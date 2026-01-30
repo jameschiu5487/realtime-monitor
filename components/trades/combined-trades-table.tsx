@@ -394,44 +394,45 @@ export function CombinedTradesTable({ combinedTrades, enableHedge }: CombinedTra
 
   if (combinedTrades.length === 0) {
     return (
-      <div className="text-center py-8 text-muted-foreground">
+      <div className="text-center py-8 text-muted-foreground text-sm">
         No historical positions found for this run.
       </div>
     );
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-10"></TableHead>
-          <SortableHeader field="ts" currentSort={sortConfig} onSort={handleSort}>
-            Entry Time
-          </SortableHeader>
-          <TableHead>Symbol</TableHead>
-          <TableHead>Exchange</TableHead>
-          <TableHead>Side</TableHead>
-          <TableHead className="text-right">Nominal Value</TableHead>
-          <TableHead className="text-right">Quantity</TableHead>
-          <TableHead className="text-right">Entry</TableHead>
-          <TableHead className="text-right">Exit</TableHead>
-          <SortableHeader field="holding_period_hours" currentSort={sortConfig} onSort={handleSort} className="text-right">
-            Duration
-          </SortableHeader>
-          <SortableHeader field="funding_fee_realized" currentSort={sortConfig} onSort={handleSort} className="text-right">
-            Funding
-          </SortableHeader>
-          <SortableHeader field="price_pnl" currentSort={sortConfig} onSort={handleSort} className="text-right">
-            Price P&L
-          </SortableHeader>
-          <SortableHeader field="commission_fee" currentSort={sortConfig} onSort={handleSort} className="text-right">
-            Commission
-          </SortableHeader>
-          <SortableHeader field="total_pnl" currentSort={sortConfig} onSort={handleSort} className="text-right">
-            Total P&L
-          </SortableHeader>
-        </TableRow>
-      </TableHeader>
+    <div className="min-w-[800px]">
+      <Table>
+        <TableHeader>
+          <TableRow className="text-xs">
+            <TableHead className="w-8 sm:w-10"></TableHead>
+            <SortableHeader field="ts" currentSort={sortConfig} onSort={handleSort}>
+              Entry Time
+            </SortableHeader>
+            <TableHead>Symbol</TableHead>
+            <TableHead>Exchange</TableHead>
+            <TableHead>Side</TableHead>
+            <TableHead className="text-right">Nominal</TableHead>
+            <TableHead className="text-right">Qty</TableHead>
+            <TableHead className="text-right">Entry</TableHead>
+            <TableHead className="text-right">Exit</TableHead>
+            <SortableHeader field="holding_period_hours" currentSort={sortConfig} onSort={handleSort} className="text-right">
+              Duration
+            </SortableHeader>
+            <SortableHeader field="funding_fee_realized" currentSort={sortConfig} onSort={handleSort} className="text-right">
+              Funding
+            </SortableHeader>
+            <SortableHeader field="price_pnl" currentSort={sortConfig} onSort={handleSort} className="text-right">
+              Price P&L
+            </SortableHeader>
+            <SortableHeader field="commission_fee" currentSort={sortConfig} onSort={handleSort} className="text-right">
+              Comm.
+            </SortableHeader>
+            <SortableHeader field="total_pnl" currentSort={sortConfig} onSort={handleSort} className="text-right">
+              Total P&L
+            </SortableHeader>
+          </TableRow>
+        </TableHeader>
       <TableBody>
         {enableHedge ? (
           // Hedge mode: show pairs with expandable summary
@@ -501,6 +502,7 @@ export function CombinedTradesTable({ combinedTrades, enableHedge }: CombinedTra
           ))
         )}
       </TableBody>
-    </Table>
+      </Table>
+    </div>
   );
 }

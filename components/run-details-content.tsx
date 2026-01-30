@@ -296,9 +296,9 @@ export function RunDetailsContent({
   return (
     <>
       {/* Performance Charts */}
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold tracking-tight">Performance Charts</h2>
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Performance Charts</h2>
         </div>
 
         {/* Time Range Selector */}
@@ -310,7 +310,7 @@ export function RunDetailsContent({
         />
 
         {/* Row 1: Total Equity with drag-to-zoom (left) + Exchange Equity (right) */}
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid gap-3 sm:gap-6 md:grid-cols-2">
           <EquityCurveWithBrush
             data={filteredEquityCurveData}
             onRangeChange={handleChartRangeChange}
@@ -319,7 +319,7 @@ export function RunDetailsContent({
         </div>
 
         {/* Row 2: Exposure (left) + Realtime Positions (right) */}
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid gap-3 sm:gap-6 md:grid-cols-2">
           <ExposureChart data={filteredExposureData} />
           <RealtimePositionChart data={realtimePositionData} />
         </div>
@@ -328,7 +328,7 @@ export function RunDetailsContent({
         <PnLBreakdownChart data={filteredPnlBreakdownData} />
 
         {/* Row 4: Trade PnL Charts */}
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid gap-3 sm:gap-6 md:grid-cols-2">
           <IndividualTradePnLChart data={filteredIndividualTradePnLData} />
           <CumulativeTradePnLChart data={filteredCumulativePnLData} />
         </div>
@@ -336,11 +336,11 @@ export function RunDetailsContent({
 
       {/* Combined Trades Table */}
       <Card>
-        <CardHeader>
-          <CardTitle>Historical Positions ({filteredCombinedTrades.length})</CardTitle>
+        <CardHeader className="px-4 sm:px-6">
+          <CardTitle className="text-lg sm:text-xl">Historical Positions ({filteredCombinedTrades.length})</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="max-h-[880px] overflow-y-auto relative [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-background">
+        <CardContent className="px-2 sm:px-6">
+          <div className="max-h-[500px] sm:max-h-[880px] overflow-auto relative [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-background">
             <CombinedTradesTable
               combinedTrades={filteredCombinedTrades}
               enableHedge={enableHedge}

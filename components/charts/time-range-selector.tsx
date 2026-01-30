@@ -96,7 +96,7 @@ export function TimeRangeSelector({
   const dataRangeMinutes = (dataEndTime.getTime() - dataStartTime.getTime()) / (60 * 1000);
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
       <div className="flex flex-wrap gap-1">
         {presetRanges.map((preset) => {
           const isAvailable = preset.minutes <= dataRangeMinutes;
@@ -107,7 +107,7 @@ export function TimeRangeSelector({
               variant={isActive ? "default" : "outline"}
               size="sm"
               className={cn(
-                "h-8 px-3 text-xs",
+                "h-7 px-2 text-xs sm:h-8 sm:px-3",
                 !isAvailable && "opacity-50"
               )}
               onClick={() => handlePresetClick(preset.label)}
@@ -120,15 +120,15 @@ export function TimeRangeSelector({
         <Button
           variant={activePreset === "All" ? "default" : "outline"}
           size="sm"
-          className="h-8 px-3 text-xs"
+          className="h-7 px-2 text-xs sm:h-8 sm:px-3"
           onClick={handleShowAll}
         >
           All
         </Button>
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
-        <div className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">
+      <div className="sm:ml-auto flex items-center gap-2">
+        <div className="rounded-md bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground sm:px-3 sm:py-1.5 sm:text-xs overflow-x-auto whitespace-nowrap">
           {formatDateTime(displayRange.start)} - {formatDateTime(displayRange.end)}
         </div>
       </div>

@@ -58,33 +58,33 @@ export function ExposureChart({ data }: ExposureChartProps) {
   return (
     <Card>
       <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
-        <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5 sm:py-6">
-          <CardTitle>Exposure</CardTitle>
-          <CardDescription>Portfolio exposure by exchange</CardDescription>
+        <div className="flex flex-1 flex-col justify-center gap-1 px-4 py-3 sm:px-6 sm:py-6">
+          <CardTitle className="text-base sm:text-lg">Exposure</CardTitle>
+          <CardDescription className="text-xs sm:text-sm">Portfolio exposure by exchange</CardDescription>
         </div>
         <div className="flex">
-          <div className="flex flex-1 flex-col justify-center gap-1 border-t px-4 py-4 text-left sm:border-t-0 sm:border-l sm:px-6 sm:py-6">
+          <div className="flex flex-1 flex-col justify-center gap-1 border-t px-2 py-2 text-left sm:border-t-0 sm:border-l sm:px-6 sm:py-6">
             <span className="text-xs text-muted-foreground">Binance</span>
-            <span className="text-lg font-bold leading-none sm:text-2xl" style={{ color: "#f0b90b" }}>
+            <span className="text-sm font-bold leading-none sm:text-2xl" style={{ color: "#f0b90b" }}>
               {currentBinance.toFixed(1)}%
             </span>
           </div>
-          <div className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-4 py-4 text-left sm:border-t-0 sm:px-6 sm:py-6">
+          <div className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-2 py-2 text-left sm:border-t-0 sm:px-6 sm:py-6">
             <span className="text-xs text-muted-foreground">Bybit</span>
-            <span className="text-lg font-bold leading-none sm:text-2xl" style={{ color: "#f7a600" }}>
+            <span className="text-sm font-bold leading-none sm:text-2xl" style={{ color: "#f7a600" }}>
               {currentBybit.toFixed(1)}%
             </span>
           </div>
-          <div className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-4 py-4 text-left sm:border-t-0 sm:px-6 sm:py-6">
+          <div className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-2 py-2 text-left sm:border-t-0 sm:px-6 sm:py-6">
             <span className="text-xs text-muted-foreground">Total</span>
-            <span className="text-lg font-bold leading-none sm:text-2xl text-emerald-600 dark:text-emerald-400">
+            <span className="text-sm font-bold leading-none sm:text-2xl text-emerald-600 dark:text-emerald-400">
               {currentExposure.toFixed(1)}%
             </span>
           </div>
         </div>
       </CardHeader>
       <CardContent className="px-2 sm:p-6">
-        <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
+        <ChartContainer config={chartConfig} className="aspect-auto h-[200px] sm:h-[250px] w-full">
           <AreaChart
             data={data}
             margin={{

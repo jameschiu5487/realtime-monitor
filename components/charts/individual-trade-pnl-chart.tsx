@@ -64,7 +64,7 @@ export function IndividualTradePnLChart({ data }: IndividualTradePnLChartProps) 
         </div>
       </CardHeader>
       <CardContent className="px-2 sm:p-6">
-        <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
+        <ChartContainer config={chartConfig} className="aspect-auto h-[200px] sm:h-[250px] w-full">
           <BarChart
             accessibilityLayer
             data={data}

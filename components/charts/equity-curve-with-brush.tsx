@@ -113,16 +113,16 @@ export function EquityCurveWithBrush({
           <CardDescription>Drag on chart to zoom • Click reset to restore</CardDescription>
         </div>
         <div className="flex">
-          <div className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">
+          <div className="flex flex-1 flex-col justify-center gap-1 border-t px-3 py-3 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">
             <span className="text-xs text-muted-foreground">Current Equity</span>
-            <span className="text-lg font-bold leading-none sm:text-3xl text-emerald-600 dark:text-emerald-400">
+            <span className="text-base font-bold leading-none sm:text-3xl text-emerald-600 dark:text-emerald-400">
               ${currentEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
         </div>
       </CardHeader>
       <CardContent className="px-2 sm:p-6">
-        <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
+        <ChartContainer config={chartConfig} className="aspect-auto h-[200px] sm:h-[250px] w-full">
           <AreaChart
             data={data}
             margin={{

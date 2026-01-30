@@ -97,21 +97,21 @@ export function RealtimePositionChart({ data }: RealtimePositionChartProps) {
   return (
     <Card>
       <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
-        <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5 sm:py-6">
-          <CardTitle>Realtime Positions</CardTitle>
-          <CardDescription>Current open positions ({latestPositions.length})</CardDescription>
+        <div className="flex flex-1 flex-col justify-center gap-1 px-4 py-3 sm:px-6 sm:py-6">
+          <CardTitle className="text-base sm:text-lg">Realtime Positions</CardTitle>
+          <CardDescription className="text-xs sm:text-sm">Current open positions ({latestPositions.length})</CardDescription>
         </div>
         <div className="flex">
-          <div className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">
+          <div className="flex flex-1 flex-col justify-center gap-1 border-t px-3 py-2 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">
             <span className="text-xs text-muted-foreground">Total Notional</span>
-            <span className="text-lg font-bold leading-none sm:text-2xl">
+            <span className="text-sm font-bold leading-none sm:text-2xl">
               {formatCurrency(totalNotional, 0)}
             </span>
           </div>
-          <div className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-6 py-4 text-left sm:border-t-0 sm:px-8 sm:py-6">
+          <div className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-3 py-2 text-left sm:border-t-0 sm:px-8 sm:py-6">
             <span className="text-xs text-muted-foreground">Unrealized P&L</span>
             <span className={cn(
-              "text-lg font-bold leading-none sm:text-2xl",
+              "text-sm font-bold leading-none sm:text-2xl",
               getPnLColor(totalUnrealizedPnl)
             )}>
               {formatCurrency(totalUnrealizedPnl)}
@@ -121,11 +121,11 @@ export function RealtimePositionChart({ data }: RealtimePositionChartProps) {
       </CardHeader>
       <CardContent className="p-0">
         {latestPositions.length === 0 ? (
-          <div className="flex items-center justify-center h-[250px] text-muted-foreground">
+          <div className="flex items-center justify-center h-[150px] sm:h-[250px] text-muted-foreground text-sm">
             No open positions
           </div>
         ) : (
-          <div className="max-h-[250px] overflow-y-auto">
+          <div className="max-h-[200px] sm:max-h-[250px] overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
