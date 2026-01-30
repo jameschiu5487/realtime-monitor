@@ -18,7 +18,9 @@ import {
 
 export interface ExposureDataPoint {
   time: string;
-  exposure: number; // percentage 0-100+
+  binance_exposure: number;
+  bybit_exposure: number;
+  total_exposure: number;
 }
 
 interface ExposureChartProps {
@@ -26,24 +28,29 @@ interface ExposureChartProps {
 }
 
 const chartConfig = {
-  exposure: {
-    label: "Exposure",
-    color: "hsl(var(--chart-1))",
+  binance_exposure: {
+    label: "Binance",
+    color: "#f0b90b", // Binance yellow
+  },
+  bybit_exposure: {
+    label: "Bybit",
+    color: "#f7a600", // Bybit orange
   },
 } satisfies ChartConfig;
 
 export function ExposureChart({ data }: ExposureChartProps) {
-  const currentExposure = data.length > 0 ? data[data.length - 1].exposure : 0;
+  const currentExposure = data.length > 0 ? data[data.length - 1].total_exposure : 0;
+  const currentBinance = data.length > 0 ? data[data.length - 1].binance_exposure : 0;
+  const currentBybit = data.length > 0 ? data[data.length - 1].bybit_exposure : 0;
 
   // Calculate Y-axis domain
   const { yMin, yMax } = useMemo(() => {
     if (data.length === 0) return { yMin: 0, yMax: 100 };
-    const values = data.map((d) => d.exposure);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const padding = (max - min) * 0.1 || 10;
+    const allValues = data.flatMap((d) => [d.binance_exposure, d.bybit_exposure, d.total_exposure]);
+    const max = Math.max(...allValues);
+    const padding = max * 0.1 || 10;
     return {
-      yMin: Math.max(0, Math.floor(min - padding)),
+      yMin: 0,
       yMax: Math.ceil(max + padding),
     };
   }, [data]);
@@ -53,12 +60,24 @@ export function ExposureChart({ data }: ExposureChartProps) {
       <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
         <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5 sm:py-6">
           <CardTitle>Exposure</CardTitle>
-          <CardDescription>Portfolio exposure over time</CardDescription>
+          <CardDescription>Portfolio exposure by exchange</CardDescription>
         </div>
         <div className="flex">
-          <div className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">
-            <span className="text-xs text-muted-foreground">Current</span>
-            <span className="text-lg font-bold leading-none sm:text-3xl text-emerald-600 dark:text-emerald-400">
+          <div className="flex flex-1 flex-col justify-center gap-1 border-t px-4 py-4 text-left sm:border-t-0 sm:border-l sm:px-6 sm:py-6">
+            <span className="text-xs text-muted-foreground">Binance</span>
+            <span className="text-lg font-bold leading-none sm:text-2xl" style={{ color: "#f0b90b" }}>
+              {currentBinance.toFixed(1)}%
+            </span>
+          </div>
+          <div className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-4 py-4 text-left sm:border-t-0 sm:px-6 sm:py-6">
+            <span className="text-xs text-muted-foreground">Bybit</span>
+            <span className="text-lg font-bold leading-none sm:text-2xl" style={{ color: "#f7a600" }}>
+              {currentBybit.toFixed(1)}%
+            </span>
+          </div>
+          <div className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-4 py-4 text-left sm:border-t-0 sm:px-6 sm:py-6">
+            <span className="text-xs text-muted-foreground">Total</span>
+            <span className="text-lg font-bold leading-none sm:text-2xl text-emerald-600 dark:text-emerald-400">
               {currentExposure.toFixed(1)}%
             </span>
           </div>
@@ -74,9 +93,13 @@ export function ExposureChart({ data }: ExposureChartProps) {
             }}
           >
             <defs>
-              <linearGradient id="fillExposure" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#34d399" stopOpacity={0.8} />
-                <stop offset="95%" stopColor="#34d399" stopOpacity={0.1} />
+              <linearGradient id="fillBinanceExposure" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#f0b90b" stopOpacity={0.8} />
+                <stop offset="95%" stopColor="#f0b90b" stopOpacity={0.1} />
+              </linearGradient>
+              <linearGradient id="fillBybitExposure" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#f7a600" stopOpacity={0.8} />
+                <stop offset="95%" stopColor="#f7a600" stopOpacity={0.1} />
               </linearGradient>
             </defs>
             <CartesianGrid vertical={false} />
@@ -107,22 +130,40 @@ export function ExposureChart({ data }: ExposureChartProps) {
             <ChartTooltip
               content={
                 <ChartTooltipContent
-                  className="w-[150px]"
+                  className="w-[180px]"
                   labelFormatter={(value) => {
                     const date = new Date(value);
-                    return date.toLocaleString();
+                    return date.toLocaleString("en-US", {
+                      year: "numeric",
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: false,
+                    });
                   }}
-                  formatter={(value) => [`${Number(value).toFixed(1)}%`, "Exposure"]}
+                  formatter={(value, name) => {
+                    const label = name === "binance_exposure" ? "Binance" : name === "bybit_exposure" ? "Bybit" : "Total";
+                    return [`${Number(value).toFixed(1)}%`, label];
+                  }}
                 />
               }
             />
             <Area
-              dataKey="exposure"
+              dataKey="binance_exposure"
               type="monotone"
-              fill="#34d399"
-              fillOpacity={0.4}
-              stroke="#34d399"
+              fill="url(#fillBinanceExposure)"
+              stroke="#f0b90b"
               strokeWidth={2}
+              stackId="1"
+            />
+            <Area
+              dataKey="bybit_exposure"
+              type="monotone"
+              fill="url(#fillBybitExposure)"
+              stroke="#f7a600"
+              strokeWidth={2}
+              stackId="1"
             />
           </AreaChart>
         </ChartContainer>

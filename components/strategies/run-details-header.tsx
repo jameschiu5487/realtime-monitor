@@ -65,7 +65,15 @@ export function RunDetailsHeader({ strategy, run }: RunDetailsHeaderProps) {
           <div className="space-y-1">
             <h1 className="text-3xl font-bold tracking-tight">{strategy.name}</h1>
             <p className="text-muted-foreground">
-              Run started {new Date(run.start_time).toLocaleString()}
+              Run started {new Date(run.start_time).toLocaleString("en-US", {
+                year: "numeric",
+                month: "numeric",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+              })}
             </p>
           </div>
           <div className="flex items-center gap-2">

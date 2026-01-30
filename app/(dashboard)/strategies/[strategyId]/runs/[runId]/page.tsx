@@ -27,119 +27,31 @@ interface RunDetailsPageProps {
 
 type RunWithStrategy = StrategyRun & { strategies: Strategy | null };
 
-// Calculate exposure series from combined trades and equity curve
-function calculateExposureFromCombinedTrades(
-  combinedTrades: CombinedTrade[],
+// Calculate exposure series from equity curve position values
+function calculateExposureFromEquityCurve(
   equityCurve: EquityCurve[]
 ): ExposureDataPoint[] {
   if (equityCurve.length === 0) return [];
 
-  // Sort equity curve by timestamp
-  const sortedEquity = [...equityCurve].sort(
-    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
-  );
+  return equityCurve.map((point) => {
+    // Calculate exposure percentage: (position_value / equity) * 100
+    const binanceExposure = point.binance_equity > 0
+      ? Math.min((point.binance_position_value / point.binance_equity) * 100, 100)
+      : 0;
+    const bybitExposure = point.bybit_equity > 0
+      ? Math.min((point.bybit_position_value / point.bybit_equity) * 100, 100)
+      : 0;
+    const totalExposure = point.total_equity > 0
+      ? Math.min((point.total_position_value / point.total_equity) * 100, 100)
+      : 0;
 
-  // Create time events for position opens and closes
-  interface PositionEvent {
-    time: number;
-    ts: string;
-    type: "open" | "close";
-    key: string;
-    notional: number;
-  }
-
-  const events: PositionEvent[] = [];
-
-  for (const trade of combinedTrades) {
-    const key = `${trade.symbol}-${trade.exchange}`;
-    const entryTime = new Date(trade.ts).getTime();
-    const notional = trade.quantity * trade.entry_price;
-
-    // Add open event
-    events.push({
-      time: entryTime,
-      ts: trade.ts,
-      type: "open",
-      key,
-      notional,
-    });
-
-    // Add close event if position was closed (has holding_period_hours)
-    if (trade.holding_period_hours !== null && trade.exit_price !== null) {
-      const exitTime = entryTime + trade.holding_period_hours * 60 * 60 * 1000;
-      const exitTs = new Date(exitTime).toISOString();
-      events.push({
-        time: exitTime,
-        ts: exitTs,
-        type: "close",
-        key,
-        notional,
-      });
-    }
-  }
-
-  // Sort events by time
-  events.sort((a, b) => a.time - b.time);
-
-  // Helper to find equity at a given time
-  function getEquityAtTime(targetTime: number): number {
-    let equity = sortedEquity[0]?.total_equity || 0;
-    for (const eq of sortedEquity) {
-      if (new Date(eq.ts).getTime() <= targetTime) {
-        equity = eq.total_equity;
-      } else {
-        break;
-      }
-    }
-    return equity;
-  }
-
-  // Track open positions
-  const openPositions = new Map<string, number>();
-  const exposurePoints: ExposureDataPoint[] = [];
-
-  // Start with 0% exposure at the beginning
-  if (sortedEquity.length > 0) {
-    exposurePoints.push({
-      time: sortedEquity[0].ts,
-      exposure: 0,
-    });
-  }
-
-  for (const event of events) {
-    if (event.type === "open") {
-      const current = openPositions.get(event.key) || 0;
-      openPositions.set(event.key, current + event.notional);
-    } else {
-      // Close - remove the notional
-      const current = openPositions.get(event.key) || 0;
-      const newNotional = current - event.notional;
-      if (newNotional <= 0) {
-        openPositions.delete(event.key);
-      } else {
-        openPositions.set(event.key, newNotional);
-      }
-    }
-
-    // Calculate total exposure
-    let totalExposure = 0;
-    for (const notional of openPositions.values()) {
-      totalExposure += notional;
-    }
-
-    // Get equity at this time
-    const equity = getEquityAtTime(event.time);
-
-    // Calculate exposure percentage (0-100%)
-    const exposurePct = equity > 0 ? Math.min((totalExposure / equity) * 100, 100) : 0;
-
-    exposurePoints.push({
-      time: event.ts,
-      exposure: exposurePct,
-    });
-  }
-
-  return exposurePoints;
+    return {
+      time: point.ts,
+      binance_exposure: binanceExposure,
+      bybit_exposure: bybitExposure,
+      total_exposure: totalExposure,
+    };
+  });
 }
 
 export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
@@ -234,8 +146,8 @@ export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
     cumulative: point.total_pnl,
   }));
 
-  // Calculate exposure from combined trades using equity curve
-  const exposureData = calculateExposureFromCombinedTrades(combinedTrades, equityCurve);
+  // Calculate exposure from equity curve position values
+  const exposureData = calculateExposureFromEquityCurve(equityCurve);
 
   // Realtime positions data - include ts for filtering latest
   const realtimePositionData: RealtimePositionDataPoint[] = positions.map((pos) => ({

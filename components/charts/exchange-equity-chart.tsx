@@ -108,7 +108,14 @@ export function ExchangeEquityChart({ data }: ExchangeEquityChartProps) {
                   className="w-[180px]"
                   labelFormatter={(value) => {
                     const date = new Date(value);
-                    return date.toLocaleString();
+                    return date.toLocaleString("en-US", {
+                      year: "numeric",
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: false,
+                    });
                   }}
                   formatter={(value, name) => (
                     <div className="flex items-center justify-between gap-2">

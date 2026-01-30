@@ -63,11 +63,11 @@ export function RealtimePositionChart({ data }: RealtimePositionChartProps) {
   const latestPositions = useMemo(() => {
     if (data.length === 0) return [];
 
-    // Filter positions within 1 second of NOW
+    // Filter positions within 1.5 seconds of NOW
     const now = Date.now();
-    const oneSecondAgo = now - 1000;
+    const cutoffTime = now - 1500;
     const recentPositions = data.filter(
-      (pos) => new Date(pos.ts).getTime() >= oneSecondAgo
+      (pos) => new Date(pos.ts).getTime() >= cutoffTime
     );
 
     // If no recent positions, return empty (no open positions)

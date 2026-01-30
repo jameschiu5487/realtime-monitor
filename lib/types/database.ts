@@ -229,10 +229,13 @@ export type Database = {
           ts: string;
           total_equity: number;
           total_pnl: number;
+          total_position_value: number;
           binance_equity: number;
           binance_pnl: number;
+          binance_position_value: number;
           bybit_equity: number;
           bybit_pnl: number;
+          bybit_position_value: number;
           drawdown_pct: number;
         };
         Insert: {
@@ -240,10 +243,13 @@ export type Database = {
           ts: string;
           total_equity: number;
           total_pnl?: number;
+          total_position_value?: number;
           binance_equity?: number;
           binance_pnl?: number;
+          binance_position_value?: number;
           bybit_equity?: number;
           bybit_pnl?: number;
+          bybit_position_value?: number;
           drawdown_pct?: number;
         };
         Update: {
@@ -251,10 +257,13 @@ export type Database = {
           ts?: string;
           total_equity?: number;
           total_pnl?: number;
+          total_position_value?: number;
           binance_equity?: number;
           binance_pnl?: number;
+          binance_position_value?: number;
           bybit_equity?: number;
           bybit_pnl?: number;
+          bybit_position_value?: number;
           drawdown_pct?: number;
         };
       };

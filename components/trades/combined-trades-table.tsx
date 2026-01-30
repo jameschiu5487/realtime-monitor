@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import {
   Table,
   TableBody,
@@ -42,7 +42,17 @@ interface HedgePair {
 }
 
 function formatDateTime(dateString: string) {
-  return new Date(dateString).toLocaleString();
+  const date = new Date(dateString);
+  // Use fixed locale to avoid hydration mismatch between server and client
+  return date.toLocaleString("en-US", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 }
 
 function formatNumber(value: number | null, decimals: number = 2) {
@@ -430,7 +440,8 @@ export function CombinedTradesTable({ combinedTrades, enableHedge }: CombinedTra
             const isActualPair = pair.positions.length === 2;
 
             return (
-              <>{pair.positions.map((position, index) => (
+              <Fragment key={pair.id}>
+                {pair.positions.map((position, index) => (
                   <PositionRow
                     key={position.combined_trade_id}
                     position={position}
@@ -440,8 +451,8 @@ export function CombinedTradesTable({ combinedTrades, enableHedge }: CombinedTra
                     isFirstInPair={index === 0}
                   />
                 ))}
-                {isExpanded && isActualPair && <HedgePairSummaryRow pair={pair} />}
-              </>
+                {isExpanded && isActualPair && <HedgePairSummaryRow key={`${pair.id}-summary`} pair={pair} />}
+              </Fragment>
             );
           })
         ) : (
