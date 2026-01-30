@@ -1,28 +1,28 @@
-"use client"
+"use client";
 
-import { Bar, BarChart, CartesianGrid, XAxis, Cell, ReferenceLine } from "recharts"
+import { Bar, BarChart, CartesianGrid, XAxis, Cell, ReferenceLine } from "recharts";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@/components/ui/card";
 import {
   ChartConfig,
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
-} from "@/components/ui/chart"
+} from "@/components/ui/chart";
 
-const chartData = [
-  { trade: "1", pnl: 28.5 },
-  { trade: "2", pnl: -3.2 },
-  { trade: "3", pnl: 12.8 },
-  { trade: "4", pnl: 18.1 },
-  { trade: "5", pnl: -2.5 },
-  { trade: "6", pnl: 27.3 },
-]
+export interface IndividualTradePnLDataPoint {
+  trade: string;
+  pnl: number;
+}
+
+interface IndividualTradePnLChartProps {
+  data: IndividualTradePnLDataPoint[];
+}
 
 const chartConfig = {
   pnl: {
@@ -36,39 +36,38 @@ const chartConfig = {
     label: "Loss",
     color: "hsl(0 84% 60%)",
   },
-} satisfies ChartConfig
+} satisfies ChartConfig;
 
-export function IndividualTradePnLChart() {
-  const totalPnL = chartData.reduce((acc, curr) => acc + curr.pnl, 0)
+export function IndividualTradePnLChart({ data }: IndividualTradePnLChartProps) {
+  const totalPnL = data.reduce((acc, curr) => acc + curr.pnl, 0);
 
   return (
     <Card>
       <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
         <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5 sm:py-6">
           <CardTitle>Individual Trade PnL</CardTitle>
-          <CardDescription>
-            Profit/Loss per trade
-          </CardDescription>
+          <CardDescription>Profit/Loss per trade</CardDescription>
         </div>
         <div className="flex">
           <div className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">
-            <span className="text-xs text-muted-foreground">
-              Total PnL
-            </span>
-            <span className={`text-lg font-bold leading-none sm:text-3xl ${totalPnL >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+            <span className="text-xs text-muted-foreground">Total PnL</span>
+            <span
+              className={`text-lg font-bold leading-none sm:text-3xl ${
+                totalPnL >= 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-red-600 dark:text-red-400"
+              }`}
+            >
               ${totalPnL.toFixed(2)}
             </span>
           </div>
         </div>
       </CardHeader>
       <CardContent className="px-2 sm:p-6">
-        <ChartContainer
-          config={chartConfig}
-          className="aspect-auto h-[250px] w-full"
-        >
+        <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
           <BarChart
             accessibilityLayer
-            data={chartData}
+            data={data}
             margin={{
               left: 12,
               right: 12,
@@ -85,13 +84,12 @@ export function IndividualTradePnLChart() {
               </linearGradient>
             </defs>
             <CartesianGrid vertical={false} />
-            <XAxis
-              dataKey="trade"
-              tickLine={false}
-              axisLine={false}
-              tickMargin={8}
+            <XAxis dataKey="trade" tickLine={false} axisLine={false} tickMargin={8} />
+            <ReferenceLine
+              y={0}
+              stroke="hsl(var(--muted-foreground))"
+              strokeDasharray="3 3"
             />
-            <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
             <ChartTooltip
               cursor={false}
               content={
@@ -101,11 +99,8 @@ export function IndividualTradePnLChart() {
                 />
               }
             />
-            <Bar
-              dataKey="pnl"
-              radius={4}
-            >
-              {chartData.map((entry, index) => (
+            <Bar dataKey="pnl" radius={4}>
+              {data.map((entry, index) => (
                 <Cell
                   key={`cell-${index}`}
                   fill={entry.pnl >= 0 ? "url(#profitGradient)" : "url(#lossGradient)"}
@@ -116,5 +111,5 @@ export function IndividualTradePnLChart() {
         </ChartContainer>
       </CardContent>
     </Card>
-  )
+  );
 }

@@ -1,7 +1,7 @@
-"use client"
+"use client";
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -10,11 +10,12 @@ import {
   TestTube,
   Settings,
   Bell,
-} from "lucide-react"
+} from "lucide-react";
 
-import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { ThemeToggle } from "./theme-toggle"
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "./theme-toggle";
+import { LogoutButton } from "@/components/auth/logout-button";
 
 const navItems = [
   {
@@ -47,10 +48,14 @@ const navItems = [
     href: "/settings",
     icon: Settings,
   },
-]
+];
 
-export function Sidebar() {
-  const pathname = usePathname()
+interface SidebarProps {
+  userEmail?: string;
+}
+
+export function Sidebar({ userEmail }: SidebarProps) {
+  const pathname = usePathname();
 
   return (
     <div className="flex h-full w-64 flex-col border-r bg-sidebar">
@@ -61,8 +66,10 @@ export function Sidebar() {
       </div>
       <nav className="flex-1 space-y-1 p-4">
         {navItems.map((item) => {
-          const Icon = item.icon
-          const isActive = pathname === item.href
+          const Icon = item.icon;
+          const isActive =
+            pathname === item.href ||
+            (item.href !== "/" && pathname.startsWith(item.href));
 
           return (
             <Link
@@ -78,18 +85,24 @@ export function Sidebar() {
               <Icon className="h-4 w-4" />
               {item.title}
             </Link>
-          )
+          );
         })}
       </nav>
       <div className="border-t p-4">
+        {userEmail && (
+          <div className="mb-3 truncate text-xs text-muted-foreground">
+            {userEmail}
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <Button variant="outline" size="icon">
             <Bell className="h-4 w-4" />
             <span className="sr-only">Notifications</span>
           </Button>
           <ThemeToggle />
+          <LogoutButton />
         </div>
       </div>
     </div>
-  )
+  );
 }
