@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TimeRangeSelector, TimeRange } from "@/components/charts/time-range-selector";
 import { EquityCurveWithBrush } from "@/components/charts/equity-curve-with-brush";
@@ -11,38 +11,130 @@ import { PnLBreakdownChart } from "@/components/charts/pnl-breakdown-chart";
 import { IndividualTradePnLChart } from "@/components/charts/individual-trade-pnl-chart";
 import { CumulativeTradePnLChart } from "@/components/charts/cumulative-trade-pnl-chart";
 import { CombinedTradesTable } from "@/components/trades/combined-trades-table";
+import {
+  useRealtimeEquityCurve,
+  useRealtimePnlSeries,
+  useRealtimeCombinedTrades,
+  useRealtimePositions,
+} from "@/lib/hooks/use-realtime-data";
 import type { EquityCurveDataPoint } from "@/components/charts/equity-curve-chart";
 import type { ExchangeEquityDataPoint } from "@/components/charts/exchange-equity-chart";
 import type { ExposureDataPoint } from "@/components/charts/exposure-chart";
 import type { RealtimePositionDataPoint } from "@/components/charts/realtime-position-chart";
 import type { PnLBreakdownDataPoint } from "@/components/charts/pnl-breakdown-chart";
-import type { IndividualTradePnLDataPoint } from "@/components/charts/individual-trade-pnl-chart";
 import type { CumulativePnLDataPoint } from "@/components/charts/cumulative-trade-pnl-chart";
-import type { CombinedTrade } from "@/lib/types/database";
+import type {
+  EquityCurve,
+  PnlSeries,
+  CombinedTrade,
+  Position,
+} from "@/lib/types/database";
 
 interface RunDetailsContentProps {
-  equityCurveData: EquityCurveDataPoint[];
-  exchangeEquityData: ExchangeEquityDataPoint[];
-  pnlBreakdownData: PnLBreakdownDataPoint[];
-  individualTradePnLData: IndividualTradePnLDataPoint[];
-  cumulativePnLData: CumulativePnLDataPoint[];
-  exposureData: ExposureDataPoint[];
-  realtimePositionData: RealtimePositionDataPoint[];
-  combinedTrades: CombinedTrade[];
+  runId: string;
+  initialEquityCurve: EquityCurve[];
+  initialPnlSeries: PnlSeries[];
+  initialCombinedTrades: CombinedTrade[];
+  initialPositions: Position[];
   enableHedge: boolean;
 }
 
+// Transform equity curve to chart data points
+function transformEquityCurveData(data: EquityCurve[]): EquityCurveDataPoint[] {
+  return data.map((point) => ({
+    time: point.ts,
+    equity: point.total_equity,
+  }));
+}
+
+// Transform equity curve to exchange equity data points
+function transformExchangeEquityData(data: EquityCurve[]): ExchangeEquityDataPoint[] {
+  return data.map((point) => ({
+    time: point.ts,
+    binance: point.binance_equity,
+    bybit: point.bybit_equity,
+  }));
+}
+
+// Transform equity curve to exposure data points
+function transformExposureData(data: EquityCurve[]): ExposureDataPoint[] {
+  return data.map((point) => {
+    const binanceExposure = point.binance_equity > 0
+      ? Math.min((point.binance_position_value / point.binance_equity) * 100, 100)
+      : 0;
+    const bybitExposure = point.bybit_equity > 0
+      ? Math.min((point.bybit_position_value / point.bybit_equity) * 100, 100)
+      : 0;
+    const totalExposure = point.total_equity > 0
+      ? Math.min((point.total_position_value / point.total_equity) * 100, 100)
+      : 0;
+
+    return {
+      time: point.ts,
+      binance_exposure: binanceExposure,
+      bybit_exposure: bybitExposure,
+      total_exposure: totalExposure,
+    };
+  });
+}
+
+// Transform PnL series to breakdown data points
+function transformPnlBreakdownData(data: PnlSeries[]): PnLBreakdownDataPoint[] {
+  return data.map((point) => ({
+    time: point.ts,
+    funding_pnl: point.total_funding_pnl,
+    price_pnl: point.total_price_pnl,
+    total_pnl: point.total_pnl,
+    total_fee: point.total_fee,
+  }));
+}
+
+// Transform PnL series to cumulative data points
+function transformCumulativePnLData(data: PnlSeries[]): CumulativePnLDataPoint[] {
+  return data.map((point) => ({
+    time: point.ts,
+    cumulative: point.total_pnl,
+  }));
+}
+
+// Transform positions to realtime position data points
+function transformRealtimePositionData(data: Position[]): RealtimePositionDataPoint[] {
+  return data.map((pos) => ({
+    symbol: pos.symbol,
+    exchange: pos.exchange,
+    position: pos.position,
+    avg_price: pos.avg_price,
+    mark_price: pos.mark_price,
+    notional_value: pos.notional_value,
+    unrealized_pnl: pos.unrealized_pnl,
+    leverage: pos.leverage,
+    liq_price: pos.liq_price,
+    ts: pos.ts,
+  }));
+}
+
 export function RunDetailsContent({
-  equityCurveData,
-  exchangeEquityData,
-  pnlBreakdownData,
-  individualTradePnLData,
-  cumulativePnLData,
-  exposureData,
-  realtimePositionData,
-  combinedTrades,
+  runId,
+  initialEquityCurve,
+  initialPnlSeries,
+  initialCombinedTrades,
+  initialPositions,
   enableHedge,
 }: RunDetailsContentProps) {
+  // Use realtime hooks for live data updates
+  const equityCurve = useRealtimeEquityCurve(runId, initialEquityCurve);
+  const pnlSeries = useRealtimePnlSeries(runId, initialPnlSeries);
+  const combinedTrades = useRealtimeCombinedTrades(runId, initialCombinedTrades);
+  const positions = useRealtimePositions(runId, initialPositions);
+
+  // Transform data for charts
+  const equityCurveData = useMemo(() => transformEquityCurveData(equityCurve), [equityCurve]);
+  const exchangeEquityData = useMemo(() => transformExchangeEquityData(equityCurve), [equityCurve]);
+  const exposureData = useMemo(() => transformExposureData(equityCurve), [equityCurve]);
+  const pnlBreakdownData = useMemo(() => transformPnlBreakdownData(pnlSeries), [pnlSeries]);
+  const cumulativePnLData = useMemo(() => transformCumulativePnLData(pnlSeries), [pnlSeries]);
+  const realtimePositionData = useMemo(() => transformRealtimePositionData(positions), [positions]);
+
   // Calculate data time range from all time-based data
   const { dataStartTime, dataEndTime } = useMemo(() => {
     const allTimes: Date[] = [];
@@ -70,6 +162,22 @@ export function RunDetailsContent({
     start: dataStartTime,
     end: dataEndTime,
   });
+
+  // Update time range when data range changes (new data comes in)
+  useEffect(() => {
+    setTimeRange((prev) => {
+      // If current end time equals previous data end time, extend to new end time
+      // This keeps the view updated as new data arrives
+      const prevEndWasAtDataEnd = Math.abs(prev.end.getTime() - dataEndTime.getTime()) < 60000; // within 1 minute
+      if (prevEndWasAtDataEnd) {
+        return {
+          start: prev.start,
+          end: dataEndTime,
+        };
+      }
+      return prev;
+    });
+  }, [dataEndTime]);
 
   // Handle time range change from the selector buttons
   const handleTimeRangeChange = useCallback((range: TimeRange) => {
