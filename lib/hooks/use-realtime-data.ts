@@ -10,11 +10,12 @@ import type {
 } from "@/lib/types/database";
 
 // Generic hook for realtime subscriptions
-function useRealtimeSubscription<T extends { ts?: string }>(
+function useRealtimeSubscription<T extends Record<string, unknown>>(
   table: string,
   runId: string,
   initialData: T[],
-  sortKey: keyof T = "ts" as keyof T,
+  primaryKey: string,
+  sortKey: string = "ts",
   sortDirection: "asc" | "desc" = "asc"
 ) {
   const [data, setData] = useState<T[]>(initialData);
@@ -62,18 +63,13 @@ function useRealtimeSubscription<T extends { ts?: string }>(
             const updatedRecord = payload.new as T;
             setData((prev) =>
               prev.map((item) => {
-                // Match by primary key - handle different table structures
-                if ("combined_trade_id" in item && "combined_trade_id" in updatedRecord) {
-                  return (item as CombinedTrade).combined_trade_id ===
-                    (updatedRecord as CombinedTrade).combined_trade_id
-                    ? updatedRecord
-                    : item;
+                // Match by primary key
+                if (item[primaryKey] === updatedRecord[primaryKey]) {
+                  return updatedRecord;
                 }
-                if ("ts" in item && "ts" in updatedRecord) {
-                  // For time-series data, match by timestamp and run_id
-                  const itemTs = (item as { ts: string }).ts;
-                  const updatedTs = (updatedRecord as { ts: string }).ts;
-                  return itemTs === updatedTs ? updatedRecord : item;
+                // Fallback: match by timestamp for time-series data
+                if (primaryKey === "ts" && item["ts"] === updatedRecord["ts"]) {
+                  return updatedRecord;
                 }
                 return item;
               })
@@ -82,12 +78,9 @@ function useRealtimeSubscription<T extends { ts?: string }>(
             const deletedRecord = payload.old as T;
             setData((prev) =>
               prev.filter((item) => {
-                if ("combined_trade_id" in item && "combined_trade_id" in deletedRecord) {
-                  return (item as CombinedTrade).combined_trade_id !==
-                    (deletedRecord as CombinedTrade).combined_trade_id;
-                }
-                if ("ts" in item && "ts" in deletedRecord) {
-                  return (item as { ts: string }).ts !== (deletedRecord as { ts: string }).ts;
+                // Match by primary key
+                if (item[primaryKey] === deletedRecord[primaryKey]) {
+                  return false;
                 }
                 return true;
               })
@@ -103,7 +96,7 @@ function useRealtimeSubscription<T extends { ts?: string }>(
       console.log(`[Realtime] Unsubscribing from ${table}`);
       supabase.removeChannel(channel);
     };
-  }, [table, runId, sortKey, sortDirection]);
+  }, [table, runId, primaryKey, sortKey, sortDirection]);
 
   return data;
 }
@@ -114,6 +107,7 @@ export function useRealtimeEquityCurve(runId: string, initialData: EquityCurve[]
     "equity_curve",
     runId,
     initialData,
+    "ts",
     "ts",
     "asc"
   );
@@ -126,6 +120,7 @@ export function useRealtimePnlSeries(runId: string, initialData: PnlSeries[]) {
     runId,
     initialData,
     "ts",
+    "ts",
     "asc"
   );
 }
@@ -136,6 +131,7 @@ export function useRealtimeCombinedTrades(runId: string, initialData: CombinedTr
     "combined_trades",
     runId,
     initialData,
+    "combined_trade_id",
     "ts",
     "asc"
   );
