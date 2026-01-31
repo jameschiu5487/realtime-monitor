@@ -25,6 +25,15 @@ export async function createClient() {
           }
         },
       },
+      global: {
+        fetch: (url, options) => {
+          // Disable Next.js fetch caching for all Supabase requests
+          return fetch(url, {
+            ...options,
+            cache: "no-store",
+          });
+        },
+      },
     }
   );
 }

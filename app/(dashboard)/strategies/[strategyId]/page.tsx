@@ -1,11 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { unstable_noStore as noStore } from "next/cache";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, TrendingUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { StrategyRunsTable } from "@/components/strategies/strategy-runs-table";
 import type { Strategy, StrategyRun } from "@/lib/types/database";
+
+// Disable caching to ensure fresh data on every page load
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 interface StrategyDetailPageProps {
   params: Promise<{
@@ -16,6 +21,7 @@ interface StrategyDetailPageProps {
 export default async function StrategyDetailPage({
   params,
 }: StrategyDetailPageProps) {
+  noStore();
   const { strategyId } = await params;
   const supabase = await createClient();
 

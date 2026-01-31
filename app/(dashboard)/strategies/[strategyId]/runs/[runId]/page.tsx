@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { RunDetailsHeader } from "@/components/strategies/run-details-header";
 import { RunDetailsContent } from "@/components/run-details-content";
@@ -11,6 +12,10 @@ import type {
   Position,
 } from "@/lib/types/database";
 
+// Disable caching to ensure fresh data on every page load
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 interface RunDetailsPageProps {
   params: Promise<{
     strategyId: string;
@@ -21,10 +26,14 @@ interface RunDetailsPageProps {
 type RunWithStrategy = StrategyRun & { strategies: Strategy | null };
 
 export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
+  // Opt out of caching for this page
+  noStore();
+
   const { strategyId, runId } = await params;
   const supabase = await createClient();
 
   // Fetch all data in parallel
+  // Note: Fetch in descending order with limit to get LATEST data (Supabase default limit is 1000)
   const [
     runResult,
     equityCurveResult,
@@ -41,17 +50,20 @@ export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
       .from("equity_curve")
       .select("*")
       .eq("run_id", runId)
-      .order("ts", { ascending: true }),
+      .order("ts", { ascending: false })
+      .limit(5000),
     supabase
       .from("pnl_series")
       .select("*")
       .eq("run_id", runId)
-      .order("ts", { ascending: true }),
+      .order("ts", { ascending: false })
+      .limit(5000),
     supabase
       .from("combined_trades")
       .select("*")
       .eq("run_id", runId)
-      .order("ts", { ascending: true }),
+      .order("ts", { ascending: false })
+      .limit(5000),
     supabase
       .from("positions")
       .select("*")
@@ -61,9 +73,10 @@ export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
   ]);
 
   const run = runResult.data as RunWithStrategy | null;
-  const equityCurve = (equityCurveResult.data ?? []) as EquityCurve[];
-  const pnlSeries = (pnlSeriesResult.data ?? []) as PnlSeries[];
-  const combinedTrades = (combinedTradesResult.data ?? []) as CombinedTrade[];
+  // Reverse to get ascending order (we fetched in descending order to get latest data)
+  const equityCurve = ((equityCurveResult.data ?? []) as EquityCurve[]).reverse();
+  const pnlSeries = ((pnlSeriesResult.data ?? []) as PnlSeries[]).reverse();
+  const combinedTrades = ((combinedTradesResult.data ?? []) as CombinedTrade[]).reverse();
   const positions = (positionsResult.data ?? []) as Position[];
 
   if (runResult.error || !run) {

@@ -1,11 +1,17 @@
 import Link from "next/link";
+import { unstable_noStore as noStore } from "next/cache";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, TrendingUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import type { Strategy } from "@/lib/types/database";
 
+// Disable caching to ensure fresh data on every page load
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function StrategiesPage() {
+  noStore();
   const supabase = await createClient();
 
   const { data, error } = await supabase

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TimeRangeSelector, TimeRange } from "@/components/charts/time-range-selector";
 import { EquityCurveWithBrush } from "@/components/charts/equity-curve-with-brush";
@@ -130,10 +130,13 @@ export function RunDetailsContent({
   enableHedge,
 }: RunDetailsContentProps) {
   // Use realtime hooks for live data updates
-  const equityCurve = useRealtimeEquityCurve(runId, initialEquityCurve);
-  const pnlSeries = useRealtimePnlSeries(runId, initialPnlSeries);
-  const combinedTrades = useRealtimeCombinedTrades(runId, initialCombinedTrades);
-  const positions = useRealtimePositions(runId, initialPositions);
+  const { data: equityCurve, isFreshDataLoaded: isEquityLoaded } = useRealtimeEquityCurve(runId, initialEquityCurve);
+  const { data: pnlSeries, isFreshDataLoaded: isPnlLoaded } = useRealtimePnlSeries(runId, initialPnlSeries);
+  const { data: combinedTrades, isFreshDataLoaded: isTradesLoaded } = useRealtimeCombinedTrades(runId, initialCombinedTrades);
+  const { data: positions } = useRealtimePositions(runId, initialPositions);
+
+  // Check if all critical data is loaded
+  const isFreshDataLoaded = isEquityLoaded && isPnlLoaded && isTradesLoaded;
 
   // Transform data for charts
   const equityCurveData = useMemo(() => transformEquityCurveData(equityCurve), [equityCurve]);
@@ -171,29 +174,76 @@ export function RunDetailsContent({
     end: dataEndTime,
   });
 
-  // Update time range when data range changes (new data comes in)
+  // Track if user has manually changed the time range
+  const userChangedRangeRef = useRef(false);
+
+  // Use timestamps for more reliable dependency comparison
+  const dataStartTimestamp = dataStartTime.getTime();
+  const dataEndTimestamp = dataEndTime.getTime();
+
+  // Sync time range to full data range when fresh data is loaded
+  // This handles initial load and fresh client fetch
   useEffect(() => {
-    setTimeRange((prev) => {
-      // If current end time equals previous data end time, extend to new end time
-      // This keeps the view updated as new data arrives
-      const prevEndWasAtDataEnd = Math.abs(prev.end.getTime() - dataEndTime.getTime()) < 60000; // within 1 minute
-      if (prevEndWasAtDataEnd) {
-        return {
-          start: prev.start,
-          end: dataEndTime,
-        };
-      }
-      return prev;
-    });
-  }, [dataEndTime]);
+    // Only sync after fresh data is loaded from client-side fetch
+    if (!isFreshDataLoaded) {
+      console.log("[TimeRange] Waiting for fresh data to load...");
+      return;
+    }
+
+    console.log("[TimeRange] Fresh data loaded, syncing time range");
+    console.log("[TimeRange] Data range:", new Date(dataStartTimestamp).toISOString(), "-", new Date(dataEndTimestamp).toISOString());
+
+    // If user hasn't manually changed the range, sync to full data range
+    if (!userChangedRangeRef.current) {
+      console.log("[TimeRange] Auto-syncing to full range");
+      setTimeRange({
+        start: new Date(dataStartTimestamp),
+        end: new Date(dataEndTimestamp),
+      });
+    }
+  }, [isFreshDataLoaded, dataStartTimestamp, dataEndTimestamp]);
+
+  // Handle real-time updates - extend time range if user is at the data end
+  useEffect(() => {
+    if (!isFreshDataLoaded) return;
+
+    // If user manually changed the range, only extend if they're near the data end
+    if (userChangedRangeRef.current) {
+      setTimeRange((prev) => {
+        const isNearDataEnd = dataEndTimestamp - prev.end.getTime() < 2 * 60 * 1000;
+        if (isNearDataEnd && prev.end.getTime() < dataEndTimestamp) {
+          console.log("[TimeRange] Auto-extending to new data end");
+          return {
+            start: prev.start,
+            end: new Date(dataEndTimestamp),
+          };
+        }
+        return prev;
+      });
+    } else {
+      // User hasn't changed range, keep syncing to full range
+      setTimeRange({
+        start: new Date(dataStartTimestamp),
+        end: new Date(dataEndTimestamp),
+      });
+    }
+  }, [dataEndTimestamp, dataStartTimestamp, isFreshDataLoaded]);
 
   // Handle time range change from the selector buttons
   const handleTimeRangeChange = useCallback((range: TimeRange) => {
+    // Check if user clicked "All" (range matches full data range)
+    const isAllRange =
+      Math.abs(range.start.getTime() - dataStartTime.getTime()) < 1000 &&
+      Math.abs(range.end.getTime() - dataEndTime.getTime()) < 1000;
+
+    // Reset flag if "All" is clicked, otherwise mark as user-changed
+    userChangedRangeRef.current = !isAllRange;
     setTimeRange(range);
-  }, []);
+  }, [dataStartTime, dataEndTime]);
 
   // Handle range change from chart drag selection
   const handleChartRangeChange = useCallback((startTime: Date, endTime: Date) => {
+    userChangedRangeRef.current = true;
     setTimeRange({ start: startTime, end: endTime });
   }, []);
 
