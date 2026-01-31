@@ -59,19 +59,30 @@ function getPnLColor(pnl: number) {
 }
 
 export function RealtimePositionChart({ data }: RealtimePositionChartProps) {
-  // Get only positions within 1 second of current time
+  // Get the latest positions - must be recent (within 1.5s of now) to be considered "open"
   const latestPositions = useMemo(() => {
     if (data.length === 0) return [];
 
-    // Filter positions within 1.5 seconds of NOW
+    // Find the maximum timestamp in the data
+    let maxTs = 0;
+    for (const pos of data) {
+      const ts = new Date(pos.ts).getTime();
+      if (ts > maxTs) maxTs = ts;
+    }
+
+    // Check if the most recent data is within 1.5 seconds of NOW
+    // If not, there are no open positions (strategy stopped updating)
     const now = Date.now();
-    const cutoffTime = now - 1500;
+    if (maxTs < now - 1500) {
+      return []; // No recent data = no open positions
+    }
+
+    // Filter positions within 1.5 seconds of the max timestamp in data
+    // This ensures all positions from the same "batch" are shown together
+    const cutoffTime = maxTs - 1500;
     const recentPositions = data.filter(
       (pos) => new Date(pos.ts).getTime() >= cutoffTime
     );
-
-    // If no recent positions, return empty (no open positions)
-    if (recentPositions.length === 0) return [];
 
     // Group by symbol+exchange and get the latest entry
     const positionMap = new Map<string, RealtimePositionDataPoint>();
