@@ -57,16 +57,20 @@ function transformExchangeEquityData(data: EquityCurve[]): ExchangeEquityDataPoi
 }
 
 // Transform equity curve to exposure data points
+// Exposure = position_value / total_equity (relative to total portfolio)
 function transformExposureData(data: EquityCurve[]): ExposureDataPoint[] {
   return data.map((point) => {
-    const binanceExposure = point.binance_equity > 0
-      ? Math.min((point.binance_position_value / point.binance_equity) * 100, 100)
+    const totalEquity = point.total_equity;
+
+    // All exposures are calculated relative to total equity
+    const binanceExposure = totalEquity > 0
+      ? (point.binance_position_value / totalEquity) * 100
       : 0;
-    const bybitExposure = point.bybit_equity > 0
-      ? Math.min((point.bybit_position_value / point.bybit_equity) * 100, 100)
+    const bybitExposure = totalEquity > 0
+      ? (point.bybit_position_value / totalEquity) * 100
       : 0;
-    const totalExposure = point.total_equity > 0
-      ? Math.min((point.total_position_value / point.total_equity) * 100, 100)
+    const totalExposure = totalEquity > 0
+      ? (point.total_position_value / totalEquity) * 100
       : 0;
 
     return {
