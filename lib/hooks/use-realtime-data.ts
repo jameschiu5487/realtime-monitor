@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type {
   EquityCurve,
@@ -138,8 +138,11 @@ export function useRealtimeCombinedTrades(runId: string, initialData: CombinedTr
 }
 
 // Hook for positions data (realtime positions need special handling)
+// Uses debouncing to batch multiple position updates together
 export function useRealtimePositions(runId: string, initialData: Position[]) {
   const [positions, setPositions] = useState<Position[]>(initialData);
+  const pendingUpdatesRef = useRef<Position[]>([]);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     setPositions(initialData);
@@ -150,6 +153,45 @@ export function useRealtimePositions(runId: string, initialData: Position[]) {
     const channelName = `positions-${runId}-${Date.now()}`;
 
     console.log(`[Realtime] Subscribing to positions for run ${runId}`);
+
+    // Flush pending updates to state
+    const flushUpdates = () => {
+      if (pendingUpdatesRef.current.length === 0) return;
+
+      const updates = [...pendingUpdatesRef.current];
+      pendingUpdatesRef.current = [];
+
+      setPositions((prev) => {
+        // Merge new positions with existing ones
+        const positionMap = new Map<string, Position>();
+
+        // Add existing positions
+        prev.forEach((pos) => {
+          const key = `${pos.symbol}-${pos.exchange}-${pos.ts}`;
+          positionMap.set(key, pos);
+        });
+
+        // Add/update with new positions
+        updates.forEach((pos) => {
+          const key = `${pos.symbol}-${pos.exchange}-${pos.ts}`;
+          positionMap.set(key, pos);
+        });
+
+        // Convert back to array, sort by ts desc, and limit
+        return Array.from(positionMap.values())
+          .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
+          .slice(0, 100);
+      });
+    };
+
+    // Schedule a debounced flush
+    const scheduleFlush = () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      // Wait 150ms for more updates before flushing
+      debounceTimerRef.current = setTimeout(flushUpdates, 150);
+    };
 
     const channel = supabase
       .channel(channelName)
@@ -164,25 +206,10 @@ export function useRealtimePositions(runId: string, initialData: Position[]) {
         (payload) => {
           console.log(`[Realtime] positions received:`, payload.eventType, payload);
 
-          if (payload.eventType === "INSERT") {
-            const newPosition = payload.new as Position;
-            setPositions((prev) => {
-              // Add new position and keep sorted by ts desc (newest first)
-              const updated = [newPosition, ...prev];
-              // Limit to most recent 100 positions to prevent memory issues
-              return updated.slice(0, 100);
-            });
-          } else if (payload.eventType === "UPDATE") {
-            const updatedPosition = payload.new as Position;
-            setPositions((prev) =>
-              prev.map((pos) =>
-                pos.ts === updatedPosition.ts &&
-                pos.symbol === updatedPosition.symbol &&
-                pos.exchange === updatedPosition.exchange
-                  ? updatedPosition
-                  : pos
-              )
-            );
+          if (payload.eventType === "INSERT" || payload.eventType === "UPDATE") {
+            const position = payload.new as Position;
+            pendingUpdatesRef.current.push(position);
+            scheduleFlush();
           }
         }
       )
@@ -192,6 +219,9 @@ export function useRealtimePositions(runId: string, initialData: Position[]) {
 
     return () => {
       console.log(`[Realtime] Unsubscribing from positions`);
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
       supabase.removeChannel(channel);
     };
   }, [runId]);

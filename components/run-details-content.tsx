@@ -11,6 +11,7 @@ import { PnLBreakdownChart } from "@/components/charts/pnl-breakdown-chart";
 import { IndividualTradePnLChart } from "@/components/charts/individual-trade-pnl-chart";
 import { CumulativeTradePnLChart } from "@/components/charts/cumulative-trade-pnl-chart";
 import { CombinedTradesTable } from "@/components/trades/combined-trades-table";
+import { PerformanceStats } from "@/components/charts/performance-stats";
 import {
   useRealtimeEquityCurve,
   useRealtimePnlSeries,
@@ -237,6 +238,14 @@ export function RunDetailsContent({
     });
   }, [combinedTrades, timeRange]);
 
+  // Filter raw equity curve for performance stats
+  const filteredEquityCurve = useMemo(() => {
+    return equityCurve.filter((d) => {
+      const time = new Date(d.ts);
+      return time >= timeRange.start && time <= timeRange.end;
+    });
+  }, [equityCurve, timeRange]);
+
   // Filter individual trade PnL data based on filtered combined trades
   const filteredIndividualTradePnLData = useMemo(() => {
     if (!enableHedge) {
@@ -304,6 +313,14 @@ export function RunDetailsContent({
         <div className="flex items-center justify-between">
           <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Performance Charts</h2>
         </div>
+
+        {/* Performance Stats */}
+        <PerformanceStats
+          equityCurve={equityCurve}
+          filteredEquityCurve={filteredEquityCurve}
+          combinedTrades={combinedTrades}
+          filteredCombinedTrades={filteredCombinedTrades}
+        />
 
         {/* Time Range Selector */}
         <TimeRangeSelector
