@@ -90,6 +90,7 @@ export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
         initialPnlSeries={pnlSeries}
         initialCombinedTrades={combinedTrades}
         initialPositions={positions}
+        initialCapital={run.initial_capital}
         enableHedge={enableHedge}
       />
     </div>

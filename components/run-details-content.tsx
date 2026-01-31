@@ -12,6 +12,7 @@ import { IndividualTradePnLChart } from "@/components/charts/individual-trade-pn
 import { CumulativeTradePnLChart } from "@/components/charts/cumulative-trade-pnl-chart";
 import { CombinedTradesTable } from "@/components/trades/combined-trades-table";
 import { PerformanceStats } from "@/components/charts/performance-stats";
+import { SymbolPnLChart } from "@/components/charts/symbol-pnl-chart";
 import {
   useRealtimeEquityCurve,
   useRealtimePnlSeries,
@@ -37,6 +38,7 @@ interface RunDetailsContentProps {
   initialPnlSeries: PnlSeries[];
   initialCombinedTrades: CombinedTrade[];
   initialPositions: Position[];
+  initialCapital: number;
   enableHedge: boolean;
 }
 
@@ -124,6 +126,7 @@ export function RunDetailsContent({
   initialPnlSeries,
   initialCombinedTrades,
   initialPositions,
+  initialCapital,
   enableHedge,
 }: RunDetailsContentProps) {
   // Use realtime hooks for live data updates
@@ -354,6 +357,9 @@ export function RunDetailsContent({
           <CumulativeTradePnLChart data={filteredCumulativePnLData} />
         </div>
       </div>
+
+      {/* Symbol P&L Chart */}
+      <SymbolPnLChart combinedTrades={filteredCombinedTrades} initialCapital={initialCapital} />
 
       {/* Combined Trades Table */}
       <Card>
