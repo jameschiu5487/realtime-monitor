@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -34,6 +34,7 @@ export interface RealtimePositionDataPoint {
 
 interface RealtimePositionChartProps {
   data: RealtimePositionDataPoint[];
+  lastInsertTime: number; // Timestamp of last INSERT event from realtime
 }
 
 function formatCurrency(value: number, decimals: number = 2) {
@@ -58,9 +59,30 @@ function getPnLColor(pnl: number) {
   return "";
 }
 
-export function RealtimePositionChart({ data }: RealtimePositionChartProps) {
-  // Get the latest positions - must be recent (within 1.5s of now) to be considered "open"
+export function RealtimePositionChart({ data, lastInsertTime }: RealtimePositionChartProps) {
+  // Track current time to detect stale data (updates every second)
+  const [currentTime, setCurrentTime] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Get the latest positions - show positions if we received an INSERT within last 5 seconds
   const latestPositions = useMemo(() => {
+    console.log(`[RealtimePosition] Processing ${data.length} positions`);
+
+    // Check if we received a position INSERT within the last 5 seconds
+    const timeSinceLastInsert = currentTime - lastInsertTime;
+    console.log(`[RealtimePosition] Time since last INSERT: ${timeSinceLastInsert}ms`);
+
+    if (timeSinceLastInsert > 5000) {
+      console.log(`[RealtimePosition] No INSERT in ${timeSinceLastInsert}ms (> 5000ms), showing no positions`);
+      return []; // No recent INSERT = no open positions
+    }
+
     if (data.length === 0) return [];
 
     // Find the maximum timestamp in the data
@@ -70,16 +92,9 @@ export function RealtimePositionChart({ data }: RealtimePositionChartProps) {
       if (ts > maxTs) maxTs = ts;
     }
 
-    // Check if the most recent data is within 1.5 seconds of NOW
-    // If not, there are no open positions (strategy stopped updating)
-    const now = Date.now();
-    if (maxTs < now - 1500) {
-      return []; // No recent data = no open positions
-    }
-
-    // Filter positions within 1.5 seconds of the max timestamp in data
+    // Filter positions within 5 seconds of the max timestamp in data
     // This ensures all positions from the same "batch" are shown together
-    const cutoffTime = maxTs - 1500;
+    const cutoffTime = maxTs - 5000;
     const recentPositions = data.filter(
       (pos) => new Date(pos.ts).getTime() >= cutoffTime
     );
@@ -100,7 +115,7 @@ export function RealtimePositionChart({ data }: RealtimePositionChartProps) {
     return Array.from(positionMap.values())
       .filter((pos) => pos.position !== 0)
       .sort((a, b) => Math.abs(b.notional_value) - Math.abs(a.notional_value));
-  }, [data]);
+  }, [data, lastInsertTime, currentTime]);
 
   const totalNotional = latestPositions.reduce((sum, d) => sum + Math.abs(d.notional_value), 0);
   const totalUnrealizedPnl = latestPositions.reduce((sum, d) => sum + d.unrealized_pnl, 0);

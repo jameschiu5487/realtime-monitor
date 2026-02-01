@@ -133,7 +133,7 @@ export function RunDetailsContent({
   const { data: equityCurve, isFreshDataLoaded: isEquityLoaded } = useRealtimeEquityCurve(runId, initialEquityCurve);
   const { data: pnlSeries, isFreshDataLoaded: isPnlLoaded } = useRealtimePnlSeries(runId, initialPnlSeries);
   const { data: combinedTrades, isFreshDataLoaded: isTradesLoaded } = useRealtimeCombinedTrades(runId, initialCombinedTrades);
-  const { data: positions } = useRealtimePositions(runId, initialPositions);
+  const { data: positions, lastInsertTime: positionsLastInsertTime } = useRealtimePositions(runId, initialPositions);
 
   // Check if all critical data is loaded
   const isFreshDataLoaded = isEquityLoaded && isPnlLoaded && isTradesLoaded;
@@ -395,7 +395,7 @@ export function RunDetailsContent({
         {/* Row 2: Exposure (left) + Realtime Positions (right) */}
         <div className="grid gap-3 sm:gap-6 md:grid-cols-2">
           <ExposureChart data={filteredExposureData} />
-          <RealtimePositionChart data={realtimePositionData} />
+          <RealtimePositionChart data={realtimePositionData} lastInsertTime={positionsLastInsertTime} />
         </div>
 
         {/* Row 3: PnL Breakdown */}

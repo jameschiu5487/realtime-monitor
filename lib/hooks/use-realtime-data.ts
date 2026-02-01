@@ -179,13 +179,16 @@ export function useRealtimeCombinedTrades(runId: string, initialData: CombinedTr
   );
 }
 
+// Extended result type for positions that includes last update time
+interface PositionsDataResult extends RealtimeDataResult<Position> {
+  lastInsertTime: number; // Timestamp of last INSERT event (Date.now() when received)
+}
+
 // Hook for positions data (realtime positions need special handling)
-// Uses debouncing to batch multiple position updates together
-export function useRealtimePositions(runId: string, initialData: Position[]): RealtimeDataResult<Position> {
+export function useRealtimePositions(runId: string, initialData: Position[]): PositionsDataResult {
   const [positions, setPositions] = useState<Position[]>(initialData);
   const [isFreshDataLoaded, setIsFreshDataLoaded] = useState(false);
-  const pendingUpdatesRef = useRef<Position[]>([]);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [lastInsertTime, setLastInsertTime] = useState<number>(Date.now());
   const hasFetchedRef = useRef(false);
 
   // Fetch fresh data immediately on mount
@@ -213,6 +216,8 @@ export function useRealtimePositions(runId: string, initialData: Position[]): Re
       if (freshData) {
         console.log(`[Realtime] Got ${freshData.length} fresh positions records`);
         setPositions(freshData as Position[]);
+        // Set lastInsertTime to now when we load initial data
+        setLastInsertTime(Date.now());
       }
       setIsFreshDataLoaded(true);
     };
@@ -225,45 +230,6 @@ export function useRealtimePositions(runId: string, initialData: Position[]): Re
     const channelName = `positions-${runId}-${Date.now()}`;
 
     console.log(`[Realtime] Subscribing to positions for run ${runId}`);
-
-    // Flush pending updates to state
-    const flushUpdates = () => {
-      if (pendingUpdatesRef.current.length === 0) return;
-
-      const updates = [...pendingUpdatesRef.current];
-      pendingUpdatesRef.current = [];
-
-      setPositions((prev) => {
-        // Merge new positions with existing ones
-        const positionMap = new Map<string, Position>();
-
-        // Add existing positions
-        prev.forEach((pos) => {
-          const key = `${pos.symbol}-${pos.exchange}-${pos.ts}`;
-          positionMap.set(key, pos);
-        });
-
-        // Add/update with new positions
-        updates.forEach((pos) => {
-          const key = `${pos.symbol}-${pos.exchange}-${pos.ts}`;
-          positionMap.set(key, pos);
-        });
-
-        // Convert back to array, sort by ts desc, and limit
-        return Array.from(positionMap.values())
-          .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
-          .slice(0, 100);
-      });
-    };
-
-    // Schedule a debounced flush
-    const scheduleFlush = () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-      // Wait 150ms for more updates before flushing
-      debounceTimerRef.current = setTimeout(flushUpdates, 150);
-    };
 
     const channel = supabase
       .channel(channelName)
@@ -279,9 +245,34 @@ export function useRealtimePositions(runId: string, initialData: Position[]): Re
           console.log(`[Realtime] positions received:`, payload.eventType, payload);
 
           if (payload.eventType === "INSERT" || payload.eventType === "UPDATE") {
-            const position = payload.new as Position;
-            pendingUpdatesRef.current.push(position);
-            scheduleFlush();
+            const newPosition = payload.new as Position;
+            console.log(`[Realtime] Adding position: ${newPosition.symbol} ${newPosition.exchange} ts=${newPosition.ts}`);
+
+            // Update lastInsertTime to NOW (when we received the event)
+            setLastInsertTime(Date.now());
+
+            setPositions((prev) => {
+              // Add new position and merge with existing
+              const positionMap = new Map<string, Position>();
+
+              // Add existing positions
+              prev.forEach((pos) => {
+                const key = `${pos.symbol}-${pos.exchange}-${pos.ts}`;
+                positionMap.set(key, pos);
+              });
+
+              // Add new position
+              const newKey = `${newPosition.symbol}-${newPosition.exchange}-${newPosition.ts}`;
+              positionMap.set(newKey, newPosition);
+
+              // Convert back to array, sort by ts desc, and limit
+              const result = Array.from(positionMap.values())
+                .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
+                .slice(0, 100);
+
+              console.log(`[Realtime] Positions state updated, now ${result.length} positions, latest ts:`, result[0]?.ts);
+              return result;
+            });
           }
         }
       )
@@ -291,12 +282,9 @@ export function useRealtimePositions(runId: string, initialData: Position[]): Re
 
     return () => {
       console.log(`[Realtime] Unsubscribing from positions`);
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
       supabase.removeChannel(channel);
     };
   }, [runId]);
 
-  return { data: positions, isFreshDataLoaded };
+  return { data: positions, isFreshDataLoaded, lastInsertTime };
 }
