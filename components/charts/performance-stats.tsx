@@ -130,31 +130,48 @@ function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrad
   // Calculate period in days
   const startTime = new Date(firstPoint.ts).getTime();
   const endTime = new Date(lastPoint.ts).getTime();
-  const periodDays = Math.max(1, (endTime - startTime) / (1000 * 60 * 60 * 24));
+  const periodDays = (endTime - startTime) / (1000 * 60 * 60 * 24);
 
-  // Annualized Return (compound)
-  const annualizedReturn = periodDays > 0
-    ? (Math.pow(1 + totalReturn / 100, 365 / periodDays) - 1) * 100
-    : 0;
+  // Annualized Return - only calculate for sufficient data periods
+  // Annualizing short-term returns is statistically meaningless
+  let annualizedReturn = 0;
+  if (periodDays >= 30) {
+    // Use compound formula for 30+ days of data
+    annualizedReturn = (Math.pow(1 + totalReturn / 100, 365 / periodDays) - 1) * 100;
+    // Cap to reasonable bounds
+    annualizedReturn = Math.max(-500, Math.min(500, annualizedReturn));
+  } else if (periodDays >= 7) {
+    // For 7-30 days, use compound formula with tighter cap
+    annualizedReturn = (Math.pow(1 + totalReturn / 100, 365 / periodDays) - 1) * 100;
+    // Tighter cap for shorter periods
+    annualizedReturn = Math.max(-200, Math.min(200, annualizedReturn));
+  }
+  // For periods < 7 days, annualizedReturn stays 0 (not meaningful to annualize)
 
-  // Volatility (annualized) - standard deviation of returns * sqrt(252)
+  // Volatility (annualized) - standard deviation of returns * sqrt(periods per year)
   let volatility = 0;
-  if (dailyReturns.length > 1) {
+  if (dailyReturns.length > 1 && periodDays > 0) {
     const meanReturn = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
     const variance = dailyReturns.reduce((sum, r) => sum + Math.pow(r - meanReturn, 2), 0) / (dailyReturns.length - 1);
     const dailyStd = Math.sqrt(variance);
-    // Assume hourly data, annualize based on ~8760 hours per year
+    // Calculate periods per year based on actual data frequency
+    const avgHoursBetweenPoints = (periodDays * 24) / Math.max(1, sorted.length - 1);
     const hoursPerYear = 8760;
-    const avgHoursBetweenPoints = periodDays * 24 / sorted.length;
-    const periodsPerYear = hoursPerYear / avgHoursBetweenPoints;
+    const periodsPerYear = hoursPerYear / Math.max(0.1, avgHoursBetweenPoints);
     volatility = dailyStd * Math.sqrt(periodsPerYear) * 100;
+    // Cap volatility to reasonable bounds (0% to 200%)
+    volatility = Math.min(200, volatility);
   }
 
   // Sharpe Ratio (assuming 0% risk-free rate)
-  const sharpeRatio = volatility > 0 ? annualizedReturn / volatility : 0;
+  // Cap to reasonable bounds (-5 to 5)
+  let sharpeRatio = volatility > 0 ? annualizedReturn / volatility : 0;
+  sharpeRatio = Math.max(-5, Math.min(5, sharpeRatio));
 
   // Calmar Ratio (annualized return / max drawdown)
-  const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
+  // Cap to reasonable bounds (-20 to 20)
+  let calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
+  calmarRatio = Math.max(-20, Math.min(20, calmarRatio));
 
   return {
     totalReturn,
