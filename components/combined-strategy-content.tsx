@@ -31,37 +31,24 @@ interface CombinedStrategyContentProps {
   runIds: string[];
 }
 
-// Merge and forward-fill equity curve data from multiple runs
+// Merge equity curve data from multiple runs with forward-fill (no sum)
+// Runs are sequential, so we just forward-fill gaps between runs
 function mergeEquityCurveData(data: EquityCurve[]): EquityCurve[] {
   if (data.length === 0) return [];
 
-  // Sort by timestamp
+  // Sort all data by timestamp
   const sorted = [...data].sort(
     (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
   );
 
-  // Group by timestamp and sum values
+  // Group by timestamp - if multiple runs have data at same timestamp, use the latest one (no sum)
   const timeMap = new Map<string, EquityCurve>();
-
   for (const point of sorted) {
-    const existing = timeMap.get(point.ts);
-    if (existing) {
-      // Sum up values from different runs at the same timestamp
-      timeMap.set(point.ts, {
-        ...existing,
-        total_equity: existing.total_equity + point.total_equity,
-        binance_equity: existing.binance_equity + point.binance_equity,
-        bybit_equity: existing.bybit_equity + point.bybit_equity,
-        total_position_value: existing.total_position_value + point.total_position_value,
-        binance_position_value: existing.binance_position_value + point.binance_position_value,
-        bybit_position_value: existing.bybit_position_value + point.bybit_position_value,
-      });
-    } else {
-      timeMap.set(point.ts, { ...point });
-    }
+    // Just overwrite - don't sum
+    timeMap.set(point.ts, { ...point });
   }
 
-  // Convert back to array and sort
+  // Convert to array and sort
   const merged = Array.from(timeMap.values()).sort(
     (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
   );
@@ -79,33 +66,88 @@ function mergeEquityCurveData(data: EquityCurve[]): EquityCurve[] {
 }
 
 // Merge PnL series data from multiple runs
+// Each run's values are forward-filled (carry last value), then summed across runs at each timestamp
 function mergePnlSeriesData(data: PnlSeries[]): PnlSeries[] {
   if (data.length === 0) return [];
 
-  const sorted = [...data].sort(
-    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
-  );
-
-  const timeMap = new Map<string, PnlSeries>();
-
-  for (const point of sorted) {
-    const existing = timeMap.get(point.ts);
-    if (existing) {
-      timeMap.set(point.ts, {
-        ...existing,
-        total_pnl: existing.total_pnl + point.total_pnl,
-        total_funding_pnl: existing.total_funding_pnl + point.total_funding_pnl,
-        total_price_pnl: existing.total_price_pnl + point.total_price_pnl,
-        total_fee: existing.total_fee + point.total_fee,
-      });
-    } else {
-      timeMap.set(point.ts, { ...point });
-    }
+  // Group data by run_id
+  const runDataMap = new Map<string, PnlSeries[]>();
+  for (const point of data) {
+    const runData = runDataMap.get(point.run_id) || [];
+    runData.push(point);
+    runDataMap.set(point.run_id, runData);
   }
 
-  return Array.from(timeMap.values()).sort(
-    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
+  // Sort each run's data by timestamp
+  for (const [runId, runData] of runDataMap) {
+    runDataMap.set(
+      runId,
+      runData.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
+    );
+  }
+
+  // Get all unique timestamps sorted
+  const allTimestamps = [...new Set(data.map((d) => d.ts))].sort(
+    (a, b) => new Date(a).getTime() - new Date(b).getTime()
   );
+
+  // Track last known value for each run (for forward-fill)
+  const lastValues = new Map<string, PnlSeries>();
+
+  // Build merged data with forward-fill
+  const merged: PnlSeries[] = [];
+
+  for (const ts of allTimestamps) {
+    // Update lastValues with any data at this timestamp
+    for (const [runId, runData] of runDataMap) {
+      const pointAtTs = runData.find((p) => p.ts === ts);
+      if (pointAtTs) {
+        lastValues.set(runId, pointAtTs);
+      }
+    }
+
+    // Sum all last known values across runs
+    let total_pnl = 0;
+    let total_funding_pnl = 0;
+    let total_price_pnl = 0;
+    let total_fee = 0;
+    let binance_funding_pnl = 0;
+    let binance_price_pnl = 0;
+    let binance_fee = 0;
+    let bybit_funding_pnl = 0;
+    let bybit_price_pnl = 0;
+    let bybit_fee = 0;
+
+    for (const lastValue of lastValues.values()) {
+      total_pnl += lastValue.total_pnl;
+      total_funding_pnl += lastValue.total_funding_pnl;
+      total_price_pnl += lastValue.total_price_pnl;
+      total_fee += lastValue.total_fee;
+      binance_funding_pnl += lastValue.binance_funding_pnl;
+      binance_price_pnl += lastValue.binance_price_pnl;
+      binance_fee += lastValue.binance_fee;
+      bybit_funding_pnl += lastValue.bybit_funding_pnl;
+      bybit_price_pnl += lastValue.bybit_price_pnl;
+      bybit_fee += lastValue.bybit_fee;
+    }
+
+    merged.push({
+      ts,
+      run_id: "combined", // Mark as combined
+      total_pnl,
+      total_funding_pnl,
+      total_price_pnl,
+      total_fee,
+      binance_funding_pnl,
+      binance_price_pnl,
+      binance_fee,
+      bybit_funding_pnl,
+      bybit_price_pnl,
+      bybit_fee,
+    });
+  }
+
+  return merged;
 }
 
 // Transform functions (same as run-details-content)
