@@ -84,6 +84,13 @@ function formatHours(hours: number | null) {
   return `${formatNumber(hours / 24, 1)}d`;
 }
 
+function formatFundingRate(funding: number | null, nominal: number) {
+  if (funding === null || nominal === 0) return "-";
+  // Convert to basis points (1 bp = 0.01% = 0.0001)
+  const bps = (funding / nominal) * 10000;
+  return `${bps >= 0 ? "+" : ""}${bps.toFixed(2)}bp`;
+}
+
 function getPnLColor(pnl: number | null) {
   if (pnl === null) return "";
   if (pnl > 0) return "text-emerald-600 dark:text-emerald-400";
@@ -216,6 +223,9 @@ function HedgePairSummaryRow({ pair }: { pair: HedgePair }) {
       <TableCell className={cn("text-right font-mono font-medium", getPnLColor(pair.totalFunding))}>
         {formatCurrency(pair.totalFunding)}
       </TableCell>
+      <TableCell className={cn("text-right font-mono text-xs font-medium", getPnLColor(pair.totalFunding))}>
+        {formatFundingRate(pair.totalFunding, pair.totalNominalValue)}
+      </TableCell>
       <TableCell className={cn("text-right font-mono font-medium", getPnLColor(pair.totalPricePnl))}>
         {formatCurrency(pair.totalPricePnl)}
       </TableCell>
@@ -287,6 +297,9 @@ function PositionRow({
       </TableCell>
       <TableCell className={cn("text-right font-mono", getPnLColor(position.funding_fee_realized))}>
         {formatCurrency(position.funding_fee_realized)}
+      </TableCell>
+      <TableCell className={cn("text-right font-mono text-xs", getPnLColor(position.funding_fee_realized))}>
+        {formatFundingRate(position.funding_fee_realized, position.quantity * position.entry_price)}
       </TableCell>
       <TableCell className={cn("text-right font-mono", getPnLColor(position.price_pnl))}>
         {formatCurrency(position.price_pnl)}
@@ -422,6 +435,7 @@ export function CombinedTradesTable({ combinedTrades, enableHedge }: CombinedTra
             <SortableHeader field="funding_fee_realized" currentSort={sortConfig} onSort={handleSort} className="text-right">
               Funding
             </SortableHeader>
+            <TableHead className="text-right">Rate</TableHead>
             <SortableHeader field="price_pnl" currentSort={sortConfig} onSort={handleSort} className="text-right">
               Price P&L
             </SortableHeader>
@@ -488,6 +502,9 @@ export function CombinedTradesTable({ combinedTrades, enableHedge }: CombinedTra
               </TableCell>
               <TableCell className={cn("text-right font-mono", getPnLColor(position.funding_fee_realized))}>
                 {formatCurrency(position.funding_fee_realized)}
+              </TableCell>
+              <TableCell className={cn("text-right font-mono text-xs", getPnLColor(position.funding_fee_realized))}>
+                {formatFundingRate(position.funding_fee_realized, position.quantity * position.entry_price)}
               </TableCell>
               <TableCell className={cn("text-right font-mono", getPnLColor(position.price_pnl))}>
                 {formatCurrency(position.price_pnl)}
