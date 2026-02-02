@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import { CombinedStrategyContent } from "@/components/combined-strategy-content";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Strategy,
   StrategyRun,
@@ -16,6 +17,43 @@ import type {
 // Disable caching to ensure fresh data on every page load
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+// Fetch all data with pagination (Supabase default limit is 1000)
+async function fetchAllData<T>(
+  supabase: SupabaseClient,
+  table: string,
+  runIds: string[],
+  orderBy: string = "ts"
+): Promise<T[]> {
+  const PAGE_SIZE = 1000;
+  const allData: T[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .in("run_id", runIds)
+      .order(orderBy, { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error(`Error fetching ${table}:`, error);
+      break;
+    }
+
+    if (data && data.length > 0) {
+      allData.push(...(data as T[]));
+      offset += PAGE_SIZE;
+      hasMore = data.length === PAGE_SIZE;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allData;
+}
 
 interface CombinedPageProps {
   params: Promise<{
@@ -67,39 +105,24 @@ export default async function CombinedStrategyPage({ params }: CombinedPageProps
     );
   }
 
-  // Fetch all data from all runs in parallel
-  // Note: Fetch in descending order with limit to get LATEST data
-  const [equityCurveResult, pnlSeriesResult, combinedTradesResult] = await Promise.all([
-    supabase
-      .from("equity_curve")
-      .select("*")
-      .in("run_id", runIds)
-      .order("ts", { ascending: false })
-      .limit(10000),
-    supabase
-      .from("pnl_series")
-      .select("*")
-      .in("run_id", runIds)
-      .order("ts", { ascending: false })
-      .limit(10000),
-    supabase
-      .from("combined_trades")
-      .select("*")
-      .in("run_id", runIds)
-      .order("ts", { ascending: false })
-      .limit(10000),
+  // Fetch all data from all runs in parallel with pagination
+  const [allEquityCurve, allPnlSeries, allCombinedTrades] = await Promise.all([
+    fetchAllData<EquityCurve>(supabase, "equity_curve", runIds),
+    fetchAllData<PnlSeries>(supabase, "pnl_series", runIds),
+    fetchAllData<CombinedTrade>(supabase, "combined_trades", runIds),
   ]);
-
-  // Reverse to get ascending order
-  const allEquityCurve = ((equityCurveResult.data ?? []) as EquityCurve[]).reverse();
-  const allPnlSeries = ((pnlSeriesResult.data ?? []) as PnlSeries[]).reverse();
-  const allCombinedTrades = ((combinedTradesResult.data ?? []) as CombinedTrade[]).reverse();
 
   // Calculate total initial capital from all runs
   const totalInitialCapital = (runs ?? []).reduce(
     (sum: number, run: StrategyRun) => sum + (run.initial_capital || 0),
     0
   );
+
+  // Check if any run has hedge mode enabled
+  const enableHedge = (runs ?? []).some((run: StrategyRun) => {
+    const runParams = run.params as { strategy?: { enable_hedge?: boolean } } | null;
+    return runParams?.strategy?.enable_hedge === true;
+  });
 
   return (
     <div className="space-y-6">
@@ -124,6 +147,7 @@ export default async function CombinedStrategyPage({ params }: CombinedPageProps
         initialCombinedTrades={allCombinedTrades}
         initialCapital={totalInitialCapital}
         runIds={runIds}
+        enableHedge={enableHedge}
       />
     </div>
   );

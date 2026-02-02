@@ -29,29 +29,59 @@ interface CombinedStrategyContentProps {
   initialCombinedTrades: CombinedTrade[];
   initialCapital: number;
   runIds: string[];
+  enableHedge: boolean;
 }
 
-// Merge equity curve data from multiple runs with forward-fill (no sum)
-// Runs are sequential, so we just forward-fill gaps between runs
+// Merge equity curve data from multiple runs with gap filling (flat line during gaps)
+// Gap threshold: if time between consecutive points > 10 minutes, insert a bridge point
+const GAP_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+
 function mergeEquityCurveData(data: EquityCurve[]): EquityCurve[] {
-  if (data.length === 0) return [];
+  if (!data || data.length === 0) return [];
 
   // Sort all data by timestamp
   const sorted = [...data].sort(
     (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
   );
 
-  // Group by timestamp - if multiple runs have data at same timestamp, use the latest one (no sum)
+  // Group by timestamp - if multiple runs have data at same timestamp, use the latest one
   const timeMap = new Map<string, EquityCurve>();
   for (const point of sorted) {
-    // Just overwrite - don't sum
     timeMap.set(point.ts, { ...point });
   }
 
   // Convert to array and sort
-  const merged = Array.from(timeMap.values()).sort(
+  const deduped = Array.from(timeMap.values()).sort(
     (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
   );
+
+  // Fill gaps with bridge points to create flat lines
+  const merged: EquityCurve[] = [];
+  for (let i = 0; i < deduped.length; i++) {
+    const current = deduped[i];
+
+    // Check if there's a gap before this point
+    if (i > 0) {
+      const prev = deduped[i - 1];
+      const prevTime = new Date(prev.ts).getTime();
+      const currentTime = new Date(current.ts).getTime();
+      const gap = currentTime - prevTime;
+
+      // If gap > threshold, insert a bridge point just before current point
+      // with the previous point's values (creates a flat line during gap)
+      if (gap > GAP_THRESHOLD_MS) {
+        // Insert bridge point 1ms before current point
+        const bridgeTs = new Date(currentTime - 1).toISOString();
+        merged.push({
+          ...prev,
+          ts: bridgeTs,
+          run_id: "bridge",
+        });
+      }
+    }
+
+    merged.push(current);
+  }
 
   // Recalculate drawdown for merged data
   let peakEquity = 0;
@@ -68,7 +98,7 @@ function mergeEquityCurveData(data: EquityCurve[]): EquityCurve[] {
 // Merge PnL series data from multiple runs
 // Each run's values are forward-filled (carry last value), then summed across runs at each timestamp
 function mergePnlSeriesData(data: PnlSeries[]): PnlSeries[] {
-  if (data.length === 0) return [];
+  if (!data || data.length === 0) return [];
 
   // Group data by run_id
   const runDataMap = new Map<string, PnlSeries[]>();
@@ -86,24 +116,32 @@ function mergePnlSeriesData(data: PnlSeries[]): PnlSeries[] {
     );
   }
 
-  // Get all unique timestamps sorted
+  // Get all unique timestamps from PnL data only (sorted)
   const allTimestamps = [...new Set(data.map((d) => d.ts))].sort(
     (a, b) => new Date(a).getTime() - new Date(b).getTime()
   );
 
-  // Track last known value for each run (for forward-fill)
+  // Track index and last value for each run
+  const runIndices = new Map<string, number>();
   const lastValues = new Map<string, PnlSeries>();
+  for (const runId of runDataMap.keys()) {
+    runIndices.set(runId, 0);
+  }
 
   // Build merged data with forward-fill
   const merged: PnlSeries[] = [];
 
   for (const ts of allTimestamps) {
-    // Update lastValues with any data at this timestamp
+    const tsTime = new Date(ts).getTime();
+
+    // For each run, advance to find latest data point <= current timestamp
     for (const [runId, runData] of runDataMap) {
-      const pointAtTs = runData.find((p) => p.ts === ts);
-      if (pointAtTs) {
-        lastValues.set(runId, pointAtTs);
+      let idx = runIndices.get(runId) || 0;
+      while (idx < runData.length && new Date(runData[idx].ts).getTime() <= tsTime) {
+        lastValues.set(runId, runData[idx]);
+        idx++;
       }
+      runIndices.set(runId, idx);
     }
 
     // Sum all last known values across runs
@@ -131,20 +169,23 @@ function mergePnlSeriesData(data: PnlSeries[]): PnlSeries[] {
       bybit_fee += lastValue.bybit_fee;
     }
 
-    merged.push({
-      ts,
-      run_id: "combined", // Mark as combined
-      total_pnl,
-      total_funding_pnl,
-      total_price_pnl,
-      total_fee,
-      binance_funding_pnl,
-      binance_price_pnl,
-      binance_fee,
-      bybit_funding_pnl,
-      bybit_price_pnl,
-      bybit_fee,
-    });
+    // Only add if we have at least one value
+    if (lastValues.size > 0) {
+      merged.push({
+        ts,
+        run_id: "combined",
+        total_pnl,
+        total_funding_pnl,
+        total_price_pnl,
+        total_fee,
+        binance_funding_pnl,
+        binance_price_pnl,
+        binance_fee,
+        bybit_funding_pnl,
+        bybit_price_pnl,
+        bybit_fee,
+      });
+    }
   }
 
   return merged;
@@ -204,6 +245,7 @@ export function CombinedStrategyContent({
   initialCombinedTrades,
   initialCapital,
   runIds,
+  enableHedge,
 }: CombinedStrategyContentProps) {
   // State for data
   const [equityCurve, setEquityCurve] = useState<EquityCurve[]>(initialEquityCurve);
@@ -212,51 +254,63 @@ export function CombinedStrategyContent({
   const [isFreshDataLoaded, setIsFreshDataLoaded] = useState(false);
   const hasFetchedRef = useRef(false);
 
-  // Fetch fresh data on mount
+  // Fetch fresh data on mount with pagination (Supabase default limit is 1000)
   useEffect(() => {
     if (hasFetchedRef.current || runIds.length === 0) return;
     hasFetchedRef.current = true;
+
+    const fetchAllData = async <T,>(
+      supabase: ReturnType<typeof createClient>,
+      table: string,
+      runIds: string[]
+    ): Promise<T[]> => {
+      const PAGE_SIZE = 1000;
+      const allData: T[] = [];
+      let offset = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from(table)
+          .select("*")
+          .in("run_id", runIds)
+          .order("ts", { ascending: true })
+          .range(offset, offset + PAGE_SIZE - 1);
+
+        if (error) {
+          console.error(`[Combined] Error fetching ${table}:`, error);
+          break;
+        }
+
+        if (data && data.length > 0) {
+          allData.push(...(data as T[]));
+          offset += PAGE_SIZE;
+          hasMore = data.length === PAGE_SIZE;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      return allData;
+    };
 
     const fetchFreshData = async () => {
       const supabase = createClient();
       console.log(`[Combined] Fetching fresh data for ${runIds.length} runs`);
 
-      const [equityResult, pnlResult, tradesResult] = await Promise.all([
-        supabase
-          .from("equity_curve")
-          .select("*")
-          .in("run_id", runIds)
-          .order("ts", { ascending: false })
-          .limit(10000),
-        supabase
-          .from("pnl_series")
-          .select("*")
-          .in("run_id", runIds)
-          .order("ts", { ascending: false })
-          .limit(10000),
-        supabase
-          .from("combined_trades")
-          .select("*")
-          .in("run_id", runIds)
-          .order("ts", { ascending: false })
-          .limit(10000),
+      const [equityData, pnlData, tradesData] = await Promise.all([
+        fetchAllData<EquityCurve>(supabase, "equity_curve", runIds),
+        fetchAllData<PnlSeries>(supabase, "pnl_series", runIds),
+        fetchAllData<CombinedTrade>(supabase, "combined_trades", runIds),
       ]);
 
-      if (equityResult.data) {
-        const reversed = [...equityResult.data].reverse() as EquityCurve[];
-        console.log(`[Combined] Got ${reversed.length} fresh equity_curve records`);
-        setEquityCurve(reversed);
-      }
-      if (pnlResult.data) {
-        const reversed = [...pnlResult.data].reverse() as PnlSeries[];
-        console.log(`[Combined] Got ${reversed.length} fresh pnl_series records`);
-        setPnlSeries(reversed);
-      }
-      if (tradesResult.data) {
-        const reversed = [...tradesResult.data].reverse() as CombinedTrade[];
-        console.log(`[Combined] Got ${reversed.length} fresh combined_trades records`);
-        setCombinedTrades(reversed);
-      }
+      console.log(`[Combined] Got ${equityData.length} fresh equity_curve records`);
+      console.log(`[Combined] Got ${pnlData.length} fresh pnl_series records`);
+      console.log(`[Combined] Got ${tradesData.length} fresh combined_trades records`);
+
+      setEquityCurve(equityData);
+      setPnlSeries(pnlData);
+      setCombinedTrades(tradesData);
       setIsFreshDataLoaded(true);
     };
 
@@ -487,14 +541,65 @@ export function CombinedStrategyContent({
   }, [mergedEquityCurve, timeRange]);
 
   // Individual trade PnL data
+  // Individual trade PnL data with hedge pairing support
   const filteredIndividualTradePnLData = useMemo(() => {
-    return filteredCombinedTrades
-      .filter((trade) => trade.total_pnl !== null)
-      .map((trade, index) => ({
-        trade: String(index + 1),
-        pnl: trade.total_pnl!,
-      }));
-  }, [filteredCombinedTrades]);
+    if (!enableHedge) {
+      // Non-hedge mode: filter and re-index
+      return filteredCombinedTrades
+        .filter((trade) => trade.total_pnl !== null)
+        .map((trade, index) => ({
+          trade: String(index + 1),
+          pnl: trade.total_pnl!,
+        }));
+    }
+
+    // Hedge mode: group into pairs and sum P&L
+    const sorted = [...filteredCombinedTrades].sort(
+      (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
+    );
+    const used = new Set<number>();
+    const pairPnLs: number[] = [];
+
+    for (let i = 0; i < sorted.length; i++) {
+      if (used.has(sorted[i].combined_trade_id)) continue;
+
+      const trade1 = sorted[i];
+      let matchIndex = -1;
+
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (used.has(sorted[j].combined_trade_id)) continue;
+        const trade2 = sorted[j];
+
+        if (trade2.symbol === trade1.symbol && trade2.exchange !== trade1.exchange) {
+          const timeDiff = Math.abs(
+            new Date(trade2.ts).getTime() - new Date(trade1.ts).getTime()
+          );
+          if (timeDiff <= 60 * 1000) {
+            matchIndex = j;
+            break;
+          }
+        }
+      }
+
+      if (matchIndex !== -1) {
+        const trade2 = sorted[matchIndex];
+        used.add(trade1.combined_trade_id);
+        used.add(trade2.combined_trade_id);
+        const pairPnl = (trade1.total_pnl ?? 0) + (trade2.total_pnl ?? 0);
+        pairPnLs.push(pairPnl);
+      } else {
+        used.add(trade1.combined_trade_id);
+        if (trade1.total_pnl !== null) {
+          pairPnLs.push(trade1.total_pnl);
+        }
+      }
+    }
+
+    return pairPnLs.map((pnl, index) => ({
+      trade: String(index + 1),
+      pnl,
+    }));
+  }, [filteredCombinedTrades, enableHedge]);
 
   return (
     <>
@@ -550,7 +655,7 @@ export function CombinedStrategyContent({
           <div className="max-h-[500px] sm:max-h-[880px] overflow-auto relative [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-background">
             <CombinedTradesTable
               combinedTrades={filteredCombinedTrades}
-              enableHedge={false}
+              enableHedge={enableHedge}
             />
           </div>
         </CardContent>
