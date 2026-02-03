@@ -254,6 +254,15 @@ export function CombinedStrategyContent({
   const [isFreshDataLoaded, setIsFreshDataLoaded] = useState(false);
   const hasFetchedRef = useRef(false);
 
+  // Debug: log initial data received from server
+  useEffect(() => {
+    console.log(`[Combined] Initial equity_curve from server: ${initialEquityCurve.length} records`);
+    if (initialEquityCurve.length > 0) {
+      const sorted = [...initialEquityCurve].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+      console.log(`[Combined] Initial equity curve date range: ${sorted[0].ts} to ${sorted[sorted.length - 1].ts}`);
+    }
+  }, []);
+
   // Fetch fresh data on mount with pagination (Supabase default limit is 1000)
   useEffect(() => {
     if (hasFetchedRef.current || runIds.length === 0) return;
@@ -307,6 +316,10 @@ export function CombinedStrategyContent({
       console.log(`[Combined] Got ${equityData.length} fresh equity_curve records`);
       console.log(`[Combined] Got ${pnlData.length} fresh pnl_series records`);
       console.log(`[Combined] Got ${tradesData.length} fresh combined_trades records`);
+      if (equityData.length > 0) {
+        const sorted = [...equityData].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+        console.log(`[Combined] Client equity curve date range: ${sorted[0].ts} to ${sorted[sorted.length - 1].ts}`);
+      }
 
       setEquityCurve(equityData);
       setPnlSeries(pnlData);
@@ -393,7 +406,19 @@ export function CombinedStrategyContent({
   }, [strategyId, runIds]);
 
   // Merge data from multiple runs
-  const mergedEquityCurve = useMemo(() => mergeEquityCurveData(equityCurve), [equityCurve]);
+  const mergedEquityCurve = useMemo(() => {
+    console.log(`[Combined] Raw equity curve count: ${equityCurve.length}`);
+    if (equityCurve.length > 0) {
+      const sorted = [...equityCurve].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+      console.log(`[Combined] Raw equity curve range: ${sorted[0].ts} to ${sorted[sorted.length - 1].ts}`);
+    }
+    const merged = mergeEquityCurveData(equityCurve);
+    console.log(`[Combined] Merged equity curve count: ${merged.length}`);
+    if (merged.length > 0) {
+      console.log(`[Combined] Merged equity curve range: ${merged[0].ts} to ${merged[merged.length - 1].ts}`);
+    }
+    return merged;
+  }, [equityCurve]);
   const mergedPnlSeries = useMemo(() => mergePnlSeriesData(pnlSeries), [pnlSeries]);
 
   // Transform data for charts
@@ -410,12 +435,16 @@ export function CombinedStrategyContent({
     pnlBreakdownData.forEach((d) => allTimes.push(new Date(d.time)));
     combinedTrades.forEach((d) => allTimes.push(new Date(d.ts)));
 
+    console.log(`[Combined TimeRange] Calculating time range from: ${equityCurveData.length} equity points, ${pnlBreakdownData.length} pnl points, ${combinedTrades.length} trades`);
+
     if (allTimes.length === 0) {
       const now = new Date();
+      console.log(`[Combined TimeRange] No data, using current time`);
       return { dataStartTime: now, dataEndTime: now };
     }
 
     const sortedTimes = allTimes.sort((a, b) => a.getTime() - b.getTime());
+    console.log(`[Combined TimeRange] Calculated range: ${sortedTimes[0].toISOString()} to ${sortedTimes[sortedTimes.length - 1].toISOString()}`);
     return {
       dataStartTime: sortedTimes[0],
       dataEndTime: sortedTimes[sortedTimes.length - 1],

@@ -3,6 +3,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { RunDetailsHeader } from "@/components/strategies/run-details-header";
 import { RunDetailsContent } from "@/components/run-details-content";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Strategy,
   StrategyRun,
@@ -15,6 +16,43 @@ import type {
 // Disable caching to ensure fresh data on every page load
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+// Fetch all data with pagination (Supabase default limit is 1000)
+async function fetchAllData<T>(
+  supabase: SupabaseClient,
+  table: string,
+  runId: string,
+  orderBy: string = "ts"
+): Promise<T[]> {
+  const PAGE_SIZE = 1000;
+  const allData: T[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .eq("run_id", runId)
+      .order(orderBy, { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error(`Error fetching ${table}:`, error);
+      break;
+    }
+
+    if (data && data.length > 0) {
+      allData.push(...(data as T[]));
+      offset += PAGE_SIZE;
+      hasMore = data.length === PAGE_SIZE;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allData;
+}
 
 interface RunDetailsPageProps {
   params: Promise<{
@@ -32,38 +70,25 @@ export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
   const { strategyId, runId } = await params;
   const supabase = await createClient();
 
-  // Fetch all data in parallel
-  // Note: Fetch in descending order with limit to get LATEST data (Supabase default limit is 1000)
-  const [
-    runResult,
-    equityCurveResult,
-    pnlSeriesResult,
-    combinedTradesResult,
-    positionsResult,
-  ] = await Promise.all([
-    supabase
-      .from("strategy_runs")
-      .select("*, strategies(*)")
-      .eq("run_id", runId)
-      .single(),
-    supabase
-      .from("equity_curve")
-      .select("*")
-      .eq("run_id", runId)
-      .order("ts", { ascending: false })
-      .limit(5000),
-    supabase
-      .from("pnl_series")
-      .select("*")
-      .eq("run_id", runId)
-      .order("ts", { ascending: false })
-      .limit(5000),
-    supabase
-      .from("combined_trades")
-      .select("*")
-      .eq("run_id", runId)
-      .order("ts", { ascending: false })
-      .limit(5000),
+  // Fetch run info first
+  const runResult = await supabase
+    .from("strategy_runs")
+    .select("*, strategies(*)")
+    .eq("run_id", runId)
+    .single();
+
+  const run = runResult.data as RunWithStrategy | null;
+
+  if (runResult.error || !run) {
+    return notFound();
+  }
+
+  // Fetch all data in parallel with pagination to overcome 1000 row limit
+  const [equityCurve, pnlSeries, combinedTrades, positionsResult] = await Promise.all([
+    fetchAllData<EquityCurve>(supabase, "equity_curve", runId),
+    fetchAllData<PnlSeries>(supabase, "pnl_series", runId),
+    fetchAllData<CombinedTrade>(supabase, "combined_trades", runId),
+    // Positions only need latest 100 for realtime display
     supabase
       .from("positions")
       .select("*")
@@ -72,16 +97,7 @@ export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
       .limit(100),
   ]);
 
-  const run = runResult.data as RunWithStrategy | null;
-  // Reverse to get ascending order (we fetched in descending order to get latest data)
-  const equityCurve = ((equityCurveResult.data ?? []) as EquityCurve[]).reverse();
-  const pnlSeries = ((pnlSeriesResult.data ?? []) as PnlSeries[]).reverse();
-  const combinedTrades = ((combinedTradesResult.data ?? []) as CombinedTrade[]).reverse();
   const positions = (positionsResult.data ?? []) as Position[];
-
-  if (runResult.error || !run) {
-    return notFound();
-  }
 
   const strategy = run.strategies;
 

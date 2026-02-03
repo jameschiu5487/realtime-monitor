@@ -112,6 +112,17 @@ export default async function CombinedStrategyPage({ params }: CombinedPageProps
     fetchAllData<CombinedTrade>(supabase, "combined_trades", runIds),
   ]);
 
+  // Debug logging
+  console.log(`[Combined] Strategy: ${strategyId}`);
+  console.log(`[Combined] Run IDs: ${runIds.join(", ")}`);
+  console.log(`[Combined] Total equity_curve records: ${allEquityCurve.length}`);
+  console.log(`[Combined] Total pnl_series records: ${allPnlSeries.length}`);
+  console.log(`[Combined] Total combined_trades records: ${allCombinedTrades.length}`);
+  if (allEquityCurve.length > 0) {
+    const sorted = [...allEquityCurve].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+    console.log(`[Combined] Equity curve date range: ${sorted[0].ts} to ${sorted[sorted.length - 1].ts}`);
+  }
+
   // Calculate total initial capital from all runs
   const totalInitialCapital = (runs ?? []).reduce(
     (sum: number, run: StrategyRun) => sum + (run.initial_capital || 0),

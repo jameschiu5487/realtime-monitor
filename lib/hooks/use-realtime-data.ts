@@ -15,6 +15,43 @@ interface RealtimeDataResult<T> {
   isFreshDataLoaded: boolean;
 }
 
+// Helper function to fetch all data with pagination (Supabase default limit is 1000)
+async function fetchAllDataWithPagination<T>(
+  supabase: ReturnType<typeof createClient>,
+  table: string,
+  runId: string,
+  sortKey: string
+): Promise<T[]> {
+  const PAGE_SIZE = 1000;
+  const allData: T[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .eq("run_id", runId)
+      .order(sortKey, { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error(`[Realtime] Error fetching ${table} page at offset ${offset}:`, error);
+      break;
+    }
+
+    if (data && data.length > 0) {
+      allData.push(...(data as T[]));
+      offset += PAGE_SIZE;
+      hasMore = data.length === PAGE_SIZE;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allData;
+}
+
 // Generic hook for realtime subscriptions with immediate fresh data fetch
 function useRealtimeSubscription<T extends Record<string, unknown>>(
   table: string,
@@ -28,37 +65,27 @@ function useRealtimeSubscription<T extends Record<string, unknown>>(
   const [isFreshDataLoaded, setIsFreshDataLoaded] = useState(false);
   const hasFetchedRef = useRef(false);
 
-  // Fetch fresh data immediately on mount
+  // Fetch fresh data immediately on mount with pagination
   useEffect(() => {
     if (hasFetchedRef.current) return;
     hasFetchedRef.current = true;
 
     const fetchFreshData = async () => {
       const supabase = createClient();
-      console.log(`[Realtime] Fetching fresh ${table} data for run ${runId}`);
+      console.log(`[Realtime] Fetching fresh ${table} data for run ${runId} with pagination`);
 
-      // Fetch in descending order to get the LATEST records first (Supabase default limit is 1000)
-      // Then reverse on client side if we need ascending order
-      const { data: freshData, error } = await supabase
-        .from(table)
-        .select("*")
-        .eq("run_id", runId)
-        .order(sortKey, { ascending: false })
-        .limit(5000); // Increase limit to get more data
+      const freshData = await fetchAllDataWithPagination<T>(supabase, table, runId, sortKey);
 
-      if (error) {
-        console.error(`[Realtime] Error fetching ${table}:`, error);
-        setIsFreshDataLoaded(true); // Mark as loaded even on error
-        return;
-      }
-
-      if (freshData) {
+      if (freshData.length > 0) {
         console.log(`[Realtime] Got ${freshData.length} fresh ${table} records`);
-        // Sort according to the desired direction
-        const sortedData = sortDirection === "asc"
-          ? [...freshData].reverse()
-          : freshData;
-        setData(sortedData as T[]);
+        if (freshData.length > 0) {
+          const first = freshData[0] as Record<string, unknown>;
+          const last = freshData[freshData.length - 1] as Record<string, unknown>;
+          console.log(`[Realtime] ${table} date range: ${first[sortKey]} to ${last[sortKey]}`);
+        }
+        // Data is already sorted ascending, reverse if needed
+        const sortedData = sortDirection === "desc" ? [...freshData].reverse() : freshData;
+        setData(sortedData);
       }
       setIsFreshDataLoaded(true);
     };
