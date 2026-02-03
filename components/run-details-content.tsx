@@ -369,9 +369,7 @@ export function RunDetailsContent({
 
         {/* Performance Stats */}
         <PerformanceStats
-          equityCurve={equityCurve}
           filteredEquityCurve={filteredEquityCurve}
-          combinedTrades={combinedTrades}
           filteredCombinedTrades={filteredCombinedTrades}
         />
 

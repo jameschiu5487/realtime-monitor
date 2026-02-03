@@ -610,9 +610,7 @@ export function CombinedStrategyContent({
 
         {/* Performance Stats */}
         <PerformanceStats
-          equityCurve={mergedEquityCurve}
           filteredEquityCurve={filteredEquityCurve}
-          combinedTrades={combinedTrades}
           filteredCombinedTrades={filteredCombinedTrades}
         />
 

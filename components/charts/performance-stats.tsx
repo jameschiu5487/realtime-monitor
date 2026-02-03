@@ -6,9 +6,7 @@ import { cn } from "@/lib/utils";
 import type { EquityCurve, CombinedTrade } from "@/lib/types/database";
 
 interface PerformanceStatsProps {
-  equityCurve: EquityCurve[];
   filteredEquityCurve: EquityCurve[];
-  combinedTrades: CombinedTrade[];
   filteredCombinedTrades: CombinedTrade[];
 }
 
@@ -186,19 +184,11 @@ function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrad
 }
 
 export function PerformanceStats({
-  equityCurve,
   filteredEquityCurve,
-  combinedTrades,
   filteredCombinedTrades,
 }: PerformanceStatsProps) {
-  // Calculate real-time stats (all data)
-  const realtimeStats = useMemo(
-    () => calculateStats(equityCurve, combinedTrades),
-    [equityCurve, combinedTrades]
-  );
-
-  // Calculate filtered stats (based on time range)
-  const filteredStats = useMemo(
+  // Calculate stats based on selected time range
+  const stats = useMemo(
     () => calculateStats(filteredEquityCurve, filteredCombinedTrades),
     [filteredEquityCurve, filteredCombinedTrades]
   );
@@ -206,51 +196,51 @@ export function PerformanceStats({
   return (
     <Card>
       <CardContent className="p-0">
-        {/* Row 1: Realtime stats */}
+        {/* Row 1: Return and risk metrics */}
         <div className="grid grid-cols-2 sm:grid-cols-4 border-b">
           <ColoredStatCard
-            value={formatPercent(realtimeStats.totalReturn)}
+            value={formatPercent(stats.totalReturn)}
             label="Total Return"
-            numericValue={realtimeStats.totalReturn}
+            numericValue={stats.totalReturn}
           />
           <ColoredStatCard
-            value={formatPercent(-realtimeStats.maxDrawdown)}
+            value={formatPercent(-stats.maxDrawdown)}
             label="Max Drawdown"
-            numericValue={-realtimeStats.maxDrawdown}
+            numericValue={-stats.maxDrawdown}
           />
           <StatCard
-            value={String(realtimeStats.positions)}
+            value={String(stats.positions)}
             label="Positions"
             colored={false}
           />
           <StatCard
-            value={formatPercent(realtimeStats.netExposure)}
+            value={formatPercent(stats.netExposure)}
             label="Net Exposure"
             colored={false}
           />
         </div>
 
-        {/* Row 2: Period-based stats (filtered by time range) */}
+        {/* Row 2: Annualized metrics */}
         <div className="grid grid-cols-2 sm:grid-cols-4">
           <ColoredStatCard
-            value={formatPercent(filteredStats.annualizedReturn)}
+            value={formatPercent(stats.annualizedReturn)}
             label="Annualized Return"
-            numericValue={filteredStats.annualizedReturn}
+            numericValue={stats.annualizedReturn}
           />
           <ColoredStatCard
-            value={formatNumber(filteredStats.sharpeRatio)}
+            value={formatNumber(stats.sharpeRatio)}
             label="Sharpe Ratio"
-            numericValue={filteredStats.sharpeRatio}
+            numericValue={stats.sharpeRatio}
           />
           <StatCard
-            value={formatPercent(filteredStats.volatility)}
+            value={formatPercent(stats.volatility)}
             label="Volatility (Ann.)"
             colored={false}
           />
           <ColoredStatCard
-            value={formatNumber(filteredStats.calmarRatio)}
+            value={formatNumber(stats.calmarRatio)}
             label="Calmar Ratio"
-            numericValue={filteredStats.calmarRatio}
+            numericValue={stats.calmarRatio}
           />
         </div>
       </CardContent>
