@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -12,8 +12,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { SpreadChart } from "./spread-chart";
 import type { Position } from "@/lib/types/database";
 
 // Extended position type with strategy info
@@ -78,6 +80,87 @@ export function AllPositionsContent({
 }: AllPositionsContentProps) {
   const [positions, setPositions] = useState<PositionWithStrategy[]>(initialPositions);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [entryTimes, setEntryTimes] = useState<number[]>([]);
+  const [entrySpread, setEntrySpread] = useState<number | null>(null);
+
+  // Handle symbol selection
+  const handleSymbolClick = useCallback((symbol: string) => {
+    setSelectedSymbol((prev) => (prev === symbol ? null : symbol));
+  }, []);
+
+  const handleClearSymbol = useCallback(() => {
+    setSelectedSymbol(null);
+    setEntryTimes([]);
+    setEntrySpread(null);
+  }, []);
+
+  // Fetch entry times and entry spread from trades when symbol is selected
+  useEffect(() => {
+    if (!selectedSymbol || runIds.length === 0) {
+      setEntryTimes([]);
+      setEntrySpread(null);
+      return;
+    }
+
+    const fetchEntryData = async () => {
+      const supabase = createClient();
+
+      // Fetch the latest trade with action = 'open' for this symbol
+      console.log(`[AllPositions] Fetching entry data for ${selectedSymbol}, runIds:`, runIds);
+
+      // Get the latest Open trades for this symbol from both exchanges
+      const { data: trades, error } = await supabase
+        .from("trades")
+        .select("ts, symbol, action, run_id, exchange, price")
+        .eq("symbol", selectedSymbol)
+        .eq("action", "Open")
+        .order("ts", { ascending: false })
+        .limit(10);
+
+      console.log(`[AllPositions] Open trades query result:`, { trades, error });
+
+      if (error) {
+        console.error("[AllPositions] Error fetching entry data:", error);
+        return;
+      }
+
+      if (trades && trades.length > 0) {
+        // Get timestamp of the latest open trade as entry point
+        const latestTrade = trades[0] as { ts: string; symbol: string; action: string; run_id: string; exchange: string; price: number };
+        const entryTime = new Date(latestTrade.ts).getTime();
+        console.log(`[AllPositions] Found entry time for ${selectedSymbol}: ${latestTrade.ts} (${entryTime}ms)`);
+        setEntryTimes([entryTime]);
+
+        // Find entry prices for both exchanges from the same entry event (similar timestamp)
+        // Trades usually come in pairs (Binance + Bybit) at similar times
+        type TradeRecord = { ts: string; symbol: string; action: string; run_id: string; exchange: string; price: number };
+        const typedTrades = trades as TradeRecord[];
+        const binanceTrade = typedTrades.find((t) => t.exchange.toLowerCase() === "binance");
+        const bybitTrade = typedTrades.find((t) => t.exchange.toLowerCase() === "bybit");
+
+        console.log(`[AllPositions] Entry trades - Binance:`, binanceTrade, `Bybit:`, bybitTrade);
+
+        if (binanceTrade && bybitTrade) {
+          const binancePrice = binanceTrade.price;
+          const bybitPrice = bybitTrade.price;
+          // Calculate spread: (Bybit - Binance) / Binance * 10000 (basis points)
+          const spread = ((bybitPrice - binancePrice) / binancePrice) * 10000;
+          console.log(`[AllPositions] Entry spread calculated: Binance=${binancePrice}, Bybit=${bybitPrice}, Spread=${spread.toFixed(2)} bp`);
+          setEntrySpread(spread);
+        } else {
+          console.log(`[AllPositions] Could not find trades for both exchanges`);
+          setEntrySpread(null);
+        }
+      } else {
+        console.log(`[AllPositions] No entry time found for ${selectedSymbol}`);
+        setEntryTimes([]);
+        setEntrySpread(null);
+      }
+    };
+
+    fetchEntryData();
+  }, [selectedSymbol, runIds]);
 
   // Calculate summary stats
   const { totalNotionalValue, totalUnrealizedPnl, positionCount } = useMemo(() => {
@@ -215,6 +298,9 @@ export function AllPositionsContent({
       <Card>
         <CardHeader>
           <CardTitle>持倉列表</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            點擊交易對查看兩間交易所的價差走勢
+          </p>
         </CardHeader>
         <CardContent>
           {positions.length === 0 ? (
@@ -256,7 +342,19 @@ export function AllPositionsContent({
                             </div>
                           </TableCell>
                         ) : null}
-                        <TableCell className="font-medium">{pos.symbol}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                              "font-medium px-2 h-7",
+                              selectedSymbol === pos.symbol && "bg-primary/10 text-primary"
+                            )}
+                            onClick={() => handleSymbolClick(pos.symbol)}
+                          >
+                            {pos.symbol}
+                          </Button>
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline" className={getExchangeColor(pos.exchange)}>
                             {pos.exchange}
@@ -297,6 +395,9 @@ export function AllPositionsContent({
           )}
         </CardContent>
       </Card>
+
+      {/* Spread Chart */}
+      <SpreadChart symbol={selectedSymbol} entryTimes={entryTimes} entrySpread={entrySpread} onSymbolClear={handleClearSymbol} />
     </div>
   );
 }
