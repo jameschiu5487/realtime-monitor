@@ -558,25 +558,22 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
                 <Tooltip content={<CustomTooltip />} />
                 <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
                 {/* Entry time vertical lines */}
-                {validEntryTimes.map((time, idx) => {
-                  console.log(`[SpreadChart] Drawing entry line at x=${time}`);
-                  return (
-                    <ReferenceLine
-                      key={`entry-${idx}`}
-                      x={time}
-                      stroke="#ef4444"
-                      strokeWidth={2}
-                      ifOverflow="extendDomain"
-                      label={{
-                        value: "進場",
-                        position: "insideTopRight",
-                        fill: "#ef4444",
-                        fontSize: 12,
-                        fontWeight: "bold",
-                      }}
-                    />
-                  );
-                })}
+                {validEntryTimes.map((time, idx) => (
+                  <ReferenceLine
+                    key={`entry-${idx}`}
+                    x={time}
+                    stroke="#ef4444"
+                    strokeWidth={2}
+                    ifOverflow="extendDomain"
+                    label={{
+                      value: "進場",
+                      position: "insideTopRight",
+                      fill: "#ef4444",
+                      fontSize: 12,
+                      fontWeight: "bold",
+                    }}
+                  />
+                ))}
                 <Line
                   type="monotone"
                   dataKey="spread"

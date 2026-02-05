@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { SpreadChart } from "./spread-chart";
+import { FundingRateMonitor } from "./funding-rate-monitor";
 import type { Position } from "@/lib/types/database";
 
 // Extended position type with strategy info
@@ -255,7 +256,7 @@ export function AllPositionsContent({
     <div className="space-y-6">
       <div>
         <h2 className="text-3xl font-bold tracking-tight">持倉查看</h2>
-        <p className="text-muted-foreground">
+        <p className="text-muted-foreground" suppressHydrationWarning>
           查看所有運行中策略的持倉 • 最後更新: {lastUpdateTime.toLocaleTimeString()}
         </p>
       </div>
@@ -395,6 +396,11 @@ export function AllPositionsContent({
           )}
         </CardContent>
       </Card>
+
+      {/* Funding Rate Monitor */}
+      <FundingRateMonitor
+        positions={positions.map((p) => ({ symbol: p.symbol, exchange: p.exchange, run_id: p.run_id }))}
+      />
 
       {/* Spread Chart */}
       <SpreadChart symbol={selectedSymbol} entryTimes={entryTimes} entrySpread={entrySpread} onSymbolClear={handleClearSymbol} />
