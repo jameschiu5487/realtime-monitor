@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -84,6 +84,25 @@ export function AllPositionsContent({
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [entryTimes, setEntryTimes] = useState<number[]>([]);
   const [entrySpread, setEntrySpread] = useState<number | null>(null);
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  const lastInsertTimesRef = useRef<Map<string, number>>(new Map());
+
+  // Initialize lastInsertTimes for initial positions
+  useEffect(() => {
+    const now = Date.now();
+    for (const pos of initialPositions) {
+      const key = `${pos.run_id}-${pos.symbol}-${pos.exchange}`;
+      lastInsertTimesRef.current.set(key, now);
+    }
+  }, [initialPositions]);
+
+  // Tick every second for staleness check
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Handle symbol selection
   const handleSymbolClick = useCallback((symbol: string) => {
@@ -163,17 +182,6 @@ export function AllPositionsContent({
     fetchEntryData();
   }, [selectedSymbol, runIds]);
 
-  // Calculate summary stats
-  const { totalNotionalValue, totalUnrealizedPnl, positionCount } = useMemo(() => {
-    const notional = positions.reduce((sum, p) => sum + Math.abs(p.notional_value), 0);
-    const pnl = positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
-    return {
-      totalNotionalValue: notional,
-      totalUnrealizedPnl: pnl,
-      positionCount: positions.length,
-    };
-  }, [positions]);
-
   // Subscribe to realtime position updates for all running runs
   useEffect(() => {
     if (runIds.length === 0) return;
@@ -202,6 +210,10 @@ export function AllPositionsContent({
               strategy_id: strategyInfo?.id ?? "",
             };
 
+            // Record insert time for this position
+            const newKey = `${newPosition.run_id}-${newPosition.symbol}-${newPosition.exchange}`;
+            lastInsertTimesRef.current.set(newKey, Date.now());
+
             setPositions((prev) => {
               // Create map for latest positions
               const posMap = new Map<string, PositionWithStrategy>();
@@ -213,7 +225,6 @@ export function AllPositionsContent({
               }
 
               // Update with new position
-              const newKey = `${newPosition.run_id}-${newPosition.symbol}-${newPosition.exchange}`;
               posMap.set(newKey, positionWithStrategy);
 
               return Array.from(posMap.values());
@@ -232,11 +243,31 @@ export function AllPositionsContent({
     };
   }, [runIds, runToStrategyMap]);
 
+  // Filter out stale positions (no INSERT in 5 seconds)
+  const activePositions = useMemo<PositionWithStrategy[]>(() => {
+    return positions.filter((pos) => {
+      const key = `${pos.run_id}-${pos.symbol}-${pos.exchange}`;
+      const lastInsert = lastInsertTimesRef.current.get(key) ?? 0;
+      return currentTime - lastInsert <= 5000;
+    });
+  }, [positions, currentTime]);
+
+  // Calculate summary stats from active positions
+  const { totalNotionalValue, totalUnrealizedPnl, positionCount } = useMemo(() => {
+    const notional = activePositions.reduce((sum, p) => sum + Math.abs(p.notional_value), 0);
+    const pnl = activePositions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+    return {
+      totalNotionalValue: notional,
+      totalUnrealizedPnl: pnl,
+      positionCount: activePositions.length,
+    };
+  }, [activePositions]);
+
   // Group positions by strategy
   const positionsByStrategy = useMemo(() => {
     const grouped = new Map<string, PositionWithStrategy[]>();
 
-    for (const pos of positions) {
+    for (const pos of activePositions) {
       const key = pos.strategy_name;
       if (!grouped.has(key)) {
         grouped.set(key, []);
@@ -250,7 +281,7 @@ export function AllPositionsContent({
     }
 
     return grouped;
-  }, [positions]);
+  }, [activePositions]);
 
   return (
     <div className="space-y-6">
@@ -304,7 +335,7 @@ export function AllPositionsContent({
           </p>
         </CardHeader>
         <CardContent>
-          {positions.length === 0 ? (
+          {activePositions.length === 0 ? (
             <div className="flex h-[200px] items-center justify-center text-muted-foreground">
               目前無持倉
             </div>
@@ -399,7 +430,7 @@ export function AllPositionsContent({
 
       {/* Funding Rate Monitor */}
       <FundingRateMonitor
-        positions={positions.map((p) => ({ symbol: p.symbol, exchange: p.exchange, run_id: p.run_id }))}
+        positions={activePositions.map((p) => ({ symbol: p.symbol, exchange: p.exchange, run_id: p.run_id }))}
       />
 
       {/* Spread Chart */}
