@@ -80,6 +80,16 @@ function aggregateTotalEquity(
 
   const sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b);
 
+  // Find the first timestamp where all strategies have data
+  // This prevents a visual spike when new strategies join
+  const strategyStartTimes = new Map<string, number>();
+  for (const [strategyId, arr] of byStrategy) {
+    if (arr.length > 0) {
+      strategyStartTimes.set(strategyId, new Date(arr[0].ts).getTime());
+    }
+  }
+  const latestStartTime = Math.max(...strategyStartTimes.values());
+
   // Forward-fill per strategy and sum at each timestamp
   const strategyIndices = new Map<string, number>();
   const lastValues = new Map<string, number>();
@@ -101,6 +111,9 @@ function aggregateTotalEquity(
       }
       strategyIndices.set(strategyId, idx);
     }
+
+    // Only include points after all strategies have started
+    if (ts < latestStartTime) continue;
 
     let total = 0;
     for (const val of lastValues.values()) {

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OverviewPerformanceChart } from "@/components/overview/overview-performance-chart";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Strategy, StrategyRun, EquityCurve } from "@/lib/types/database";
+import { PerformanceStats } from "@/components/charts/performance-stats";
+import type { Strategy, StrategyRun, EquityCurve, CombinedTrade } from "@/lib/types/database";
 
 // Disable caching to ensure fresh data on every page load
 export const dynamic = "force-dynamic";
@@ -49,6 +50,80 @@ async function fetchRecentEquityData(
   return allData;
 }
 
+// Fetch all equity data for specific runs (no time filter, for stats calculation)
+async function fetchAllEquityData(
+  supabase: SupabaseClient,
+  runIds: string[]
+): Promise<EquityCurve[]> {
+  if (runIds.length === 0) return [];
+
+  const PAGE_SIZE = 1000;
+  const allData: EquityCurve[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("equity_curve")
+      .select("*")
+      .in("run_id", runIds)
+      .order("ts", { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error("Error fetching equity_curve:", error);
+      break;
+    }
+
+    if (data && data.length > 0) {
+      allData.push(...(data as EquityCurve[]));
+      offset += PAGE_SIZE;
+      hasMore = data.length === PAGE_SIZE;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allData;
+}
+
+// Fetch all combined trades for specific runs
+async function fetchAllCombinedTrades(
+  supabase: SupabaseClient,
+  runIds: string[]
+): Promise<CombinedTrade[]> {
+  if (runIds.length === 0) return [];
+
+  const PAGE_SIZE = 1000;
+  const allData: CombinedTrade[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("combined_trades")
+      .select("*")
+      .in("run_id", runIds)
+      .order("ts", { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error("Error fetching combined_trades:", error);
+      break;
+    }
+
+    if (data && data.length > 0) {
+      allData.push(...(data as CombinedTrade[]));
+      offset += PAGE_SIZE;
+      hasMore = data.length === PAGE_SIZE;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allData;
+}
+
 export default async function DashboardPage() {
   noStore();
 
@@ -80,8 +155,14 @@ export default async function DashboardPage() {
     .filter((r) => r.status === "running")
     .map((r) => r.run_id);
 
-  // Fetch last 24h of equity curve data
+  // Fetch last 24h of equity curve data (for chart)
   const equityData = await fetchRecentEquityData(supabase, runIds);
+
+  // Fetch all equity and trades for running runs (for performance stats)
+  const [runningEquityData, runningCombinedTrades] = await Promise.all([
+    fetchAllEquityData(supabase, runningRunIds),
+    fetchAllCombinedTrades(supabase, runningRunIds),
+  ]);
 
   // Calculate summary stats
   const runToStrategyMap: Record<string, string> = {};
@@ -128,6 +209,18 @@ export default async function DashboardPage() {
       startTime: r.start_time,
     }))
     .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+
+  // Group equity and trades by run_id for per-run stats
+  const equityByRunId: Record<string, EquityCurve[]> = {};
+  const tradesByRunId: Record<string, CombinedTrade[]> = {};
+  for (const point of runningEquityData) {
+    if (!equityByRunId[point.run_id]) equityByRunId[point.run_id] = [];
+    equityByRunId[point.run_id].push(point);
+  }
+  for (const trade of runningCombinedTrades) {
+    if (!tradesByRunId[trade.run_id]) tradesByRunId[trade.run_id] = [];
+    tradesByRunId[trade.run_id].push(trade);
+  }
 
   return (
     <div className="space-y-6">
@@ -250,6 +343,25 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Performance Stats for Each Running Run */}
+      {runningRuns.length > 0 && (
+        <div className="space-y-4">
+          {runningRuns.map((run) => (
+            <div key={run.runId} className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <h3 className="text-lg font-semibold">{run.strategyName}</h3>
+                <span className="text-sm text-muted-foreground">({run.mode})</span>
+              </div>
+              <PerformanceStats
+                filteredEquityCurve={equityByRunId[run.runId] ?? []}
+                filteredCombinedTrades={tradesByRunId[run.runId] ?? []}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
