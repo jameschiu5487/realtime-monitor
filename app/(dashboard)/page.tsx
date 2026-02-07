@@ -1,4 +1,3 @@
-import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,9 +6,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { PerformanceStats } from "@/components/charts/performance-stats";
 import type { Strategy, StrategyRun, EquityCurve, CombinedTrade } from "@/lib/types/database";
 
-// Disable caching to ensure fresh data on every page load
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+// Cache for 60 seconds, then revalidate in background
+export const revalidate = 60;
 
 // Fetch last 24h of equity data with pagination
 async function fetchRecentEquityData(
@@ -137,8 +135,6 @@ async function fetchCombinedTradesWithLimit(
 }
 
 export default async function DashboardPage() {
-  noStore();
-
   const supabase = await createClient();
 
   // Fetch all strategies
@@ -162,7 +158,6 @@ export default async function DashboardPage() {
   }
 
   const allRuns = (runsData ?? []) as StrategyRun[];
-  const runIds = allRuns.map((r) => r.run_id);
   const runningRunIds = allRuns
     .filter((r) => r.status === "running")
     .map((r) => r.run_id);
