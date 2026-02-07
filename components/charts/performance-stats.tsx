@@ -19,6 +19,15 @@ function formatNumber(value: number, decimals: number = 2) {
   return value.toFixed(decimals);
 }
 
+function formatCurrency(value: number) {
+  if (value >= 1000000) {
+    return `$${(value / 1000000).toFixed(2)}M`;
+  } else if (value >= 1000) {
+    return `$${(value / 1000).toFixed(2)}K`;
+  }
+  return `$${value.toFixed(2)}`;
+}
+
 function getValueColor(value: number) {
   if (value > 0) return "text-emerald-600 dark:text-emerald-400";
   if (value < 0) return "text-red-600 dark:text-red-400";
@@ -86,6 +95,10 @@ function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrad
       sharpeRatio: 0,
       volatility: 0,
       calmarRatio: 0,
+      totalTurnover: 0,
+      turnoverRate: 0,
+      dailyTurnoverRate: 0,
+      pnlPerTurnoverBps: 0,
     };
   }
 
@@ -171,6 +184,28 @@ function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrad
   let calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
   calmarRatio = Math.max(-20, Math.min(20, calmarRatio));
 
+  // Total Turnover: entry + exit notional values
+  const totalTurnover = combinedTrades.reduce((sum, trade) => {
+    const entryNotional = Math.abs(trade.quantity * trade.entry_price);
+    const exitNotional = trade.exit_price
+      ? Math.abs(trade.quantity * trade.exit_price)
+      : 0;
+    return sum + entryNotional + exitNotional;
+  }, 0);
+
+  // Turnover Rate: total turnover / initial equity
+  const turnoverRate = initialEquity > 0 ? totalTurnover / initialEquity : 0;
+
+  // Daily Turnover Rate: turnover rate / period in days
+  const dailyTurnoverRate = periodDays > 0 ? turnoverRate / periodDays : 0;
+
+  // PnL per Turnover in basis points
+  const totalPnl = combinedTrades.reduce(
+    (sum, trade) => sum + (trade.total_pnl ?? 0),
+    0
+  );
+  const pnlPerTurnoverBps = totalTurnover > 0 ? (totalPnl / totalTurnover) * 10000 : 0;
+
   return {
     totalReturn,
     maxDrawdown,
@@ -180,6 +215,10 @@ function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrad
     sharpeRatio,
     volatility,
     calmarRatio,
+    totalTurnover,
+    turnoverRate,
+    dailyTurnoverRate,
+    pnlPerTurnoverBps,
   };
 }
 
@@ -221,7 +260,7 @@ export function PerformanceStats({
         </div>
 
         {/* Row 2: Annualized metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 border-b">
           <ColoredStatCard
             value={formatPercent(stats.annualizedReturn)}
             label="Annualized Return"
@@ -241,6 +280,30 @@ export function PerformanceStats({
             value={formatNumber(stats.calmarRatio)}
             label="Calmar Ratio"
             numericValue={stats.calmarRatio}
+          />
+        </div>
+
+        {/* Row 3: Turnover metrics */}
+        <div className="grid grid-cols-2 sm:grid-cols-4">
+          <StatCard
+            value={formatCurrency(stats.totalTurnover)}
+            label="Total Turnover"
+            colored={false}
+          />
+          <StatCard
+            value={formatNumber(stats.turnoverRate, 2) + "x"}
+            label="Turnover Rate"
+            colored={false}
+          />
+          <StatCard
+            value={formatNumber(stats.dailyTurnoverRate, 4) + "x"}
+            label="Daily Turnover Rate"
+            colored={false}
+          />
+          <ColoredStatCard
+            value={formatNumber(stats.pnlPerTurnoverBps, 2)}
+            label="PnL/Turnover (bp)"
+            numericValue={stats.pnlPerTurnoverBps}
           />
         </div>
       </CardContent>
