@@ -50,10 +50,11 @@ async function fetchRecentEquityData(
   return allData;
 }
 
-// Fetch all equity data for specific runs (no time filter, for stats calculation)
-async function fetchAllEquityData(
+// Fetch equity data for specific runs with optional time filter (for stats calculation)
+async function fetchEquityDataWithLimit(
   supabase: SupabaseClient,
-  runIds: string[]
+  runIds: string[],
+  since?: string
 ): Promise<EquityCurve[]> {
   if (runIds.length === 0) return [];
 
@@ -63,12 +64,17 @@ async function fetchAllEquityData(
   let hasMore = true;
 
   while (hasMore) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("equity_curve")
       .select("*")
       .in("run_id", runIds)
-      .order("ts", { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1);
+      .order("ts", { ascending: true });
+
+    if (since) {
+      query = query.gte("ts", since);
+    }
+
+    const { data, error } = await query.range(offset, offset + PAGE_SIZE - 1);
 
     if (error) {
       console.error("Error fetching equity_curve:", error);
@@ -87,10 +93,11 @@ async function fetchAllEquityData(
   return allData;
 }
 
-// Fetch all combined trades for specific runs
-async function fetchAllCombinedTrades(
+// Fetch combined trades for specific runs with optional time filter
+async function fetchCombinedTradesWithLimit(
   supabase: SupabaseClient,
-  runIds: string[]
+  runIds: string[],
+  since?: string
 ): Promise<CombinedTrade[]> {
   if (runIds.length === 0) return [];
 
@@ -100,12 +107,17 @@ async function fetchAllCombinedTrades(
   let hasMore = true;
 
   while (hasMore) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("combined_trades")
       .select("*")
       .in("run_id", runIds)
-      .order("ts", { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1);
+      .order("ts", { ascending: true });
+
+    if (since) {
+      query = query.gte("ts", since);
+    }
+
+    const { data, error } = await query.range(offset, offset + PAGE_SIZE - 1);
 
     if (error) {
       console.error("Error fetching combined_trades:", error);
@@ -155,13 +167,16 @@ export default async function DashboardPage() {
     .filter((r) => r.status === "running")
     .map((r) => r.run_id);
 
-  // Fetch last 24h of equity curve data (for chart)
-  const equityData = await fetchRecentEquityData(supabase, runIds);
+  // Time filter for stats (7 days)
+  const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  // Fetch all equity and trades for running runs (for performance stats)
-  const [runningEquityData, runningCombinedTrades] = await Promise.all([
-    fetchAllEquityData(supabase, runningRunIds),
-    fetchAllCombinedTrades(supabase, runningRunIds),
+  // Fetch all data in parallel:
+  // - Chart: last 24h equity for running runs only
+  // - Stats: last 7 days equity and trades for running runs
+  const [equityData, runningEquityData, runningCombinedTrades] = await Promise.all([
+    fetchRecentEquityData(supabase, runningRunIds),
+    fetchEquityDataWithLimit(supabase, runningRunIds, since7d),
+    fetchCombinedTradesWithLimit(supabase, runningRunIds, since7d),
   ]);
 
   // Calculate summary stats
