@@ -22,6 +22,13 @@ interface SpreadDataPoint {
   spread: number; // basis points
   spreadPercent: number;
   ma?: number; // moving average of spread
+  std?: number; // standard deviation
+  upper1?: number; // MA + 1σ
+  upper2?: number; // MA + 2σ
+  upper3?: number; // MA + 3σ
+  lower1?: number; // MA - 1σ
+  lower2?: number; // MA - 2σ
+  lower3?: number; // MA - 3σ
 }
 
 interface SpreadChartProps {
@@ -46,8 +53,15 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
   const date = new Date(label || 0);
   const spreadData = payload.find((p) => p.dataKey === "spread");
   const maData = payload.find((p) => p.dataKey === "ma");
+  const upper1Data = payload.find((p) => p.dataKey === "upper1");
+  const lower1Data = payload.find((p) => p.dataKey === "lower1");
   const spread = spreadData?.value ?? 0;
   const ma = maData?.value;
+  const upper1 = upper1Data?.value;
+  const lower1 = lower1Data?.value;
+
+  // Calculate std from upper1 and ma
+  const std = ma !== undefined && upper1 !== undefined ? upper1 - ma : undefined;
 
   return (
     <div className="bg-background border rounded-lg shadow-lg p-3 text-sm">
@@ -66,6 +80,16 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
       {ma !== undefined && ma !== null && (
         <div className="text-amber-500 font-medium mt-1">
           MA(1440): {ma.toFixed(2)} bp
+        </div>
+      )}
+      {std !== undefined && std !== null && (
+        <div className="text-purple-500 font-medium mt-1">
+          σ: {std.toFixed(2)} bp
+        </div>
+      )}
+      {upper1 !== undefined && lower1 !== undefined && (
+        <div className="text-muted-foreground mt-1 text-xs">
+          ±1σ: [{lower1.toFixed(2)}, {upper1.toFixed(2)}]
         </div>
       )}
     </div>
@@ -212,7 +236,7 @@ function mergeKlinesAndCalculateSpread(
     }
   }
 
-  // Calculate moving average with window = MA_WINDOW (1440)
+  // Calculate moving average and standard deviation with window = MA_WINDOW (1440)
   for (let i = 0; i < result.length; i++) {
     if (i >= MA_WINDOW - 1) {
       // Calculate average of last MA_WINDOW points
@@ -220,7 +244,24 @@ function mergeKlinesAndCalculateSpread(
       for (let j = i - MA_WINDOW + 1; j <= i; j++) {
         sum += result[j].spread;
       }
-      result[i].ma = sum / MA_WINDOW;
+      const ma = sum / MA_WINDOW;
+      result[i].ma = ma;
+
+      // Calculate standard deviation
+      let sumSquaredDiff = 0;
+      for (let j = i - MA_WINDOW + 1; j <= i; j++) {
+        sumSquaredDiff += Math.pow(result[j].spread - ma, 2);
+      }
+      const std = Math.sqrt(sumSquaredDiff / MA_WINDOW);
+      result[i].std = std;
+
+      // Bollinger Bands
+      result[i].upper1 = ma + std;
+      result[i].upper2 = ma + 2 * std;
+      result[i].upper3 = ma + 3 * std;
+      result[i].lower1 = ma - std;
+      result[i].lower2 = ma - 2 * std;
+      result[i].lower3 = ma - 3 * std;
     }
   }
 
@@ -377,12 +418,27 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
               spreadPercent: (spread / binance) * 100,
             };
 
-            // Calculate MA for the new point
+            // Calculate MA and Bollinger Bands for the new point
             // We need the last MA_WINDOW-1 points plus the new point
             const recentPoints = prev.slice(-(MA_WINDOW - 1));
             if (recentPoints.length >= MA_WINDOW - 1) {
-              let sum = recentPoints.reduce((acc, p) => acc + p.spread, 0) + spreadBps;
-              newPoint.ma = sum / MA_WINDOW;
+              const allSpreads = [...recentPoints.map(p => p.spread), spreadBps];
+              const sum = allSpreads.reduce((acc, s) => acc + s, 0);
+              const ma = sum / MA_WINDOW;
+              newPoint.ma = ma;
+
+              // Calculate standard deviation
+              const sumSquaredDiff = allSpreads.reduce((acc, s) => acc + Math.pow(s - ma, 2), 0);
+              const std = Math.sqrt(sumSquaredDiff / MA_WINDOW);
+              newPoint.std = std;
+
+              // Bollinger Bands
+              newPoint.upper1 = ma + std;
+              newPoint.upper2 = ma + 2 * std;
+              newPoint.upper3 = ma + 3 * std;
+              newPoint.lower1 = ma - std;
+              newPoint.lower2 = ma - 2 * std;
+              newPoint.lower3 = ma - 3 * std;
             }
 
             // Keep last ~2 weeks of data
@@ -421,13 +477,15 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
     return downsampled;
   }, [data]);
 
-  // Calculate Y-axis domain (include both spread and MA values)
+  // Calculate Y-axis domain (include spread, MA, and Bollinger Bands)
   const yDomain = useMemo(() => {
     if (chartData.length === 0) return [-10, 10];
     const allValues: number[] = [];
     chartData.forEach((d) => {
       allValues.push(d.spread);
       if (d.ma !== undefined) allValues.push(d.ma);
+      if (d.upper3 !== undefined) allValues.push(d.upper3);
+      if (d.lower3 !== undefined) allValues.push(d.lower3);
     });
     const min = Math.min(...allValues);
     const max = Math.max(...allValues);
@@ -468,17 +526,29 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
             </button>
           )}
           {/* Legend */}
-          <div className="flex items-center gap-4 ml-4 text-sm">
+          <div className="flex items-center gap-3 ml-4 text-xs">
             <div className="flex items-center gap-1">
-              <div className="w-4 h-0.5 bg-blue-500"></div>
+              <div className="w-3 h-0.5 bg-blue-500"></div>
               <span className="text-muted-foreground">Spread</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-4 h-0.5 bg-amber-500"></div>
-              <span className="text-muted-foreground">MA(1440)</span>
+              <div className="w-3 h-0.5 bg-amber-500"></div>
+              <span className="text-muted-foreground">MA</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-4 h-0 border-l-2 border-dashed border-red-500"></div>
+              <div className="w-3 h-0.5 bg-purple-400"></div>
+              <span className="text-muted-foreground">±1σ</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0.5 bg-purple-300"></div>
+              <span className="text-muted-foreground">±2σ</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0.5 bg-purple-200"></div>
+              <span className="text-muted-foreground">±3σ</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0 border-l-2 border-dashed border-red-500"></div>
               <span className="text-muted-foreground">進場</span>
             </div>
           </div>
@@ -574,15 +644,70 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
                     }}
                   />
                 ))}
+                {/* Bollinger Bands - 3σ (outermost, lightest) */}
                 <Line
                   type="monotone"
-                  dataKey="spread"
-                  name="Spread"
-                  stroke="#3b82f6"
-                  strokeWidth={1.5}
+                  dataKey="upper3"
+                  name="+3σ"
+                  stroke="#d8b4fe"
+                  strokeWidth={1}
                   dot={false}
                   isAnimationActive={false}
+                  connectNulls={false}
                 />
+                <Line
+                  type="monotone"
+                  dataKey="lower3"
+                  name="-3σ"
+                  stroke="#d8b4fe"
+                  strokeWidth={1}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                {/* Bollinger Bands - 2σ */}
+                <Line
+                  type="monotone"
+                  dataKey="upper2"
+                  name="+2σ"
+                  stroke="#c084fc"
+                  strokeWidth={1}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="lower2"
+                  name="-2σ"
+                  stroke="#c084fc"
+                  strokeWidth={1}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                {/* Bollinger Bands - 1σ (innermost, darkest) */}
+                <Line
+                  type="monotone"
+                  dataKey="upper1"
+                  name="+1σ"
+                  stroke="#a855f7"
+                  strokeWidth={1}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="lower1"
+                  name="-1σ"
+                  stroke="#a855f7"
+                  strokeWidth={1}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                {/* MA line */}
                 <Line
                   type="monotone"
                   dataKey="ma"
@@ -592,6 +717,16 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
                   dot={false}
                   isAnimationActive={false}
                   connectNulls={false}
+                />
+                {/* Spread line (on top) */}
+                <Line
+                  type="monotone"
+                  dataKey="spread"
+                  name="Spread"
+                  stroke="#3b82f6"
+                  strokeWidth={1.5}
+                  dot={false}
+                  isAnimationActive={false}
                 />
               </LineChart>
             </ResponsiveContainer>

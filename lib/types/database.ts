@@ -140,6 +140,7 @@ export type Database = {
           quantity: number;
           entry_price: number;
           exit_price: number | null;
+          exit_type: string | null;
           holding_period_hours: number | null;
           price_pnl: number | null;
           funding_fee_realized: number | null;
@@ -156,6 +157,7 @@ export type Database = {
           quantity: number;
           entry_price: number;
           exit_price?: number | null;
+          exit_type?: string | null;
           holding_period_hours?: number | null;
           price_pnl?: number | null;
           funding_fee_realized?: number | null;
@@ -172,6 +174,7 @@ export type Database = {
           quantity?: number;
           entry_price?: number;
           exit_price?: number | null;
+          exit_type?: string | null;
           holding_period_hours?: number | null;
           price_pnl?: number | null;
           funding_fee_realized?: number | null;
