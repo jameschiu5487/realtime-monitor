@@ -217,6 +217,7 @@ function HedgePairSummaryRow({ pair }: { pair: HedgePair }) {
       </TableCell>
       <TableCell></TableCell>
       <TableCell></TableCell>
+      <TableCell></TableCell>
       <TableCell className="text-right font-mono">
         {formatHours(pair.avgHoldingPeriod)}
       </TableCell>
@@ -291,6 +292,9 @@ function PositionRow({
       </TableCell>
       <TableCell className="text-right font-mono">
         {formatCurrency(position.exit_price)}
+      </TableCell>
+      <TableCell className="text-xs">
+        {position.exit_type ?? "-"}
       </TableCell>
       <TableCell className="text-right font-mono">
         {formatHours(position.holding_period_hours)}
@@ -429,6 +433,7 @@ export function CombinedTradesTable({ combinedTrades, enableHedge }: CombinedTra
             <TableHead className="text-right">Qty</TableHead>
             <TableHead className="text-right">Entry</TableHead>
             <TableHead className="text-right">Exit</TableHead>
+            <TableHead>Exit Type</TableHead>
             <SortableHeader field="holding_period_hours" currentSort={sortConfig} onSort={handleSort} className="text-right">
               Duration
             </SortableHeader>
@@ -496,6 +501,9 @@ export function CombinedTradesTable({ combinedTrades, enableHedge }: CombinedTra
               </TableCell>
               <TableCell className="text-right font-mono">
                 {formatCurrency(position.exit_price)}
+              </TableCell>
+              <TableCell className="text-xs">
+                {position.exit_type ?? "-"}
               </TableCell>
               <TableCell className="text-right font-mono">
                 {formatHours(position.holding_period_hours)}

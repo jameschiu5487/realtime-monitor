@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import {
   ChartConfig,
@@ -133,61 +133,8 @@ export function OverviewPerformanceChart({
   runningRunIds,
   runToStrategyMap,
 }: OverviewPerformanceChartProps) {
-  const [equityData, setEquityData] =
-    useState<EquityCurve[]>(initialEquityData);
-  const hasFetchedRef = useRef(false);
-
-  // Fetch fresh last-24h data on mount
-  useEffect(() => {
-    if (hasFetchedRef.current) return;
-    hasFetchedRef.current = true;
-
-    const runIds = [
-      ...new Set([
-        ...initialEquityData.map((d) => d.run_id),
-        ...runningRunIds,
-      ]),
-    ];
-    if (runIds.length === 0) return;
-
-    const fetchFreshData = async () => {
-      const supabase = createClient();
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const PAGE_SIZE = 1000;
-      const allData: EquityCurve[] = [];
-      let offset = 0;
-      let hasMore = true;
-
-      while (hasMore) {
-        const { data, error } = await supabase
-          .from("equity_curve")
-          .select("*")
-          .in("run_id", runIds)
-          .gte("ts", since)
-          .order("ts", { ascending: true })
-          .range(offset, offset + PAGE_SIZE - 1);
-
-        if (error) {
-          console.error("[Overview] Error fetching equity_curve:", error);
-          break;
-        }
-
-        if (data && data.length > 0) {
-          allData.push(...(data as EquityCurve[]));
-          offset += PAGE_SIZE;
-          hasMore = data.length === PAGE_SIZE;
-        } else {
-          hasMore = false;
-        }
-      }
-
-      if (allData.length > 0) {
-        setEquityData(allData);
-      }
-    };
-
-    fetchFreshData();
-  }, [initialEquityData, runningRunIds]);
+  // Server already sends 24h data, no need to filter
+  const [equityData, setEquityData] = useState<EquityCurve[]>(initialEquityData);
 
   // Subscribe to realtime updates for running runs
   useEffect(() => {

@@ -1,7 +1,9 @@
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OverviewPerformanceChart } from "@/components/overview/overview-performance-chart";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PerformanceStats } from "@/components/charts/performance-stats";
 import type { Strategy, StrategyRun, EquityCurve, CombinedTrade } from "@/lib/types/database";
@@ -9,46 +11,7 @@ import type { Strategy, StrategyRun, EquityCurve, CombinedTrade } from "@/lib/ty
 // Cache for 60 seconds, then revalidate in background
 export const revalidate = 60;
 
-// Fetch last 24h of equity data with pagination
-async function fetchRecentEquityData(
-  supabase: SupabaseClient,
-  runIds: string[]
-): Promise<EquityCurve[]> {
-  if (runIds.length === 0) return [];
-
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const PAGE_SIZE = 1000;
-  const allData: EquityCurve[] = [];
-  let offset = 0;
-  let hasMore = true;
-
-  while (hasMore) {
-    const { data, error } = await supabase
-      .from("equity_curve")
-      .select("*")
-      .in("run_id", runIds)
-      .gte("ts", since)
-      .order("ts", { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1);
-
-    if (error) {
-      console.error("Error fetching equity_curve:", error);
-      break;
-    }
-
-    if (data && data.length > 0) {
-      allData.push(...(data as EquityCurve[]));
-      offset += PAGE_SIZE;
-      hasMore = data.length === PAGE_SIZE;
-    } else {
-      hasMore = false;
-    }
-  }
-
-  return allData;
-}
-
-// Fetch equity data for specific runs with optional time filter (for stats calculation)
+// Fetch equity data for specific runs with optional time filter
 async function fetchEquityDataWithLimit(
   supabase: SupabaseClient,
   runIds: string[],
@@ -134,47 +97,70 @@ async function fetchCombinedTradesWithLimit(
   return allData;
 }
 
-export default async function DashboardPage() {
+// Skeleton for summary cards
+function SummaryCardSkeleton() {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Skeleton className="h-4 w-24" />
+      </CardHeader>
+      <CardContent>
+        <Skeleton className="h-8 w-32 mb-2" />
+        <Skeleton className="h-3 w-20" />
+      </CardContent>
+    </Card>
+  );
+}
+
+// Skeleton for chart
+function ChartSkeleton() {
+  return <Skeleton className="h-[300px] w-full" />;
+}
+
+// Skeleton for performance stats
+function PerformanceStatsSkeleton() {
+  return (
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {[...Array(8)].map((_, i) => (
+        <Card key={i}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <Skeleton className="h-4 w-20" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-7 w-24" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// Async component for summary cards that need data
+async function SummaryCards({
+  runningRunIds,
+  allRuns,
+  allStrategies,
+}: {
+  runningRunIds: string[];
+  allRuns: StrategyRun[];
+  allStrategies: Strategy[];
+}) {
   const supabase = await createClient();
 
-  // Fetch all strategies
-  const { data: strategiesData, error: strategiesError } = await supabase
-    .from("strategies")
-    .select("*");
+  // Fetch only latest equity per run (limit 1 per run, ordered by ts desc)
+  // This is much faster than fetching all equity data
+  const equityPromises = runningRunIds.map(async (runId) => {
+    const { data } = await supabase
+      .from("equity_curve")
+      .select("run_id, total_equity, ts")
+      .eq("run_id", runId)
+      .order("ts", { ascending: false })
+      .limit(1);
+    return data?.[0] as EquityCurve | undefined;
+  });
 
-  if (strategiesError) {
-    console.error("Error fetching strategies:", strategiesError);
-  }
+  const latestEquities = (await Promise.all(equityPromises)).filter(Boolean) as EquityCurve[];
 
-  const allStrategies = (strategiesData ?? []) as Strategy[];
-
-  // Fetch all runs
-  const { data: runsData, error: runsError } = await supabase
-    .from("strategy_runs")
-    .select("*");
-
-  if (runsError) {
-    console.error("Error fetching strategy_runs:", runsError);
-  }
-
-  const allRuns = (runsData ?? []) as StrategyRun[];
-  const runningRunIds = allRuns
-    .filter((r) => r.status === "running")
-    .map((r) => r.run_id);
-
-  // Time filter for stats (7 days)
-  const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
-  // Fetch all data in parallel:
-  // - Chart: last 24h equity for running runs only
-  // - Stats: last 7 days equity and trades for running runs
-  const [equityData, runningEquityData, runningCombinedTrades] = await Promise.all([
-    fetchRecentEquityData(supabase, runningRunIds),
-    fetchEquityDataWithLimit(supabase, runningRunIds, since7d),
-    fetchCombinedTradesWithLimit(supabase, runningRunIds, since7d),
-  ]);
-
-  // Calculate summary stats
   const runToStrategyMap: Record<string, string> = {};
   for (const run of allRuns) {
     runToStrategyMap[run.run_id] = run.strategy_id;
@@ -184,10 +170,9 @@ export default async function DashboardPage() {
     runningRunIds.map((rid) => runToStrategyMap[rid]).filter(Boolean)
   ).size;
 
-  // Get latest total equity: per strategy, use the latest run's equity, then sum across strategies
-  // Within a strategy, runs are sequential (not concurrent), so take the latest value
+  // Calculate total equity by strategy
   const lastEquityPerStrategy = new Map<string, { equity: number; ts: number }>();
-  for (const point of equityData) {
+  for (const point of latestEquities) {
     const strategyId = runToStrategyMap[point.run_id];
     if (!strategyId) continue;
     const ts = new Date(point.ts).getTime();
@@ -203,7 +188,155 @@ export default async function DashboardPage() {
 
   const strategiesWithDataCount = lastEquityPerStrategy.size;
 
-  // Build running runs info for Recent Activity
+  return (
+    <>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Total Assets</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">
+            ${totalEquity.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Across {strategiesWithDataCount} strategies
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Unrealized P&L</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">$0.00</div>
+          <p className="text-xs text-muted-foreground">
+            0 positions
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Active Strategies</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">{activeStrategiesCount}</div>
+          <p className="text-xs text-muted-foreground">
+            {allStrategies.length} total strategies
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Today&apos;s Orders</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">0</div>
+          <p className="text-xs text-muted-foreground">
+            0 filled
+          </p>
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+// Async component for performance chart
+async function PerformanceChartSection({
+  runningRunIds,
+  runToStrategyMap,
+}: {
+  runningRunIds: string[];
+  runToStrategyMap: Record<string, string>;
+}) {
+  const supabase = await createClient();
+  // Only fetch 24h for chart - much faster
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const equityData = await fetchEquityDataWithLimit(supabase, runningRunIds, since24h);
+
+  return (
+    <OverviewPerformanceChart
+      initialEquityData={equityData}
+      runningRunIds={runningRunIds}
+      runToStrategyMap={runToStrategyMap}
+    />
+  );
+}
+
+// Async component for performance stats
+async function PerformanceStatsSection({
+  runningRuns,
+}: {
+  runningRuns: { runId: string; strategyName: string; strategyId: string; mode: string; startTime: string }[];
+}) {
+  if (runningRuns.length === 0) return null;
+
+  const supabase = await createClient();
+  const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const runIds = runningRuns.map((r) => r.runId);
+
+  const [equityData, combinedTrades] = await Promise.all([
+    fetchEquityDataWithLimit(supabase, runIds, since7d),
+    fetchCombinedTradesWithLimit(supabase, runIds, since7d),
+  ]);
+
+  // Group by run_id
+  const equityByRunId: Record<string, EquityCurve[]> = {};
+  const tradesByRunId: Record<string, CombinedTrade[]> = {};
+  for (const point of equityData) {
+    if (!equityByRunId[point.run_id]) equityByRunId[point.run_id] = [];
+    equityByRunId[point.run_id].push(point);
+  }
+  for (const trade of combinedTrades) {
+    if (!tradesByRunId[trade.run_id]) tradesByRunId[trade.run_id] = [];
+    tradesByRunId[trade.run_id].push(trade);
+  }
+
+  return (
+    <div className="space-y-4">
+      {runningRuns.map((run) => (
+        <div key={run.runId} className="space-y-2">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            <h3 className="text-lg font-semibold">{run.strategyName}</h3>
+            <span className="text-sm text-muted-foreground">({run.mode})</span>
+          </div>
+          <PerformanceStats
+            filteredEquityCurve={equityByRunId[run.runId] ?? []}
+            filteredCombinedTrades={tradesByRunId[run.runId] ?? []}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default async function DashboardPage() {
+  const supabase = await createClient();
+
+  // Fast queries - strategies and runs are small tables
+  const [{ data: strategiesData }, { data: runsData }] = await Promise.all([
+    supabase.from("strategies").select("*"),
+    supabase.from("strategy_runs").select("*"),
+  ]);
+
+  const allStrategies = (strategiesData ?? []) as Strategy[];
+  const allRuns = (runsData ?? []) as StrategyRun[];
+
+  const runningRunIds = allRuns
+    .filter((r) => r.status === "running")
+    .map((r) => r.run_id);
+
+  const runToStrategyMap: Record<string, string> = {};
+  for (const run of allRuns) {
+    runToStrategyMap[run.run_id] = run.strategy_id;
+  }
+
   const strategyNameMap = new Map<string, string>();
   for (const s of allStrategies) {
     strategyNameMap.set(s.strategy_id, s.name);
@@ -220,18 +353,6 @@ export default async function DashboardPage() {
     }))
     .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 
-  // Group equity and trades by run_id for per-run stats
-  const equityByRunId: Record<string, EquityCurve[]> = {};
-  const tradesByRunId: Record<string, CombinedTrade[]> = {};
-  for (const point of runningEquityData) {
-    if (!equityByRunId[point.run_id]) equityByRunId[point.run_id] = [];
-    equityByRunId[point.run_id].push(point);
-  }
-  for (const trade of runningCombinedTrades) {
-    if (!tradesByRunId[trade.run_id]) tradesByRunId[trade.run_id] = [];
-    tradesByRunId[trade.run_id].push(trade);
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -241,75 +362,34 @@ export default async function DashboardPage() {
         </p>
       </div>
 
+      {/* Summary Cards with Suspense */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Assets</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              ${totalEquity.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Across {strategiesWithDataCount} strategies
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Unrealized P&L</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">$0.00</div>
-            <p className="text-xs text-muted-foreground">
-              0 positions
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Strategies</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{activeStrategiesCount}</div>
-            <p className="text-xs text-muted-foreground">
-              {allStrategies.length} total strategies
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Today&apos;s Orders</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">0</div>
-            <p className="text-xs text-muted-foreground">
-              0 filled
-            </p>
-          </CardContent>
-        </Card>
+        <Suspense fallback={<><SummaryCardSkeleton /><SummaryCardSkeleton /><SummaryCardSkeleton /><SummaryCardSkeleton /></>}>
+          <SummaryCards
+            runningRunIds={runningRunIds}
+            allRuns={allRuns}
+            allStrategies={allStrategies}
+          />
+        </Suspense>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+        {/* Performance Chart with Suspense */}
         <Card className="col-span-4">
           <CardHeader>
             <CardTitle>Performance Curve</CardTitle>
           </CardHeader>
           <CardContent className="pl-2">
-            <OverviewPerformanceChart
-              initialEquityData={equityData}
-              runningRunIds={runningRunIds}
-              runToStrategyMap={runToStrategyMap}
-            />
+            <Suspense fallback={<ChartSkeleton />}>
+              <PerformanceChartSection
+                runningRunIds={runningRunIds}
+                runToStrategyMap={runToStrategyMap}
+              />
+            </Suspense>
           </CardContent>
         </Card>
 
+        {/* Running Strategies - no Suspense needed, uses already-fetched data */}
         <Card className="col-span-3">
           <CardHeader>
             <CardTitle>Running Strategies</CardTitle>
@@ -354,23 +434,11 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      {/* Performance Stats for Each Running Run */}
+      {/* Performance Stats with Suspense */}
       {runningRuns.length > 0 && (
-        <div className="space-y-4">
-          {runningRuns.map((run) => (
-            <div key={run.runId} className="space-y-2">
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <h3 className="text-lg font-semibold">{run.strategyName}</h3>
-                <span className="text-sm text-muted-foreground">({run.mode})</span>
-              </div>
-              <PerformanceStats
-                filteredEquityCurve={equityByRunId[run.runId] ?? []}
-                filteredCombinedTrades={tradesByRunId[run.runId] ?? []}
-              />
-            </div>
-          ))}
-        </div>
+        <Suspense fallback={<PerformanceStatsSkeleton />}>
+          <PerformanceStatsSection runningRuns={runningRuns} />
+        </Suspense>
       )}
     </div>
   );
