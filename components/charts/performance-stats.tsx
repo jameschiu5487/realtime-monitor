@@ -133,13 +133,19 @@ function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrad
   const endTime = new Date(lastPoint.ts).getTime();
   const periodDays = (endTime - startTime) / (1000 * 60 * 60 * 24);
 
-  // Calculate log returns: r_t = ln(E_t / E_(t-1))
-  const logReturns: number[] = [];
+  // Annualized Return (linear): total_return * (365 / days)
+  let annualizedReturn = 0;
+  if (periodDays > 0) {
+    annualizedReturn = totalReturn * (365 / periodDays);
+  }
+
+  // Calculate simple returns: r_t = (E_t - E_(t-1)) / E_(t-1)
+  const simpleReturns: number[] = [];
   for (let i = 1; i < sorted.length; i++) {
     const prevEquity = sorted[i - 1].total_equity;
     const currEquity = sorted[i].total_equity;
-    if (prevEquity > 0 && currEquity > 0) {
-      logReturns.push(Math.log(currEquity / prevEquity));
+    if (prevEquity > 0) {
+      simpleReturns.push((currEquity - prevEquity) / prevEquity);
     }
   }
 
@@ -153,32 +159,33 @@ function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrad
   // Risk-free rate (annual)
   const rf = 0.02;
 
-  // Calculate stats from log returns
-  let annualizedReturn = 0;
+  // Calculate volatility, Sharpe, and Calmar from simple returns
   let volatility = 0;
   let sharpeRatio = 0;
+  let calmarRatio = 0;
 
-  if (logReturns.length > 1) {
-    const meanReturn = logReturns.reduce((a, b) => a + b, 0) / logReturns.length;
-    const variance = logReturns.reduce((sum, r) => sum + Math.pow(r - meanReturn, 2), 0) / (logReturns.length - 1);
+  if (simpleReturns.length > 1) {
+    const meanReturn = simpleReturns.reduce((a, b) => a + b, 0) / simpleReturns.length;
+    const variance = simpleReturns.reduce((sum, r) => sum + Math.pow(r - meanReturn, 2), 0) / (simpleReturns.length - 1);
     const std = Math.sqrt(variance);
 
-    // Annualized Return: mean(r) * N * 100 (as percentage)
-    annualizedReturn = meanReturn * N * 100;
+    // Annualized return for Sharpe/Calmar: mean(r) * N (consistent scaling)
+    const annReturnForRatios = meanReturn * N * 100; // as percentage
 
     // Annualized Volatility: std(r) * sqrt(N) * 100 (as percentage)
     volatility = std * Math.sqrt(N) * 100;
 
-    // Sharpe Ratio: (mean(r) * N - rf) / (std(r) * sqrt(N))
-    // = (annualized_return - rf) / volatility
-    if (volatility > 0) {
-      sharpeRatio = (annualizedReturn / 100 - rf) / (volatility / 100);
+    // Sharpe Ratio: (mean(r) - rf/N) / std(r) * sqrt(N)
+    if (std > 0) {
+      sharpeRatio = (meanReturn - rf / N) / std * Math.sqrt(N);
+    }
+
+    // Calmar Ratio: annualized_return / |MDD|
+    // Using same annualized return as Sharpe for consistency
+    if (maxDrawdown > 0) {
+      calmarRatio = annReturnForRatios / maxDrawdown;
     }
   }
-
-  // Calmar Ratio: annualized_return / |MDD|
-  // Both in percentage, so they cancel out
-  const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
 
   // Total Turnover: entry + exit notional values
   const totalTurnover = combinedTrades.reduce((sum, trade) => {
