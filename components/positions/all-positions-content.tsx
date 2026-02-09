@@ -401,10 +401,10 @@ export function AllPositionsContent({
                           {formatNumber(Math.abs(pos.position), 4)}
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          ${formatNumber(pos.avg_price, 2)}
+                          ${formatNumber(pos.avg_price, 4)}
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          ${formatNumber(pos.mark_price, 2)}
+                          ${formatNumber(pos.mark_price, 4)}
                         </TableCell>
                         <TableCell className="text-right font-mono">
                           ${formatCurrency(Math.abs(pos.notional_value))}
@@ -416,7 +416,7 @@ export function AllPositionsContent({
                           {pos.leverage}x
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          ${formatNumber(pos.liq_price, 2)}
+                          ${formatNumber(pos.liq_price, 4)}
                         </TableCell>
                       </TableRow>
                     ))
