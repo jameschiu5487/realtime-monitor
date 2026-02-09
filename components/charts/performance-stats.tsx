@@ -128,61 +128,57 @@ function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrad
     ? (lastPoint.total_position_value / lastPoint.total_equity) * 100
     : 0;
 
-  // Calculate daily returns for volatility and Sharpe
-  const dailyReturns: number[] = [];
-  for (let i = 1; i < sorted.length; i++) {
-    const prevEquity = sorted[i - 1].total_equity;
-    const currEquity = sorted[i].total_equity;
-    if (prevEquity > 0) {
-      dailyReturns.push((currEquity - prevEquity) / prevEquity);
-    }
-  }
-
   // Calculate period in days
   const startTime = new Date(firstPoint.ts).getTime();
   const endTime = new Date(lastPoint.ts).getTime();
   const periodDays = (endTime - startTime) / (1000 * 60 * 60 * 24);
 
-  // Annualized Return - only calculate for sufficient data periods
-  // Annualizing short-term returns is statistically meaningless
+  // Calculate log returns: r_t = ln(E_t / E_(t-1))
+  const logReturns: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const prevEquity = sorted[i - 1].total_equity;
+    const currEquity = sorted[i].total_equity;
+    if (prevEquity > 0 && currEquity > 0) {
+      logReturns.push(Math.log(currEquity / prevEquity));
+    }
+  }
+
+  // Calculate N (periods per year) based on actual data frequency
+  const totalHours = periodDays * 24;
+  const numIntervals = Math.max(1, sorted.length - 1);
+  const avgHoursBetweenPoints = totalHours / numIntervals;
+  const hoursPerYear = 8760; // 365 * 24
+  const N = hoursPerYear / Math.max(0.1, avgHoursBetweenPoints);
+
+  // Risk-free rate (annual)
+  const rf = 0.02;
+
+  // Calculate stats from log returns
   let annualizedReturn = 0;
-  if (periodDays >= 30) {
-    // Use compound formula for 30+ days of data
-    annualizedReturn = (Math.pow(1 + totalReturn / 100, 365 / periodDays) - 1) * 100;
-    // Cap to reasonable bounds
-    annualizedReturn = Math.max(-500, Math.min(500, annualizedReturn));
-  } else if (periodDays >= 7) {
-    // For 7-30 days, use compound formula with tighter cap
-    annualizedReturn = (Math.pow(1 + totalReturn / 100, 365 / periodDays) - 1) * 100;
-    // Tighter cap for shorter periods
-    annualizedReturn = Math.max(-200, Math.min(200, annualizedReturn));
-  }
-  // For periods < 7 days, annualizedReturn stays 0 (not meaningful to annualize)
-
-  // Volatility (annualized) - standard deviation of returns * sqrt(periods per year)
   let volatility = 0;
-  if (dailyReturns.length > 1 && periodDays > 0) {
-    const meanReturn = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
-    const variance = dailyReturns.reduce((sum, r) => sum + Math.pow(r - meanReturn, 2), 0) / (dailyReturns.length - 1);
-    const dailyStd = Math.sqrt(variance);
-    // Calculate periods per year based on actual data frequency
-    const avgHoursBetweenPoints = (periodDays * 24) / Math.max(1, sorted.length - 1);
-    const hoursPerYear = 8760;
-    const periodsPerYear = hoursPerYear / Math.max(0.1, avgHoursBetweenPoints);
-    volatility = dailyStd * Math.sqrt(periodsPerYear) * 100;
-    // Cap volatility to reasonable bounds (0% to 200%)
-    volatility = Math.min(200, volatility);
+  let sharpeRatio = 0;
+
+  if (logReturns.length > 1) {
+    const meanReturn = logReturns.reduce((a, b) => a + b, 0) / logReturns.length;
+    const variance = logReturns.reduce((sum, r) => sum + Math.pow(r - meanReturn, 2), 0) / (logReturns.length - 1);
+    const std = Math.sqrt(variance);
+
+    // Annualized Return: mean(r) * N * 100 (as percentage)
+    annualizedReturn = meanReturn * N * 100;
+
+    // Annualized Volatility: std(r) * sqrt(N) * 100 (as percentage)
+    volatility = std * Math.sqrt(N) * 100;
+
+    // Sharpe Ratio: (mean(r) * N - rf) / (std(r) * sqrt(N))
+    // = (annualized_return - rf) / volatility
+    if (volatility > 0) {
+      sharpeRatio = (annualizedReturn / 100 - rf) / (volatility / 100);
+    }
   }
 
-  // Sharpe Ratio (assuming 0% risk-free rate)
-  // Cap to reasonable bounds (-5 to 5)
-  let sharpeRatio = volatility > 0 ? annualizedReturn / volatility : 0;
-  sharpeRatio = Math.max(-5, Math.min(5, sharpeRatio));
-
-  // Calmar Ratio (annualized return / max drawdown)
-  // Cap to reasonable bounds (-20 to 20)
-  let calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
-  calmarRatio = Math.max(-20, Math.min(20, calmarRatio));
+  // Calmar Ratio: annualized_return / |MDD|
+  // Both in percentage, so they cancel out
+  const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
 
   // Total Turnover: entry + exit notional values
   const totalTurnover = combinedTrades.reduce((sum, trade) => {
