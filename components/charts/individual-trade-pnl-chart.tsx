@@ -40,6 +40,8 @@ const chartConfig = {
 
 export function IndividualTradePnLChart({ data }: IndividualTradePnLChartProps) {
   const totalPnL = data.reduce((acc, curr) => acc + curr.pnl, 0);
+  const winningTrades = data.filter((d) => d.pnl > 0).length;
+  const winRate = data.length > 0 ? (winningTrades / data.length) * 100 : 0;
 
   return (
     <Card>
@@ -49,6 +51,21 @@ export function IndividualTradePnLChart({ data }: IndividualTradePnLChartProps) 
           <CardDescription>Profit/Loss per trade</CardDescription>
         </div>
         <div className="flex">
+          <div className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">
+            <span className="text-xs text-muted-foreground">Win Rate</span>
+            <span
+              className={`text-lg font-bold leading-none sm:text-3xl ${
+                winRate >= 50
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-red-600 dark:text-red-400"
+              }`}
+            >
+              {winRate.toFixed(1)}%
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {winningTrades}/{data.length} trades
+            </span>
+          </div>
           <div className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">
             <span className="text-xs text-muted-foreground">Total PnL</span>
             <span
