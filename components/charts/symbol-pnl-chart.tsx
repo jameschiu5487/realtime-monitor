@@ -51,19 +51,57 @@ export function SymbolPnLChart({ combinedTrades, initialCapital }: SymbolPnLChar
   const maxSymbols = showMore ? 50 : 10;
 
   // Calculate cumulative PnL over time for each symbol
+  // In hedge mode, trades with same symbol + timestamp are grouped as one trade
   const { chartData, symbolStats, allSymbols } = useMemo(() => {
     if (combinedTrades.length === 0) {
       return { chartData: [], symbolStats: [], allSymbols: [] };
     }
 
-    // Sort trades by time
-    const sortedTrades = [...combinedTrades]
-      .filter((t) => t.total_pnl !== null)
-      .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+    // Filter and sort trades by time
+    const validTrades = combinedTrades.filter((t) => t.total_pnl !== null);
 
-    if (sortedTrades.length === 0) {
+    if (validTrades.length === 0) {
       return { chartData: [], symbolStats: [], allSymbols: [] };
     }
+
+    // Group trades by symbol + timestamp (hedge pairs)
+    // Use 1-minute window to group trades that are part of the same hedge
+    // Key: "symbol|timestamp_rounded_to_minute"
+    const hedgeGroups = new Map<string, { symbol: string; ts: string; totalPnl: number }>();
+
+    for (const trade of validTrades) {
+      // Round timestamp to nearest minute for grouping
+      const tradeTime = new Date(trade.ts);
+      const roundedTime = new Date(
+        tradeTime.getFullYear(),
+        tradeTime.getMonth(),
+        tradeTime.getDate(),
+        tradeTime.getHours(),
+        tradeTime.getMinutes(),
+        0,
+        0
+      ).toISOString();
+
+      const key = `${trade.symbol}|${roundedTime}`;
+      const existing = hedgeGroups.get(key);
+
+      if (existing) {
+        // Add PnL to existing hedge pair
+        existing.totalPnl += trade.total_pnl ?? 0;
+      } else {
+        // Create new hedge pair entry
+        hedgeGroups.set(key, {
+          symbol: trade.symbol,
+          ts: roundedTime,
+          totalPnl: trade.total_pnl ?? 0,
+        });
+      }
+    }
+
+    // Convert to sorted array
+    const sortedPairs = Array.from(hedgeGroups.values()).sort(
+      (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
+    );
 
     // Track cumulative PnL for each symbol
     const symbolCumulativePnL = new Map<string, number>();
@@ -72,20 +110,20 @@ export function SymbolPnLChart({ combinedTrades, initialCapital }: SymbolPnLChar
     // Build time series data
     const timeSeriesMap = new Map<string, Record<string, number>>();
 
-    for (const trade of sortedTrades) {
-      const symbol = trade.symbol;
-      const pnl = trade.total_pnl ?? 0;
+    for (const pair of sortedPairs) {
+      const symbol = pair.symbol;
+      const pnl = pair.totalPnl;
 
       // Update cumulative PnL
       const currentPnL = symbolCumulativePnL.get(symbol) ?? 0;
       const newPnL = currentPnL + pnl;
       symbolCumulativePnL.set(symbol, newPnL);
 
-      // Update trade count
+      // Update trade count (count hedge pair as 1 trade)
       symbolTradeCount.set(symbol, (symbolTradeCount.get(symbol) ?? 0) + 1);
 
       // Create time point with all current cumulative values
-      const timeKey = trade.ts;
+      const timeKey = pair.ts;
       const dataPoint: Record<string, number | string> = { time: timeKey };
 
       // Add all symbols' current cumulative PnL as percentage
