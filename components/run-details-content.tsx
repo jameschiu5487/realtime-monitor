@@ -2,7 +2,10 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 import { TimeRangeSelector, TimeRange } from "@/components/charts/time-range-selector";
+import { createClient } from "@/lib/supabase/client";
 import { EquityCurveWithBrush } from "@/components/charts/equity-curve-with-brush";
 import { ExchangeEquityChart } from "@/components/charts/exchange-equity-chart";
 import { ExposureChart } from "@/components/charts/exposure-chart";
@@ -40,6 +43,94 @@ interface RunDetailsContentProps {
   initialPositions: Position[];
   initialCapital: number;
   enableHedge: boolean;
+}
+
+// Parallel fetch function - fetches all pages concurrently
+async function fetchAllDataParallel<T>(
+  table: string,
+  runId: string,
+  before?: string // fetch data before this timestamp
+): Promise<T[]> {
+  const supabase = createClient();
+  const PAGE_SIZE = 1000;
+
+  // First, get the count to know how many pages we need
+  let countQuery = supabase
+    .from(table)
+    .select("*", { count: "exact", head: true })
+    .eq("run_id", runId);
+
+  if (before) {
+    countQuery = countQuery.lt("ts", before);
+  }
+
+  const { count } = await countQuery;
+  if (!count || count === 0) return [];
+
+  // Calculate number of pages needed
+  const numPages = Math.ceil(count / PAGE_SIZE);
+
+  // Fetch all pages in parallel
+  const pagePromises = Array.from({ length: numPages }, (_, i) => {
+    let query = supabase
+      .from(table)
+      .select("*")
+      .eq("run_id", runId)
+      .order("ts", { ascending: true })
+      .range(i * PAGE_SIZE, (i + 1) * PAGE_SIZE - 1);
+
+    if (before) {
+      query = query.lt("ts", before);
+    }
+
+    return query;
+  });
+
+  const results = await Promise.all(pagePromises);
+  const allData: T[] = [];
+
+  for (const result of results) {
+    if (result.data) {
+      allData.push(...(result.data as T[]));
+    }
+  }
+
+  return allData;
+}
+
+// Downsample time series data for display (if > 3 days, keep every 5 minutes)
+function downsampleForDisplay<T extends { ts: string }>(data: T[]): T[] {
+  if (data.length < 2) return data;
+
+  const sorted = [...data].sort(
+    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
+  );
+
+  const firstTs = new Date(sorted[0].ts).getTime();
+  const lastTs = new Date(sorted[sorted.length - 1].ts).getTime();
+  const rangeDays = (lastTs - firstTs) / (1000 * 60 * 60 * 24);
+
+  if (rangeDays <= 3) return sorted;
+
+  // Downsample to every 5 minutes
+  const intervalMs = 5 * 60 * 1000;
+  const result: T[] = [];
+  let lastKeptTs = 0;
+
+  for (const point of sorted) {
+    const ts = new Date(point.ts).getTime();
+    if (ts - lastKeptTs >= intervalMs || result.length === 0) {
+      result.push(point);
+      lastKeptTs = ts;
+    }
+  }
+
+  // Always include the last point
+  if (result[result.length - 1] !== sorted[sorted.length - 1]) {
+    result.push(sorted[sorted.length - 1]);
+  }
+
+  return result;
 }
 
 // Transform equity curve to chart data points
@@ -129,11 +220,74 @@ export function RunDetailsContent({
   initialCapital,
   enableHedge,
 }: RunDetailsContentProps) {
+  // State for loading all historical data
+  const [isLoadingAll, setIsLoadingAll] = useState(false);
+  const [allDataLoaded, setAllDataLoaded] = useState(false);
+  const [historicalEquity, setHistoricalEquity] = useState<EquityCurve[]>([]);
+  const [historicalPnl, setHistoricalPnl] = useState<PnlSeries[]>([]);
+
   // Use realtime hooks for live data updates
-  const { data: equityCurve, isFreshDataLoaded: isEquityLoaded } = useRealtimeEquityCurve(runId, initialEquityCurve);
-  const { data: pnlSeries, isFreshDataLoaded: isPnlLoaded } = useRealtimePnlSeries(runId, initialPnlSeries);
+  const { data: recentEquityCurve, isFreshDataLoaded: isEquityLoaded } = useRealtimeEquityCurve(runId, initialEquityCurve);
+  const { data: recentPnlSeries, isFreshDataLoaded: isPnlLoaded } = useRealtimePnlSeries(runId, initialPnlSeries);
   const { data: combinedTrades, isFreshDataLoaded: isTradesLoaded } = useRealtimeCombinedTrades(runId, initialCombinedTrades);
   const { data: positions, lastInsertTime: positionsLastInsertTime } = useRealtimePositions(runId, initialPositions);
+
+  // Merge historical + recent data, then downsample for display
+  const equityCurve = useMemo(() => {
+    if (historicalEquity.length === 0) return recentEquityCurve;
+    const merged = [...historicalEquity, ...recentEquityCurve];
+    // Sort and dedupe by timestamp
+    const sorted = merged.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+    const deduped = sorted.filter((item, index, arr) =>
+      index === 0 || item.ts !== arr[index - 1].ts
+    );
+    return downsampleForDisplay(deduped);
+  }, [historicalEquity, recentEquityCurve]);
+
+  const pnlSeries = useMemo(() => {
+    if (historicalPnl.length === 0) return recentPnlSeries;
+    const merged = [...historicalPnl, ...recentPnlSeries];
+    const sorted = merged.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+    const deduped = sorted.filter((item, index, arr) =>
+      index === 0 || item.ts !== arr[index - 1].ts
+    );
+    return downsampleForDisplay(deduped);
+  }, [historicalPnl, recentPnlSeries]);
+
+  // Handler for loading all historical data
+  const handleLoadAllData = useCallback(async () => {
+    if (allDataLoaded || isLoadingAll) return;
+
+    setIsLoadingAll(true);
+
+    try {
+      // Find the earliest timestamp in current data
+      const earliestEquityTs = recentEquityCurve.length > 0
+        ? recentEquityCurve.reduce((min, p) => p.ts < min ? p.ts : min, recentEquityCurve[0].ts)
+        : undefined;
+      const earliestPnlTs = recentPnlSeries.length > 0
+        ? recentPnlSeries.reduce((min, p) => p.ts < min ? p.ts : min, recentPnlSeries[0].ts)
+        : undefined;
+
+      // Fetch historical data (before current data) in parallel
+      const [histEquity, histPnl] = await Promise.all([
+        earliestEquityTs
+          ? fetchAllDataParallel<EquityCurve>("equity_curve", runId, earliestEquityTs)
+          : Promise.resolve([]),
+        earliestPnlTs
+          ? fetchAllDataParallel<PnlSeries>("pnl_series", runId, earliestPnlTs)
+          : Promise.resolve([]),
+      ]);
+
+      setHistoricalEquity(histEquity);
+      setHistoricalPnl(histPnl);
+      setAllDataLoaded(true);
+    } catch (error) {
+      console.error("Error loading all data:", error);
+    } finally {
+      setIsLoadingAll(false);
+    }
+  }, [runId, recentEquityCurve, recentPnlSeries, allDataLoaded, isLoadingAll]);
 
   // Check if all critical data is loaded
   const isFreshDataLoaded = isEquityLoaded && isPnlLoaded && isTradesLoaded;
@@ -379,6 +533,9 @@ export function RunDetailsContent({
           dataEndTime={dataEndTime}
           onRangeChange={handleTimeRangeChange}
           currentRange={timeRange}
+          onLoadAll={handleLoadAllData}
+          isLoadingAll={isLoadingAll}
+          allDataLoaded={allDataLoaded}
         />
 
         {/* Row 1: Total Equity with drag-to-zoom (left) + Exchange Equity (right) */}

@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface TimeRange {
@@ -15,6 +15,9 @@ interface TimeRangeSelectorProps {
   dataEndTime: Date;
   onRangeChange: (range: TimeRange) => void;
   currentRange?: TimeRange;
+  onLoadAll?: () => void;
+  isLoadingAll?: boolean;
+  allDataLoaded?: boolean;
 }
 
 const presetRanges = [
@@ -51,10 +54,10 @@ export function TimeRangeSelector({
   dataEndTime,
   onRangeChange,
   currentRange,
+  onLoadAll,
+  isLoadingAll = false,
+  allDataLoaded = false,
 }: TimeRangeSelectorProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const isAllRangeLoaded = searchParams.get("range") === "all";
   const displayRange = currentRange || { start: dataStartTime, end: dataEndTime };
 
   // Calculate which preset is currently active (if any)
@@ -93,12 +96,11 @@ export function TimeRangeSelector({
   };
 
   const handleShowAll = () => {
-    // If all data is not loaded yet, navigate to load all data
-    if (!isAllRangeLoaded) {
-      router.push("?range=all");
-      return;
+    // If all data is not loaded yet and we have a callback, trigger it
+    if (!allDataLoaded && onLoadAll) {
+      onLoadAll();
     }
-    // If all data is loaded, just filter client-side
+    // Always update the range to show all
     onRangeChange({ start: dataStartTime, end: dataEndTime });
   };
 
@@ -132,8 +134,16 @@ export function TimeRangeSelector({
           size="sm"
           className="h-7 px-2 text-xs sm:h-8 sm:px-3"
           onClick={handleShowAll}
+          disabled={isLoadingAll}
         >
-          All
+          {isLoadingAll ? (
+            <>
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              Loading...
+            </>
+          ) : (
+            "All"
+          )}
         </Button>
       </div>
 
