@@ -54,6 +54,38 @@ async function fetchAllData<T>(
   return allData;
 }
 
+// Downsample time series data: if range > 3 days, keep only every 5 minutes
+function downsampleTimeSeries<T extends { ts: string }>(data: T[]): T[] {
+  if (data.length < 2) return data;
+
+  const firstTs = new Date(data[0].ts).getTime();
+  const lastTs = new Date(data[data.length - 1].ts).getTime();
+  const rangeDays = (lastTs - firstTs) / (1000 * 60 * 60 * 24);
+
+  // If range <= 3 days, return all data
+  if (rangeDays <= 3) return data;
+
+  // Downsample to every 5 minutes
+  const intervalMs = 5 * 60 * 1000; // 5 minutes in milliseconds
+  const result: T[] = [];
+  let lastKeptTs = 0;
+
+  for (const point of data) {
+    const ts = new Date(point.ts).getTime();
+    if (ts - lastKeptTs >= intervalMs || result.length === 0) {
+      result.push(point);
+      lastKeptTs = ts;
+    }
+  }
+
+  // Always include the last point
+  if (result[result.length - 1] !== data[data.length - 1]) {
+    result.push(data[data.length - 1]);
+  }
+
+  return result;
+}
+
 interface RunDetailsPageProps {
   params: Promise<{
     strategyId: string;
@@ -84,7 +116,7 @@ export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
   }
 
   // Fetch all data in parallel with pagination to overcome 1000 row limit
-  const [equityCurve, pnlSeries, combinedTrades, positionsResult] = await Promise.all([
+  const [equityCurveRaw, pnlSeriesRaw, combinedTrades, positionsResult] = await Promise.all([
     fetchAllData<EquityCurve>(supabase, "equity_curve", runId),
     fetchAllData<PnlSeries>(supabase, "pnl_series", runId),
     fetchAllData<CombinedTrade>(supabase, "combined_trades", runId),
@@ -96,6 +128,10 @@ export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
       .order("ts", { ascending: false })
       .limit(100),
   ]);
+
+  // Downsample time series data if range > 3 days (every 5 minutes instead of every 1 minute)
+  const equityCurve = downsampleTimeSeries(equityCurveRaw);
+  const pnlSeries = downsampleTimeSeries(pnlSeriesRaw);
 
   const positions = (positionsResult.data ?? []) as Position[];
 

@@ -55,6 +55,42 @@ async function fetchAllData<T>(
   return allData;
 }
 
+// Downsample time series data: if range > 3 days, keep only every 5 minutes
+function downsampleTimeSeries<T extends { ts: string }>(data: T[]): T[] {
+  if (data.length < 2) return data;
+
+  const sorted = [...data].sort(
+    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
+  );
+
+  const firstTs = new Date(sorted[0].ts).getTime();
+  const lastTs = new Date(sorted[sorted.length - 1].ts).getTime();
+  const rangeDays = (lastTs - firstTs) / (1000 * 60 * 60 * 24);
+
+  // If range <= 3 days, return all data
+  if (rangeDays <= 3) return data;
+
+  // Downsample to every 5 minutes
+  const intervalMs = 5 * 60 * 1000; // 5 minutes in milliseconds
+  const result: T[] = [];
+  let lastKeptTs = 0;
+
+  for (const point of sorted) {
+    const ts = new Date(point.ts).getTime();
+    if (ts - lastKeptTs >= intervalMs || result.length === 0) {
+      result.push(point);
+      lastKeptTs = ts;
+    }
+  }
+
+  // Always include the last point
+  if (result[result.length - 1] !== sorted[sorted.length - 1]) {
+    result.push(sorted[sorted.length - 1]);
+  }
+
+  return result;
+}
+
 interface CombinedPageProps {
   params: Promise<{
     strategyId: string;
@@ -106,17 +142,21 @@ export default async function CombinedStrategyPage({ params }: CombinedPageProps
   }
 
   // Fetch all data from all runs in parallel with pagination
-  const [allEquityCurve, allPnlSeries, allCombinedTrades] = await Promise.all([
+  const [allEquityCurveRaw, allPnlSeriesRaw, allCombinedTrades] = await Promise.all([
     fetchAllData<EquityCurve>(supabase, "equity_curve", runIds),
     fetchAllData<PnlSeries>(supabase, "pnl_series", runIds),
     fetchAllData<CombinedTrade>(supabase, "combined_trades", runIds),
   ]);
 
+  // Downsample time series data if range > 3 days (every 5 minutes instead of every 1 minute)
+  const allEquityCurve = downsampleTimeSeries(allEquityCurveRaw);
+  const allPnlSeries = downsampleTimeSeries(allPnlSeriesRaw);
+
   // Debug logging
   console.log(`[Combined] Strategy: ${strategyId}`);
   console.log(`[Combined] Run IDs: ${runIds.join(", ")}`);
-  console.log(`[Combined] Total equity_curve records: ${allEquityCurve.length}`);
-  console.log(`[Combined] Total pnl_series records: ${allPnlSeries.length}`);
+  console.log(`[Combined] Total equity_curve records: ${allEquityCurveRaw.length} -> ${allEquityCurve.length} (downsampled)`);
+  console.log(`[Combined] Total pnl_series records: ${allPnlSeriesRaw.length} -> ${allPnlSeries.length} (downsampled)`);
   console.log(`[Combined] Total combined_trades records: ${allCombinedTrades.length}`);
   if (allEquityCurve.length > 0) {
     const sorted = [...allEquityCurve].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
