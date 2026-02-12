@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +52,9 @@ export function TimeRangeSelector({
   onRangeChange,
   currentRange,
 }: TimeRangeSelectorProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const isAllRangeLoaded = searchParams.get("range") === "all";
   const displayRange = currentRange || { start: dataStartTime, end: dataEndTime };
 
   // Calculate which preset is currently active (if any)
@@ -89,6 +93,12 @@ export function TimeRangeSelector({
   };
 
   const handleShowAll = () => {
+    // If all data is not loaded yet, navigate to load all data
+    if (!isAllRangeLoaded) {
+      router.push("?range=all");
+      return;
+    }
+    // If all data is loaded, just filter client-side
     onRangeChange({ start: dataStartTime, end: dataEndTime });
   };
 

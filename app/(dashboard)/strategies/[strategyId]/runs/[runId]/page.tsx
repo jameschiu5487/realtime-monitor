@@ -17,11 +17,12 @@ import type {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Fetch all data with pagination (Supabase default limit is 1000)
-async function fetchAllData<T>(
+// Fetch data with pagination and optional time filter
+async function fetchDataWithLimit<T>(
   supabase: SupabaseClient,
   table: string,
   runId: string,
+  since?: string,
   orderBy: string = "ts"
 ): Promise<T[]> {
   const PAGE_SIZE = 1000;
@@ -30,12 +31,17 @@ async function fetchAllData<T>(
   let hasMore = true;
 
   while (hasMore) {
-    const { data, error } = await supabase
+    let query = supabase
       .from(table)
       .select("*")
       .eq("run_id", runId)
-      .order(orderBy, { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1);
+      .order(orderBy, { ascending: true });
+
+    if (since) {
+      query = query.gte("ts", since);
+    }
+
+    const { data, error } = await query.range(offset, offset + PAGE_SIZE - 1);
 
     if (error) {
       console.error(`Error fetching ${table}:`, error);
@@ -91,16 +97,24 @@ interface RunDetailsPageProps {
     strategyId: string;
     runId: string;
   }>;
+  searchParams: Promise<{
+    range?: string;
+  }>;
 }
 
 type RunWithStrategy = StrategyRun & { strategies: Strategy | null };
 
-export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
+export default async function RunDetailsPage({ params, searchParams }: RunDetailsPageProps) {
   // Opt out of caching for this page
   noStore();
 
   const { strategyId, runId } = await params;
+  const { range } = await searchParams;
   const supabase = await createClient();
+
+  // Determine time filter: default 7 days, or all if range=all
+  const isAllRange = range === "all";
+  const since7d = isAllRange ? undefined : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   // Fetch run info first
   const runResult = await supabase
@@ -115,11 +129,13 @@ export default async function RunDetailsPage({ params }: RunDetailsPageProps) {
     return notFound();
   }
 
-  // Fetch all data in parallel with pagination to overcome 1000 row limit
+  // Fetch data in parallel with pagination
+  // Default: last 7 days only for faster loading
+  // range=all: fetch all data
   const [equityCurveRaw, pnlSeriesRaw, combinedTrades, positionsResult] = await Promise.all([
-    fetchAllData<EquityCurve>(supabase, "equity_curve", runId),
-    fetchAllData<PnlSeries>(supabase, "pnl_series", runId),
-    fetchAllData<CombinedTrade>(supabase, "combined_trades", runId),
+    fetchDataWithLimit<EquityCurve>(supabase, "equity_curve", runId, since7d),
+    fetchDataWithLimit<PnlSeries>(supabase, "pnl_series", runId, since7d),
+    fetchDataWithLimit<CombinedTrade>(supabase, "combined_trades", runId), // trades don't need time filter
     // Positions only need latest 100 for realtime display
     supabase
       .from("positions")

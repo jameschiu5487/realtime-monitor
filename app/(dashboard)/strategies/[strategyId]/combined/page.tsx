@@ -18,11 +18,12 @@ import type {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Fetch all data with pagination (Supabase default limit is 1000)
-async function fetchAllData<T>(
+// Fetch data with pagination and optional time filter
+async function fetchDataWithLimit<T>(
   supabase: SupabaseClient,
   table: string,
   runIds: string[],
+  since?: string,
   orderBy: string = "ts"
 ): Promise<T[]> {
   const PAGE_SIZE = 1000;
@@ -31,12 +32,17 @@ async function fetchAllData<T>(
   let hasMore = true;
 
   while (hasMore) {
-    const { data, error } = await supabase
+    let query = supabase
       .from(table)
       .select("*")
       .in("run_id", runIds)
-      .order(orderBy, { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1);
+      .order(orderBy, { ascending: true });
+
+    if (since) {
+      query = query.gte("ts", since);
+    }
+
+    const { data, error } = await query.range(offset, offset + PAGE_SIZE - 1);
 
     if (error) {
       console.error(`Error fetching ${table}:`, error);
@@ -95,12 +101,20 @@ interface CombinedPageProps {
   params: Promise<{
     strategyId: string;
   }>;
+  searchParams: Promise<{
+    range?: string;
+  }>;
 }
 
-export default async function CombinedStrategyPage({ params }: CombinedPageProps) {
+export default async function CombinedStrategyPage({ params, searchParams }: CombinedPageProps) {
   noStore();
 
   const { strategyId } = await params;
+  const { range } = await searchParams;
+
+  // Determine time filter: default 7 days, or all if range=all
+  const isAllRange = range === "all";
+  const since7d = isAllRange ? undefined : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const supabase = await createClient();
 
   // Fetch strategy info
@@ -141,11 +155,13 @@ export default async function CombinedStrategyPage({ params }: CombinedPageProps
     );
   }
 
-  // Fetch all data from all runs in parallel with pagination
+  // Fetch data in parallel with pagination
+  // Default: last 7 days only for faster loading
+  // range=all: fetch all data
   const [allEquityCurveRaw, allPnlSeriesRaw, allCombinedTrades] = await Promise.all([
-    fetchAllData<EquityCurve>(supabase, "equity_curve", runIds),
-    fetchAllData<PnlSeries>(supabase, "pnl_series", runIds),
-    fetchAllData<CombinedTrade>(supabase, "combined_trades", runIds),
+    fetchDataWithLimit<EquityCurve>(supabase, "equity_curve", runIds, since7d),
+    fetchDataWithLimit<PnlSeries>(supabase, "pnl_series", runIds, since7d),
+    fetchDataWithLimit<CombinedTrade>(supabase, "combined_trades", runIds), // trades don't need time filter
   ]);
 
   // Downsample time series data if range > 3 days (every 5 minutes instead of every 1 minute)
