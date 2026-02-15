@@ -7,12 +7,12 @@ import {
   LayoutDashboard,
   TrendingUp,
   Wallet,
-  FileText,
   TestTube,
   Settings,
   Bell,
   PanelLeftClose,
   PanelLeft,
+  Radar,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -43,9 +43,9 @@ const navItems = [
     icon: Wallet,
   },
   {
-    title: "Orders",
-    href: "/orders",
-    icon: FileText,
+    title: "Opportunity",
+    href: "/opportunity",
+    icon: Radar,
   },
   {
     title: "Backtest",
