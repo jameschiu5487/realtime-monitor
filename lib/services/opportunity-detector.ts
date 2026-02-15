@@ -8,7 +8,7 @@ import type {
 } from "@/lib/types/opportunity";
 
 const MIN_RATE_SPREAD_BPS = 3.0;
-const ENTRY_WINDOW_MINUTES = 10;
+const ENTRY_WINDOW_MINUTES = 30;
 
 interface ExchangePairConfig {
   pair: ExchangePair;
