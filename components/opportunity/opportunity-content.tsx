@@ -16,7 +16,7 @@ import { getExchangePairsFromSelections, ALL_EXCHANGES } from "@/lib/types/oppor
 import { cn } from "@/lib/utils";
 
 export function OpportunityContent() {
-  const [selectedExchanges, setSelectedExchanges] = useState<Exchange[]>([...ALL_EXCHANGES]);
+  const [selectedExchanges, setSelectedExchanges] = useState<Exchange[]>(['Binance', 'Bybit']);
   const [activeTab, setActiveTab] = useState<'opportunities' | 'funding-rates'>('opportunities');
   const [costBpsInput, setCostBpsInput] = useState<string>("20"); // String for input
   const costBps = parseInt(costBpsInput) || 0; // Parse for calculations
