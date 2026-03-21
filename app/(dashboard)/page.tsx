@@ -452,8 +452,13 @@ export default async function DashboardPage() {
     supabase.from("user_strategy_access").select("strategy_id, share_ratio") as unknown as Promise<{ data: { strategy_id: string; share_ratio: number }[] | null }>,
   ]);
 
-  const allStrategies = (strategiesData ?? []) as Strategy[];
-  const allRuns = (runsData ?? []) as StrategyRun[];
+  // Filter to crypto-futures strategies only for the overview
+  const allStrategiesRaw = (strategiesData ?? []) as (Strategy & { market?: string })[];
+  const cryptoFuturesStrategyIds = new Set(
+    allStrategiesRaw.filter((s) => s.market === "crypto-futures").map((s) => s.strategy_id)
+  );
+  const allStrategies = allStrategiesRaw.filter((s) => cryptoFuturesStrategyIds.has(s.strategy_id));
+  const allRuns = ((runsData ?? []) as StrategyRun[]).filter((r) => cryptoFuturesStrategyIds.has(r.strategy_id));
 
   // Build share ratio map: strategy_id -> share_ratio
   const shareRatioMap: Record<string, number> = {};
