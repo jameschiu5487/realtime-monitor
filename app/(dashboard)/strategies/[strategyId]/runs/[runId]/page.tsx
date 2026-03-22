@@ -3,6 +3,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { RunDetailsHeader } from "@/components/strategies/run-details-header";
 import { RunDetailsContent } from "@/components/run-details-content";
+import { PolymarketRunContent } from "@/components/polymarket/polymarket-run-content";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Strategy,
@@ -11,7 +12,12 @@ import type {
   PnlSeries,
   CombinedTrade,
   Position,
+  PolymarketEquity,
+  PolymarketPosition,
+  PolymarketSymbolPnl,
 } from "@/lib/types/database";
+
+const POLYMARKET_STRATEGY_ID = "ec82f9eb-6b84-419f-b51c-f800c1e6ad85";
 
 // Disable caching to ensure fresh data on every page load
 export const dynamic = "force-dynamic";
@@ -157,6 +163,37 @@ export default async function RunDetailsPage({ params, searchParams }: RunDetail
     return notFound();
   }
 
+  // === Polymarket strategy: use new tables ===
+  console.log(`[RunDetails] strategyId=${strategyId}, POLYMARKET_ID=${POLYMARKET_STRATEGY_ID}, match=${strategyId === POLYMARKET_STRATEGY_ID}`);
+  if (strategyId === POLYMARKET_STRATEGY_ID) {
+    const [pmEquityRes, pmPositionsRes, pmSymbolPnlRes] = await Promise.all([
+      fetchDataWithLimit<PolymarketEquity>(supabase, "polymarket_equity", runId, since7d),
+      supabase
+        .from("polymarket_positions")
+        .select("*")
+        .eq("run_id", runId)
+        .order("ts", { ascending: false })
+        .limit(500),
+      fetchDataWithLimit<PolymarketSymbolPnl>(supabase, "polymarket_symbol_pnl", runId, since7d),
+    ]);
+
+    const pmEquity = downsampleTimeSeries(pmEquityRes);
+
+    return (
+      <div className="space-y-4 sm:space-y-6">
+        <RunDetailsHeader strategy={strategy} run={run} initialCapitalOverride={run.initial_capital} />
+        <PolymarketRunContent
+          runId={runId}
+          run={run}
+          initialEquity={pmEquity}
+          initialPositions={(pmPositionsRes.data ?? []) as PolymarketPosition[]}
+          initialSymbolPnl={pmSymbolPnlRes}
+        />
+      </div>
+    );
+  }
+
+  // === Default: funding arb tables ===
   // Fetch share ratio for current user
   const { data: accessData } = await supabase
     .from("user_strategy_access")

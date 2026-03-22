@@ -7,6 +7,9 @@ import type {
   PnlSeries,
   CombinedTrade,
   Position,
+  PolymarketEquity,
+  PolymarketPosition,
+  PolymarketSymbolPnl,
 } from "@/lib/types/database";
 
 // Return type for hooks that includes loading state
@@ -314,4 +317,42 @@ export function useRealtimePositions(runId: string, initialData: Position[]): Po
   }, [runId]);
 
   return { data: positions, isFreshDataLoaded, lastInsertTime };
+}
+
+// ==================== Polymarket Hooks ====================
+
+// Hook for polymarket equity curve
+export function useRealtimePolymarketEquity(runId: string, initialData: PolymarketEquity[]): RealtimeDataResult<PolymarketEquity> {
+  return useRealtimeSubscription<PolymarketEquity>(
+    "polymarket_equity",
+    runId,
+    initialData,
+    "ts",
+    "ts",
+    "asc"
+  );
+}
+
+// Hook for polymarket positions
+export function useRealtimePolymarketPositions(runId: string, initialData: PolymarketPosition[]): RealtimeDataResult<PolymarketPosition> {
+  return useRealtimeSubscription<PolymarketPosition>(
+    "polymarket_positions",
+    runId,
+    initialData,
+    "id",
+    "ts",
+    "desc"
+  );
+}
+
+// Hook for polymarket symbol P&L
+export function useRealtimePolymarketSymbolPnl(runId: string, initialData: PolymarketSymbolPnl[]): RealtimeDataResult<PolymarketSymbolPnl> {
+  return useRealtimeSubscription<PolymarketSymbolPnl>(
+    "polymarket_symbol_pnl",
+    runId,
+    initialData,
+    "ts",
+    "ts",
+    "asc"
+  );
 }

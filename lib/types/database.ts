@@ -331,6 +331,111 @@ export type Database = {
           liq_price?: number;
         };
       };
+      polymarket_equity: {
+        Row: {
+          run_id: string;
+          ts: string;
+          total_equity: number;
+          total_pnl: number;
+          total_position_value: number;
+          drawdown_pct: number;
+        };
+        Insert: {
+          run_id: string;
+          ts: string;
+          total_equity: number;
+          total_pnl?: number;
+          total_position_value?: number;
+          drawdown_pct?: number;
+        };
+        Update: {
+          run_id?: string;
+          ts?: string;
+          total_equity?: number;
+          total_pnl?: number;
+          total_position_value?: number;
+          drawdown_pct?: number;
+        };
+      };
+      polymarket_positions: {
+        Row: {
+          id: number;
+          run_id: string;
+          ts: string;
+          symbol: string;
+          side: string | null;
+          entry_price: number | null;
+          current_price: number | null;
+          shares: number | null;
+          cost: number | null;
+          current_value: number | null;
+          unrealized_pnl: number | null;
+          settled: boolean;
+          result: string | null;
+          entry_time: string | null;
+        };
+        Insert: {
+          id?: number;
+          run_id: string;
+          ts: string;
+          symbol: string;
+          side?: string | null;
+          entry_price?: number | null;
+          current_price?: number | null;
+          shares?: number | null;
+          cost?: number | null;
+          current_value?: number | null;
+          unrealized_pnl?: number | null;
+          settled?: boolean;
+          result?: string | null;
+          entry_time?: string | null;
+        };
+        Update: {
+          id?: number;
+          run_id?: string;
+          ts?: string;
+          symbol?: string;
+          side?: string | null;
+          entry_price?: number | null;
+          current_price?: number | null;
+          shares?: number | null;
+          cost?: number | null;
+          current_value?: number | null;
+          unrealized_pnl?: number | null;
+          settled?: boolean;
+          result?: string | null;
+          entry_time?: string | null;
+        };
+      };
+      polymarket_symbol_pnl: {
+        Row: {
+          run_id: string;
+          ts: string;
+          symbol: string;
+          cumulative_pnl: number;
+          trade_count: number;
+          win_count: number;
+          win_rate: number;
+        };
+        Insert: {
+          run_id: string;
+          ts: string;
+          symbol: string;
+          cumulative_pnl?: number;
+          trade_count?: number;
+          win_count?: number;
+          win_rate?: number;
+        };
+        Update: {
+          run_id?: string;
+          ts?: string;
+          symbol?: string;
+          cumulative_pnl?: number;
+          trade_count?: number;
+          win_count?: number;
+          win_rate?: number;
+        };
+      };
     };
     Views: {
       [_ in never]: never;
@@ -372,6 +477,10 @@ export type EquityCurveUpdate = Database["public"]["Tables"]["equity_curve"]["Up
 export type Position = Database["public"]["Tables"]["positions"]["Row"];
 export type PositionInsert = Database["public"]["Tables"]["positions"]["Insert"];
 export type PositionUpdate = Database["public"]["Tables"]["positions"]["Update"];
+
+export type PolymarketEquity = Database["public"]["Tables"]["polymarket_equity"]["Row"];
+export type PolymarketPosition = Database["public"]["Tables"]["polymarket_positions"]["Row"];
+export type PolymarketSymbolPnl = Database["public"]["Tables"]["polymarket_symbol_pnl"]["Row"];
 
 // Run mode and status types
 export type RunMode = StrategyRun["mode"];

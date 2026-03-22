@@ -14,6 +14,7 @@ import {
   Radar,
   Menu,
   X,
+  Dice5,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -32,6 +33,7 @@ const navItems = [
   { title: "Strategies", href: "/strategies", icon: TrendingUp },
   { title: "Positions", href: "/positions", icon: Wallet },
   { title: "Opportunity", href: "/opportunity", icon: Radar },
+  { title: "Polymarket", href: "/polymarket", icon: Dice5 },
   { title: "Backtest", href: "/backtest", icon: TestTube },
   { title: "Settings", href: "/settings", icon: Settings },
 ];
