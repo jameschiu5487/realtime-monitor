@@ -6,7 +6,6 @@ import { OverviewPerformanceChart } from "@/components/overview/overview-perform
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { PerformanceStats } from "@/components/charts/performance-stats";
 import type {
   Strategy,
   StrategyRun,
@@ -126,35 +125,6 @@ function ChartSkeleton() {
   return <Skeleton className="h-[220px] sm:h-[300px] w-full" />;
 }
 
-function PerformanceStatsSkeleton() {
-  return (
-    <div className="space-y-6">
-      {[...Array(2)].map((_, i) => (
-        <div key={i} className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-2 w-2 rounded-full" />
-            <Skeleton className="h-5 w-32" />
-          </div>
-          <Card>
-            <CardContent className="p-0">
-              <div className="grid grid-cols-2 sm:grid-cols-4">
-                {[...Array(12)].map((_, j) => (
-                  <div
-                    key={j}
-                    className="p-3 space-y-2 flex flex-col items-center"
-                  >
-                    <Skeleton className="h-6 w-16" />
-                    <Skeleton className="h-3 w-20" />
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 // --- Async Data Components ---
 
@@ -342,11 +312,13 @@ async function PerformanceChartSection({
   allRuns,
   runToStrategyMap,
   shareRatioMap,
+  strategyNameMap,
 }: {
   runningRunIds: string[];
   allRuns: StrategyRun[];
   runToStrategyMap: Record<string, string>;
   shareRatioMap: Record<string, number>;
+  strategyNameMap: Map<string, string>;
 }) {
   const supabase = await createClient();
 
@@ -371,6 +343,12 @@ async function PerformanceChartSection({
     fetchCombinedTradesWithLimit(supabase, allActiveRunIds),
   ]);
 
+  // Build strategy name map for per-strategy stats display
+  const strategyNames: Record<string, string> = {};
+  for (const sid of activeStrategyIds) {
+    strategyNames[sid] = strategyNameMap.get(sid) ?? "Unknown";
+  }
+
   return (
     <OverviewPerformanceChart
       initialEquityData={equityData}
@@ -379,67 +357,8 @@ async function PerformanceChartSection({
       strategyRunIds={strategyRunIds}
       runToStrategyMap={runToStrategyMap}
       shareRatioMap={shareRatioMap}
+      strategyNameMap={strategyNames}
     />
-  );
-}
-
-// Async component for performance stats
-async function PerformanceStatsSection({
-  runningRuns,
-  shareRatioMap,
-}: {
-  runningRuns: {
-    runId: string;
-    strategyName: string;
-    strategyId: string;
-    mode: string;
-    startTime: string;
-  }[];
-  shareRatioMap: Record<string, number>;
-}) {
-  if (runningRuns.length === 0) return null;
-
-  const supabase = await createClient();
-  const since7d = new Date(
-    Date.now() - 7 * 24 * 60 * 60 * 1000
-  ).toISOString();
-  const runIds = runningRuns.map((r) => r.runId);
-
-  const [equityData, combinedTrades] = await Promise.all([
-    fetchEquityDataWithLimit(supabase, runIds, since7d),
-    fetchCombinedTradesWithLimit(supabase, runIds, since7d),
-  ]);
-
-  const equityByRunId: Record<string, EquityCurve[]> = {};
-  const tradesByRunId: Record<string, CombinedTrade[]> = {};
-  for (const point of equityData) {
-    if (!equityByRunId[point.run_id]) equityByRunId[point.run_id] = [];
-    equityByRunId[point.run_id].push(point);
-  }
-  for (const trade of combinedTrades) {
-    if (!tradesByRunId[trade.run_id]) tradesByRunId[trade.run_id] = [];
-    tradesByRunId[trade.run_id].push(trade);
-  }
-
-  return (
-    <div className="space-y-4">
-      {runningRuns.map((run) => (
-        <div key={run.runId} className="space-y-2">
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <h3 className="text-sm sm:text-base font-semibold">{run.strategyName}</h3>
-            <span className="text-xs font-mono text-muted-foreground uppercase">
-              {run.mode}
-            </span>
-          </div>
-          <PerformanceStats
-            filteredEquityCurve={equityByRunId[run.runId] ?? []}
-            filteredCombinedTrades={tradesByRunId[run.runId] ?? []}
-            shareRatio={shareRatioMap[run.strategyId] ?? 1}
-          />
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -480,19 +399,24 @@ export default async function DashboardPage() {
     strategyNameMap.set(s.strategy_id, s.name);
   }
 
-  const runningRuns = allRuns
-    .filter((r) => r.status === "running")
-    .map((r) => ({
-      runId: r.run_id,
-      strategyName: strategyNameMap.get(r.strategy_id) ?? "Unknown",
-      strategyId: r.strategy_id,
-      mode: r.mode,
-      startTime: r.start_time,
-    }))
-    .sort(
-      (a, b) =>
-        new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
-    );
+  // Group by strategy for combined display
+  const activeStrategyIds = new Set(
+    allRuns.filter((r) => r.status === "running").map((r) => r.strategy_id)
+  );
+  const activeStrategies = Array.from(activeStrategyIds).map((strategyId) => {
+    const strategyRuns = allRuns.filter((r) => r.strategy_id === strategyId);
+    const runningRun = strategyRuns.find((r) => r.status === "running");
+    return {
+      strategyId,
+      strategyName: strategyNameMap.get(strategyId) ?? "Unknown",
+      runCount: strategyRuns.length,
+      allRunIds: strategyRuns.map((r) => r.run_id),
+      mode: runningRun?.mode ?? "live",
+      latestStartTime: strategyRuns
+        .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())[0]
+        ?.start_time ?? "",
+    };
+  });
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -529,13 +453,14 @@ export default async function DashboardPage() {
               allRuns={allRuns}
               runToStrategyMap={runToStrategyMap}
               shareRatioMap={shareRatioMap}
+              strategyNameMap={strategyNameMap}
             />
           </Suspense>
         </CardContent>
       </Card>
 
       {/* Active Strategies */}
-      {runningRuns.length > 0 ? (
+      {activeStrategies.length > 0 ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
@@ -549,31 +474,24 @@ export default async function DashboardPage() {
             </Link>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {runningRuns.map((run) => (
+            {activeStrategies.map((strategy) => (
               <Link
-                key={run.runId}
-                href={`/strategies/${run.strategyId}/runs/${run.runId}`}
+                key={strategy.strategyId}
+                href={`/strategies/${strategy.strategyId}/combined`}
               >
                 <Card className="transition-colors hover:bg-accent/50 active:bg-accent/50">
                   <CardContent className="p-3 sm:p-4">
                     <div className="flex items-center gap-2">
                       <div className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
                       <span className="font-medium text-sm sm:text-base truncate flex-1">
-                        {run.strategyName}
+                        {strategy.strategyName}
                       </span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-mono uppercase">
-                        {run.mode}
+                        {strategy.mode}
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground font-mono mt-2">
-                      Started{" "}
-                      {new Date(run.startTime).toLocaleString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: false,
-                      })}
+                      {strategy.runCount} {strategy.runCount === 1 ? "run" : "runs"} combined
                     </p>
                   </CardContent>
                 </Card>
@@ -589,18 +507,6 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      {/* Performance Stats */}
-      {runningRuns.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-            Strategy Metrics
-            <span className="ml-2 text-muted-foreground/60">(7d)</span>
-          </h3>
-          <Suspense fallback={<PerformanceStatsSkeleton />}>
-            <PerformanceStatsSection runningRuns={runningRuns} shareRatioMap={shareRatioMap} />
-          </Suspense>
-        </div>
-      )}
     </div>
   );
 }

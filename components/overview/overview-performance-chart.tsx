@@ -29,6 +29,8 @@ interface OverviewPerformanceChartProps {
   strategyRunIds: Record<string, string[]>;
   runToStrategyMap: Record<string, string>;
   shareRatioMap: Record<string, number>;
+  /** strategy_id -> strategy name for per-strategy stats display */
+  strategyNameMap: Record<string, string>;
 }
 
 interface ChartDataPoint {
@@ -268,6 +270,7 @@ export function OverviewPerformanceChart({
   strategyRunIds,
   runToStrategyMap,
   shareRatioMap,
+  strategyNameMap,
 }: OverviewPerformanceChartProps) {
   const [equityData, setEquityData] = useState<EquityCurve[]>(initialEquityData);
   const [combinedTrades, setCombinedTrades] = useState<CombinedTrade[]>(initialCombinedTrades);
@@ -513,6 +516,39 @@ export function OverviewPerformanceChart({
     });
   }, [combinedTrades, timeRange]);
 
+  // Per-strategy filtered data for individual strategy stats
+  const perStrategyStats = useMemo(() => {
+    const strategyIds = Array.from(mergedPerStrategy.keys());
+    return strategyIds.map((strategyId) => {
+      // Build combined equity curve for this single strategy
+      const singleStrategyMap = new Map<string, EquityCurve[]>();
+      singleStrategyMap.set(strategyId, mergedPerStrategy.get(strategyId) || []);
+      const equityCurve = buildCombinedEquityCurve(singleStrategyMap, shareRatioMap);
+
+      // Filter by time range
+      const filteredEquity = equityCurve.filter((d) => {
+        const time = new Date(d.ts).getTime();
+        return time >= timeRange.start.getTime() && time <= timeRange.end.getTime();
+      });
+
+      // Filter trades for this strategy's runs
+      const runIdsForStrategy = new Set(strategyRunIds[strategyId] || []);
+      const filteredTrades = combinedTrades.filter((d) => {
+        if (!runIdsForStrategy.has(d.run_id)) return false;
+        const time = new Date(d.ts).getTime();
+        return time >= timeRange.start.getTime() && time <= timeRange.end.getTime();
+      });
+
+      return {
+        strategyId,
+        strategyName: strategyNameMap[strategyId] ?? "Unknown",
+        filteredEquity,
+        filteredTrades,
+        runCount: strategyRunIds[strategyId]?.length ?? 0,
+      };
+    });
+  }, [mergedPerStrategy, shareRatioMap, timeRange, combinedTrades, strategyRunIds, strategyNameMap]);
+
   // Compute P&L for selected time range
   const rangePnl = useMemo(() => {
     if (filteredChartData.length < 2) return { pnl: 0, pct: 0, hasData: false };
@@ -690,11 +726,36 @@ export function OverviewPerformanceChart({
         </AreaChart>
       </ChartContainer>
 
-      {/* Performance Stats based on selected time range */}
+      {/* Combined Performance Stats */}
       <PerformanceStats
         filteredEquityCurve={filteredEquityCurve}
         filteredCombinedTrades={filteredCombinedTrades}
       />
+
+      {/* Per-Strategy Stats */}
+      {perStrategyStats.length > 1 && (
+        <div className="space-y-4 pt-2">
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+            Per Strategy
+          </h3>
+          {perStrategyStats.map((s) => (
+            <div key={s.strategyId} className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <h4 className="text-sm sm:text-base font-semibold">{s.strategyName}</h4>
+                <span className="text-xs font-mono text-muted-foreground">
+                  {s.runCount} {s.runCount === 1 ? "run" : "runs"}
+                </span>
+              </div>
+              <PerformanceStats
+                filteredEquityCurve={s.filteredEquity}
+                filteredCombinedTrades={s.filteredTrades}
+                shareRatio={shareRatioMap[s.strategyId] ?? 1}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
