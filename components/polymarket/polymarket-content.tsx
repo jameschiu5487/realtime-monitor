@@ -60,12 +60,20 @@ export function PolymarketContent({
     [equityData]
   );
 
-  // Get latest positions (most recent timestamp only)
+  // Deduplicate positions: keep latest record per (symbol, side, entry_time)
   const latestPositions = useMemo(() => {
     if (positionsData.length === 0) return [];
-    const latestTs = positionsData[0]?.ts;
-    if (!latestTs) return [];
-    return positionsData.filter((p) => p.ts === latestTs);
+    const seen = new Map<string, PolymarketPosition>();
+    for (const p of positionsData) {
+      const key = `${p.symbol}_${p.side}_${p.entry_time ?? p.ts}`;
+      const existing = seen.get(key);
+      if (!existing || new Date(p.ts) > new Date(existing.ts)) {
+        seen.set(key, p);
+      }
+    }
+    return Array.from(seen.values()).sort(
+      (a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime()
+    );
   }, [positionsData]);
 
   // Get latest symbol P&L (most recent timestamp per symbol)

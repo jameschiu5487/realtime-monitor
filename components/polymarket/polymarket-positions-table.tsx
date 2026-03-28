@@ -39,6 +39,7 @@ export function PolymarketPositionsTable({ positions }: PolymarketPositionsTable
               <thead>
                 <tr className="border-b bg-muted/50">
                   <th className="px-3 py-2 text-left font-medium">Entry Time</th>
+                  <th className="px-3 py-2 text-center font-medium">TF</th>
                   <th className="px-3 py-2 text-left font-medium">Symbol</th>
                   <th className="px-3 py-2 text-left font-medium">Side</th>
                   <th className="px-3 py-2 text-right font-medium">Shares</th>
@@ -61,7 +62,7 @@ export function PolymarketPositionsTable({ positions }: PolymarketPositionsTable
                 ))}
                 {settled.length > 20 && (
                   <tr>
-                    <td colSpan={10} className="px-3 py-2 text-center text-muted-foreground">
+                    <td colSpan={11} className="px-3 py-2 text-center text-muted-foreground">
                       ... and {settled.length - 20} more settled positions
                     </td>
                   </tr>
@@ -92,6 +93,11 @@ function PositionRow({ position: p }: { position: PolymarketPosition }) {
               hour12: false,
             })
           : "-"}
+      </td>
+      <td className="px-3 py-2 text-center">
+        <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+          {p.timeframe ?? "-"}
+        </span>
       </td>
       <td className="px-3 py-2 font-medium">{p.symbol}</td>
       <td className="px-3 py-2">

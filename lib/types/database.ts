@@ -373,6 +373,7 @@ export type Database = {
           settled: boolean;
           result: string | null;
           entry_time: string | null;
+          timeframe: string | null;
         };
         Insert: {
           id?: number;
@@ -389,6 +390,7 @@ export type Database = {
           settled?: boolean;
           result?: string | null;
           entry_time?: string | null;
+          timeframe?: string | null;
         };
         Update: {
           id?: number;
@@ -405,6 +407,7 @@ export type Database = {
           settled?: boolean;
           result?: string | null;
           entry_time?: string | null;
+          timeframe?: string | null;
         };
       };
       polymarket_symbol_pnl: {
