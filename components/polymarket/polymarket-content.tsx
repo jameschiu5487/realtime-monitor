@@ -60,18 +60,9 @@ export function PolymarketContent({
     [equityData]
   );
 
-  // Deduplicate positions: keep latest record per (symbol, side, entry_time)
+  // Show all positions (each row = one trade), sorted newest first
   const latestPositions = useMemo(() => {
-    if (positionsData.length === 0) return [];
-    const seen = new Map<string, PolymarketPosition>();
-    for (const p of positionsData) {
-      const key = `${p.symbol}_${p.side}_${p.entry_time ?? p.ts}`;
-      const existing = seen.get(key);
-      if (!existing || new Date(p.ts) > new Date(existing.ts)) {
-        seen.set(key, p);
-      }
-    }
-    return Array.from(seen.values()).sort(
+    return [...positionsData].sort(
       (a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime()
     );
   }, [positionsData]);
