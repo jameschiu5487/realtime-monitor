@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useRealtimePolymarketEquity,
-  useRealtimePolymarketPositions,
   useRealtimePolymarketSymbolPnl,
 } from "@/lib/hooks/use-realtime-data";
+import { createClient } from "@/lib/supabase/client";
 import type {
   StrategyRun,
   PolymarketEquity,
@@ -44,8 +44,55 @@ export function PolymarketContent({
   const currentRun = allRuns.find((r) => r.run_id === selectedRunId) ?? run;
 
   const { data: equityData } = useRealtimePolymarketEquity(selectedRunId, initialEquity);
-  const { data: positionsData } = useRealtimePolymarketPositions(selectedRunId, initialPositions);
   const { data: symbolPnlData } = useRealtimePolymarketSymbolPnl(selectedRunId, initialSymbolPnl);
+
+  // Positions: use SSR data + realtime INSERT (no client re-fetch that overwrites)
+  const [positions, setPositions] = useState<PolymarketPosition[]>(initialPositions);
+
+  // Listen for new positions via realtime
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`pm-positions-${selectedRunId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "polymarket_positions",
+          filter: `run_id=eq.${selectedRunId}`,
+        },
+        (payload) => {
+          const newPos = payload.new as PolymarketPosition;
+          setPositions((prev) => [newPos, ...prev]);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "polymarket_positions",
+          filter: `run_id=eq.${selectedRunId}`,
+        },
+        (payload) => {
+          const updated = payload.new as PolymarketPosition;
+          setPositions((prev) =>
+            prev.map((p) => (p.id === updated.id ? updated : p))
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedRunId]);
+
+  // Reset positions when run changes
+  useEffect(() => {
+    setPositions(initialPositions);
+  }, [initialPositions]);
 
   // Transform equity data for chart
   const equityChartData = useMemo(
@@ -60,12 +107,12 @@ export function PolymarketContent({
     [equityData]
   );
 
-  // Show all positions (each row = one trade), sorted newest first
+  // All positions sorted newest first (limit 500)
   const latestPositions = useMemo(() => {
-    return [...positionsData].sort(
-      (a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime()
-    );
-  }, [positionsData]);
+    return [...positions]
+      .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
+      .slice(0, 500);
+  }, [positions]);
 
   // Get latest symbol P&L (most recent timestamp per symbol)
   const latestSymbolPnl = useMemo(() => {
