@@ -80,15 +80,19 @@ function useRealtimeSubscription<T extends Record<string, unknown>>(
       const freshData = await fetchAllDataWithPagination<T>(supabase, table, runId, sortKey);
 
       if (freshData.length > 0) {
-        console.log(`[Realtime] Got ${freshData.length} fresh ${table} records`);
+        console.log(`[Realtime] Got ${freshData.length} fresh ${table} records (initial: ${initialData.length})`);
         if (freshData.length > 0) {
           const first = freshData[0] as Record<string, unknown>;
           const last = freshData[freshData.length - 1] as Record<string, unknown>;
           console.log(`[Realtime] ${table} date range: ${first[sortKey]} to ${last[sortKey]}`);
         }
-        // Data is already sorted ascending, reverse if needed
-        const sortedData = sortDirection === "desc" ? [...freshData].reverse() : freshData;
-        setData(sortedData);
+        // Only replace if we got at least as many records as initial (avoid RLS-limited overwrites)
+        if (freshData.length >= initialData.length) {
+          const sortedData = sortDirection === "desc" ? [...freshData].reverse() : freshData;
+          setData(sortedData);
+        } else {
+          console.warn(`[Realtime] ${table}: client fetch (${freshData.length}) < initial (${initialData.length}), keeping initial`);
+        }
       }
       setIsFreshDataLoaded(true);
     };
