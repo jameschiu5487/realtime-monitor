@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { RunDetailsHeader } from "@/components/strategies/run-details-header";
 import { RunDetailsContent } from "@/components/run-details-content";
 import { PolymarketRunContent } from "@/components/polymarket/polymarket-run-content";
+import { GriffinRunContent } from "@/components/griffin/griffin-run-content";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Strategy,
@@ -18,6 +19,7 @@ import type {
 } from "@/lib/types/database";
 
 const POLYMARKET_STRATEGY_ID = "ec82f9eb-6b84-419f-b51c-f800c1e6ad85";
+const GRIFFIN_STRATEGY_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
 
 // Disable caching to ensure fresh data on every page load
 export const dynamic = "force-dynamic";
@@ -188,6 +190,30 @@ export default async function RunDetailsPage({ params, searchParams }: RunDetail
           initialEquity={pmEquity}
           initialPositions={(pmPositionsRes.data ?? []) as PolymarketPosition[]}
           initialSymbolPnl={pmSymbolPnlRes}
+        />
+      </div>
+    );
+  }
+
+  // === Griffin: market maker dashboard ===
+  if (strategyId === GRIFFIN_STRATEGY_ID) {
+    const tradesRes = await supabase
+      .from("trades")
+      .select("*")
+      .eq("run_id", runId)
+      .order("ts", { ascending: true });
+    const trades = (tradesRes.data ?? []) as import("@/lib/types/database").Trade[];
+
+    return (
+      <div className="space-y-4 sm:space-y-6">
+        <RunDetailsHeader strategy={strategy} run={run} initialCapitalOverride={run.initial_capital} />
+        <GriffinRunContent
+          runId={runId}
+          initialEquityCurve={equityCurve}
+          initialPnlSeries={pnlSeries}
+          initialPositions={positions}
+          initialTrades={trades}
+          initialCapital={run.initial_capital}
         />
       </div>
     );
