@@ -82,15 +82,31 @@ export function GriffinRunContent({
     }));
   }, [equityCurve, effectiveCapital]);
 
-  // === PnL Breakdown (Fee + Funding + Total) ===
+  // === PnL Breakdown — totalPnl from equity curve, fee from pnl_series ===
+  const firstEquity = equityCurve.length > 0 ? equityCurve[0].total_equity : 0;
+
   const pnlData = useMemo(() => {
-    return pnlSeries.map((d) => ({
-      time: d.ts,
-      totalPnl: d.total_pnl,
-      fee: -d.total_fee,
-      funding: d.total_funding_pnl,
-    }));
-  }, [pnlSeries]);
+    // Build fee lookup by minute (ts → total_fee)
+    const feeByMinute = new Map<string, number>();
+    for (const d of pnlSeries) {
+      const key = d.ts.slice(0, 16); // YYYY-MM-DDTHH:MM
+      feeByMinute.set(key, -d.total_fee);
+    }
+
+    let lastFee = 0;
+    return equityCurve.map((d) => {
+      const key = d.ts.slice(0, 16);
+      const fee = feeByMinute.get(key) ?? lastFee;
+      lastFee = fee;
+      const totalPnl = d.total_equity - firstEquity;
+      return {
+        time: d.ts,
+        totalPnl,
+        fee,
+        pricePnl: totalPnl - fee,
+      };
+    });
+  }, [equityCurve, pnlSeries, firstEquity]);
 
   // Current values
   const latestExposure = exposureData.length > 0 ? exposureData[exposureData.length - 1] : null;
@@ -164,19 +180,19 @@ export function GriffinRunContent({
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <div>
             <CardTitle className="text-base">PnL Breakdown</CardTitle>
-            <p className="text-xs text-muted-foreground">Fee, Funding & Total PnL</p>
+            <p className="text-xs text-muted-foreground">Price PnL, Fee & Total</p>
           </div>
           <div className="flex gap-6 text-right">
+            <div>
+              <p className="text-xs text-muted-foreground">Price PnL</p>
+              <p className="text-lg font-bold text-blue-400">
+                ${(latestPnl?.pricePnl ?? 0).toFixed(2)}
+              </p>
+            </div>
             <div>
               <p className="text-xs text-muted-foreground">Fee</p>
               <p className="text-lg font-bold text-orange-400">
                 ${(latestPnl?.fee ?? 0).toFixed(2)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Funding</p>
-              <p className="text-lg font-bold text-purple-400">
-                ${(latestPnl?.funding ?? 0).toFixed(2)}
               </p>
             </div>
             <div>
@@ -206,8 +222,8 @@ export function GriffinRunContent({
                   labelFormatter={(l: string) => formatDateTime(l)}
                   contentStyle={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }}
                 />
+                <Line type="monotone" dataKey="pricePnl" stroke="#3b82f6" strokeWidth={1.5} dot={false} name="Price PnL" />
                 <Line type="monotone" dataKey="fee" stroke="#f97316" strokeWidth={1.5} dot={false} name="Fee" />
-                <Line type="monotone" dataKey="funding" stroke="#a855f7" strokeWidth={1.5} dot={false} name="Funding" />
                 <Line type="monotone" dataKey="totalPnl" stroke="#22c55e" strokeWidth={2} dot={false} name="Total PnL" />
               </LineChart>
             </ResponsiveContainer>
@@ -236,7 +252,7 @@ function GriffinStats({
   const stats = useMemo(() => {
     if (equityCurve.length === 0) {
       return {
-        totalReturn: 0, maxDrawdown: 0, leverage: 0, netExposure: 0, totalTurnover: 0,
+        totalReturn: 0, maxDrawdown: 0, leverage: 0, netExposure: 0, totalTurnover: 0, pricePnl: 0,
         annualizedReturn: 0, sharpeRatio: 0, volatility: 0, calmarRatio: 0,
         totalFee: 0, totalFunding: 0, totalPnl: 0,
       };
@@ -294,16 +310,17 @@ function GriffinStats({
 
     // Fee / Funding from pnl_series
     const latestPnl = pnlSeries.length > 0 ? pnlSeries[pnlSeries.length - 1] : null;
+    // Total PnL from equity curve (always matches equity display)
+    const totalPnl = last.total_equity - first.total_equity;
     const totalFee = -(latestPnl?.total_fee ?? 0);
-    const totalFunding = latestPnl?.total_funding_pnl ?? 0;
-    const totalPnl = latestPnl?.total_pnl ?? 0;
+    const pricePnl = totalPnl - totalFee;
     // Turnover: sum(quantity * price) from trades table
     const totalTurnover = trades.reduce((sum: number, t: Trade) => sum + t.quantity_actual * t.price, 0);
 
     return {
       totalReturn, maxDrawdown: maxDrawdown * 100, leverage, netExposure,
       annualizedReturn, sharpeRatio, volatility,
-      totalFee, totalFunding, totalPnl, totalTurnover,
+      pricePnl, totalFee, totalPnl, totalTurnover,
     };
   }, [equityCurve, positions, initialCapital, pnlSeries]);
 
@@ -326,9 +343,9 @@ function GriffinStats({
           <Stat label="Turnover" value={`$${stats.totalTurnover.toFixed(2)}`} />
         </div>
         <div className="grid grid-cols-4 divide-x divide-border border-t border-border">
+          <Stat label="Price PnL" value={`$${stats.pricePnl.toFixed(2)}`} color={getColor(stats.pricePnl)} />
+          <Stat label="Fee" value={`$${stats.totalFee.toFixed(2)}`} color={getColor(stats.totalFee)} />
           <Stat label="Total PnL" value={`$${stats.totalPnl.toFixed(2)}`} color={getColor(stats.totalPnl)} />
-          <Stat label="Fee (Net)" value={`$${stats.totalFee.toFixed(2)}`} color={getColor(stats.totalFee)} />
-          <Stat label="Funding Fee" value={`$${stats.totalFunding.toFixed(2)}`} color={getColor(stats.totalFunding)} />
           <Stat label="PnL / Capital" value={`${((stats.totalPnl / (initialCapital || 1)) * 10000).toFixed(1)} bp`} color={getColor(stats.totalPnl)} />
         </div>
       </CardContent>
