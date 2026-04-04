@@ -127,6 +127,24 @@ async function fetchBitMartKlines(symbol: string): Promise<[number, number][]> {
     .sort((a: [number, number], b: [number, number]) => a[0] - b[0]);
 }
 
+async function fetchZoomexKlines(symbol: string): Promise<[number, number][]> {
+  const allKlines: [number, number][] = [];
+  let endTime = Date.now();
+  for (let i = 0; i < 3 && allKlines.length < FETCH_KLINES; i++) {
+    const url = `https://openapi.zoomex.com/cloud/trade/v3/market/kline?category=linear&symbol=${symbol.toUpperCase()}&interval=1&limit=1000&end=${endTime}`;
+    const response = await fetch(url);
+    if (!response.ok) break;
+    const data = await response.json();
+    if (data.retCode !== 0 || !data.result?.list?.length) break;
+    const klines: [number, number][] = data.result.list.map((k: string[]) => [parseInt(k[0]), parseFloat(k[4])]);
+    allKlines.push(...klines);
+    const oldest = Math.min(...klines.map((k) => k[0]));
+    endTime = oldest - 1;
+    if (klines.length < 1000) break;
+  }
+  return allKlines.sort((a, b) => a[0] - b[0]);
+}
+
 function getKlineFetcher(exchange: Exchange): (symbol: string) => Promise<[number, number][]> {
   switch (exchange) {
     case "Binance": return fetchBinanceKlines;
@@ -135,7 +153,7 @@ function getKlineFetcher(exchange: Exchange): (symbol: string) => Promise<[numbe
     case "Gate": return fetchGateKlines;
     case "Bitget": return fetchBitgetKlines;
     case "BitMart": return fetchBitMartKlines;
-    case "Zoomex": return async () => [];
+    case "Zoomex": return fetchZoomexKlines;
   }
 }
 

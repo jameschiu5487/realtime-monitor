@@ -283,11 +283,51 @@ async function fetchBitgetFunding(): Promise<FundingSnapshot[]> {
   }
 }
 
-// Zoomex Futures funding rates - currently disabled due to API access issues
+// Zoomex Futures funding rates (Bybit-like API with different base URL and path prefix)
 async function fetchZoomexFunding(): Promise<FundingSnapshot[]> {
-  // Zoomex API is not accessible from this region
-  // Return empty array for now
-  return [];
+  try {
+    const [tickersRes, instrumentsRes] = await Promise.all([
+      fetch('https://openapi.zoomex.com/cloud/trade/v3/market/tickers?category=linear'),
+      fetch('https://openapi.zoomex.com/cloud/trade/v3/market/instruments-info?category=linear'),
+    ]);
+
+    if (!tickersRes.ok || !instrumentsRes.ok) return [];
+
+    const tickersData = await tickersRes.json();
+    const instrumentsData = await instrumentsRes.json();
+
+    if (tickersData.retCode !== 0 || instrumentsData.retCode !== 0) return [];
+
+    // Build interval map from instruments info (fundingInterval is in minutes)
+    const intervalMap = new Map<string, number>();
+    for (const inst of instrumentsData.result.list) {
+      const intervalMinutes = parseInt(inst.fundingInterval) || 480;
+      intervalMap.set(inst.symbol, intervalMinutes / 60);
+    }
+
+    return tickersData.result.list
+      .filter((item: { symbol: string }) => item.symbol.endsWith('USDT'))
+      .map((item: {
+        symbol: string;
+        fundingRate: string;
+        nextFundingTime: string;
+        markPrice: string;
+        fundingIntervalHour?: string;
+      }) => ({
+        symbol: item.symbol,
+        exchange: 'Zoomex' as Exchange,
+        funding_rate: parseFloat(item.fundingRate),
+        funding_interval_hours: item.fundingIntervalHour
+          ? parseInt(item.fundingIntervalHour)
+          : (intervalMap.get(item.symbol) || 8),
+        next_funding_time: new Date(parseInt(item.nextFundingTime)).toISOString(),
+        mark_price: parseFloat(item.markPrice),
+        fetched_at: new Date().toISOString(),
+      }));
+  } catch (e) {
+    console.error('Zoomex funding fetch error:', e);
+    return [];
+  }
 }
 
 // BitMart Futures funding rates
