@@ -1,10 +1,5 @@
-import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
-import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { OverviewPerformanceChart } from "@/components/overview/overview-performance-chart";
-import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
+import { OverviewContent } from "@/components/overview/overview-content";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Strategy,
@@ -101,267 +96,6 @@ async function fetchCombinedTradesWithLimit(
   return allData;
 }
 
-// --- Skeleton Components ---
-
-function MetricsStripSkeleton() {
-  return (
-    <Card className="overflow-hidden">
-      <CardContent className="p-0">
-        <div className="grid grid-cols-2 gap-px bg-border lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="p-3 sm:p-4 lg:p-5 bg-card space-y-2">
-              <Skeleton className="h-3 w-16 sm:w-20" />
-              <Skeleton className="h-6 sm:h-7 w-20 sm:w-28" />
-              <Skeleton className="h-3 w-14 sm:w-16" />
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ChartSkeleton() {
-  return <Skeleton className="h-[220px] sm:h-[300px] w-full" />;
-}
-
-
-// --- Async Data Components ---
-
-async function MetricsStrip({
-  runningRunIds,
-  allRuns,
-  allStrategies,
-  shareRatioMap,
-}: {
-  runningRunIds: string[];
-  allRuns: StrategyRun[];
-  allStrategies: Strategy[];
-  shareRatioMap: Record<string, number>;
-}) {
-  const supabase = await createClient();
-
-  const runToStrategyMap: Record<string, string> = {};
-  for (const run of allRuns) {
-    runToStrategyMap[run.run_id] = run.strategy_id;
-  }
-
-  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
-
-  const [latestEquitiesRaw, equities24hAgoRaw, tradesResult] =
-    await Promise.all([
-      // Latest equity per run
-      Promise.all(
-        runningRunIds.map(async (runId) => {
-          const { data } = await supabase
-            .from("equity_curve")
-            .select("run_id, total_equity, ts")
-            .eq("run_id", runId)
-            .order("ts", { ascending: false })
-            .limit(1);
-          return data?.[0] as EquityCurve | undefined;
-        })
-      ),
-      // Equity from ~24h ago per run (earliest point in 24h window)
-      Promise.all(
-        runningRunIds.map(async (runId) => {
-          const { data } = await supabase
-            .from("equity_curve")
-            .select("run_id, total_equity, ts")
-            .eq("run_id", runId)
-            .gte("ts", since24h)
-            .order("ts", { ascending: true })
-            .limit(1);
-          return data?.[0] as EquityCurve | undefined;
-        })
-      ),
-      // Today's trade count
-      runningRunIds.length > 0
-        ? supabase
-            .from("trades")
-            .select("*", { count: "exact", head: true })
-            .in("run_id", runningRunIds)
-            .gte("ts", todayStart.toISOString())
-        : Promise.resolve({ count: 0 } as { count: number }),
-    ]);
-
-  const latestEquities = latestEquitiesRaw.filter(
-    Boolean
-  ) as EquityCurve[];
-  const equities24hAgo = equities24hAgoRaw.filter(
-    Boolean
-  ) as EquityCurve[];
-  const todayTradeCount = tradesResult.count ?? 0;
-
-  const activeStrategiesCount = new Set(
-    runningRunIds.map((rid) => runToStrategyMap[rid]).filter(Boolean)
-  ).size;
-
-  // Current total equity by strategy (scaled by share ratio)
-  const lastEquityPerStrategy = new Map<
-    string,
-    { equity: number; ts: number }
-  >();
-  for (const point of latestEquities) {
-    const strategyId = runToStrategyMap[point.run_id];
-    if (!strategyId) continue;
-    const ts = new Date(point.ts).getTime();
-    const ratio = shareRatioMap[strategyId] ?? 1;
-    const existing = lastEquityPerStrategy.get(strategyId);
-    if (!existing || ts > existing.ts) {
-      lastEquityPerStrategy.set(strategyId, {
-        equity: point.total_equity * ratio,
-        ts,
-      });
-    }
-  }
-  let totalEquity = 0;
-  for (const val of lastEquityPerStrategy.values()) {
-    totalEquity += val.equity;
-  }
-
-  // 24h-ago total equity by strategy (scaled by share ratio)
-  const equity24hPerStrategy = new Map<
-    string,
-    { equity: number; ts: number }
-  >();
-  for (const point of equities24hAgo) {
-    const strategyId = runToStrategyMap[point.run_id];
-    if (!strategyId) continue;
-    const ts = new Date(point.ts).getTime();
-    const ratio = shareRatioMap[strategyId] ?? 1;
-    const existing = equity24hPerStrategy.get(strategyId);
-    if (!existing || ts < existing.ts) {
-      equity24hPerStrategy.set(strategyId, {
-        equity: point.total_equity * ratio,
-        ts,
-      });
-    }
-  }
-  let totalEquity24hAgo = 0;
-  for (const val of equity24hPerStrategy.values()) {
-    totalEquity24hAgo += val.equity;
-  }
-
-  const pnl24h = totalEquity - totalEquity24hAgo;
-  const pnl24hPct =
-    totalEquity24hAgo > 0 ? (pnl24h / totalEquity24hAgo) * 100 : 0;
-  const hasEquityData = lastEquityPerStrategy.size > 0;
-
-  return (
-    <Card className="overflow-hidden">
-      <CardContent className="p-0">
-        <div className="grid grid-cols-3 gap-px bg-border">
-          {/* Total Equity */}
-          <div className="p-3 sm:p-4 lg:p-5 bg-card">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Total Equity
-            </p>
-            <p className="text-lg sm:text-2xl lg:text-3xl font-bold font-mono tabular-nums mt-1">
-              $
-              {totalEquity.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
-              {lastEquityPerStrategy.size}{" "}
-              {lastEquityPerStrategy.size === 1 ? "strategy" : "strategies"}
-            </p>
-          </div>
-
-          {/* Active Strategies */}
-          <div className="p-3 sm:p-4 lg:p-5 bg-card">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Active Strategies
-            </p>
-            <p className="text-lg sm:text-2xl lg:text-3xl font-bold font-mono tabular-nums mt-1">
-              {activeStrategiesCount}
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
-              of {allStrategies.length} total
-            </p>
-          </div>
-
-          {/* Today's Trades */}
-          <div className="p-3 sm:p-4 lg:p-5 bg-card">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Today&apos;s Trades
-            </p>
-            <p className="text-lg sm:text-2xl lg:text-3xl font-bold font-mono tabular-nums mt-1">
-              {todayTradeCount}
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
-              {new Date().toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-              })}
-            </p>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// Async component for performance chart
-async function PerformanceChartSection({
-  runningRunIds,
-  allRuns,
-  runToStrategyMap,
-  shareRatioMap,
-  strategyNameMap,
-}: {
-  runningRunIds: string[];
-  allRuns: StrategyRun[];
-  runToStrategyMap: Record<string, string>;
-  shareRatioMap: Record<string, number>;
-  strategyNameMap: Map<string, string>;
-}) {
-  const supabase = await createClient();
-
-  // For each strategy that has a running run, get ALL run IDs for that strategy
-  const activeStrategyIds = new Set(
-    runningRunIds.map((rid) => runToStrategyMap[rid]).filter(Boolean)
-  );
-  const strategyRunIds: Record<string, string[]> = {};
-  const allActiveRunIds: string[] = [];
-  for (const strategyId of activeStrategyIds) {
-    const runIds = allRuns
-      .filter((r) => r.strategy_id === strategyId)
-      .map((r) => r.run_id);
-    strategyRunIds[strategyId] = runIds;
-    allActiveRunIds.push(...runIds);
-  }
-
-  // Fetch 7 days of equity data + combined trades for all runs of active strategies
-  const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [equityData, combinedTradesData] = await Promise.all([
-    fetchEquityDataWithLimit(supabase, allActiveRunIds, since7d),
-    fetchCombinedTradesWithLimit(supabase, allActiveRunIds),
-  ]);
-
-  // Build strategy name map for per-strategy stats display
-  const strategyNames: Record<string, string> = {};
-  for (const sid of activeStrategyIds) {
-    strategyNames[sid] = strategyNameMap.get(sid) ?? "Unknown";
-  }
-
-  return (
-    <OverviewPerformanceChart
-      initialEquityData={equityData}
-      initialCombinedTrades={combinedTradesData}
-      runningRunIds={runningRunIds}
-      strategyRunIds={strategyRunIds}
-      runToStrategyMap={runToStrategyMap}
-      shareRatioMap={shareRatioMap}
-      strategyNameMap={strategyNames}
-    />
-  );
-}
-
 export default async function DashboardPage() {
   const supabase = await createClient();
 
@@ -418,95 +152,86 @@ export default async function DashboardPage() {
     };
   });
 
+  // Pre-fetch metrics data
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  // Pre-fetch chart data: get all run IDs for active strategies
+  const strategyRunIds: Record<string, string[]> = {};
+  const allActiveRunIds: string[] = [];
+  for (const strategyId of activeStrategyIds) {
+    const runIds = allRuns
+      .filter((r) => r.strategy_id === strategyId)
+      .map((r) => r.run_id);
+    strategyRunIds[strategyId] = runIds;
+    allActiveRunIds.push(...runIds);
+  }
+
+  const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const [latestEquitiesRaw, equities24hAgoRaw, tradesResult, equityData, combinedTradesData] =
+    await Promise.all([
+      // Latest equity per running run
+      Promise.all(
+        runningRunIds.map(async (runId) => {
+          const { data } = await supabase
+            .from("equity_curve")
+            .select("run_id, total_equity, ts")
+            .eq("run_id", runId)
+            .order("ts", { ascending: false })
+            .limit(1);
+          return data?.[0] as EquityCurve | undefined;
+        })
+      ),
+      // Equity from ~24h ago per running run
+      Promise.all(
+        runningRunIds.map(async (runId) => {
+          const { data } = await supabase
+            .from("equity_curve")
+            .select("run_id, total_equity, ts")
+            .eq("run_id", runId)
+            .gte("ts", since24h)
+            .order("ts", { ascending: true })
+            .limit(1);
+          return data?.[0] as EquityCurve | undefined;
+        })
+      ),
+      // Today's trades (fetch run_id for client-side filtering)
+      runningRunIds.length > 0
+        ? supabase
+            .from("trades")
+            .select("run_id")
+            .in("run_id", runningRunIds)
+            .gte("ts", todayStart.toISOString())
+        : Promise.resolve({ data: [] as { run_id: string }[] }),
+      // Chart equity data (7 days)
+      fetchEquityDataWithLimit(supabase, allActiveRunIds, since7d),
+      // Combined trades
+      fetchCombinedTradesWithLimit(supabase, allActiveRunIds),
+    ]);
+
+  const latestEquities = latestEquitiesRaw.filter(Boolean) as EquityCurve[];
+  const equities24hAgo = equities24hAgoRaw.filter(Boolean) as EquityCurve[];
+  const todayTrades = (tradesResult.data ?? []) as { run_id: string }[];
+
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Overview</h2>
-        {runningRunIds.length > 0 && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.5)]" />
-            <span className="font-mono uppercase tracking-wider">Live</span>
-          </div>
-        )}
-      </div>
-
-      {/* Metrics Strip */}
-      <Suspense fallback={<MetricsStripSkeleton />}>
-        <MetricsStrip
-          runningRunIds={runningRunIds}
-          allRuns={allRuns}
-          allStrategies={allStrategies}
-          shareRatioMap={shareRatioMap}
-        />
-      </Suspense>
-
-      {/* Performance Chart — Full Width */}
-      <Card>
-        <CardHeader className="px-3 sm:px-6 pb-2">
-          <CardTitle className="text-sm sm:text-base font-medium">Equity Curve</CardTitle>
-        </CardHeader>
-        <CardContent className="px-1 sm:px-2">
-          <Suspense fallback={<ChartSkeleton />}>
-            <PerformanceChartSection
-              runningRunIds={runningRunIds}
-              allRuns={allRuns}
-              runToStrategyMap={runToStrategyMap}
-              shareRatioMap={shareRatioMap}
-              strategyNameMap={strategyNameMap}
-            />
-          </Suspense>
-        </CardContent>
-      </Card>
-
-      {/* Active Strategies */}
-      {activeStrategies.length > 0 ? (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-              Active Strategies
-            </h3>
-            <Link
-              href="/strategies"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              View all &rarr;
-            </Link>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {activeStrategies.map((strategy) => (
-              <Link
-                key={strategy.strategyId}
-                href={`/strategies/${strategy.strategyId}/combined`}
-              >
-                <Card className="transition-colors hover:bg-accent/50 active:bg-accent/50">
-                  <CardContent className="p-3 sm:p-4">
-                    <div className="flex items-center gap-2">
-                      <div className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
-                      <span className="font-medium text-sm sm:text-base truncate flex-1">
-                        {strategy.strategyName}
-                      </span>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-mono uppercase">
-                        {strategy.mode}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground font-mono mt-2">
-                      {strategy.runCount} {strategy.runCount === 1 ? "run" : "runs"} combined
-                    </p>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <Card>
-          <CardContent className="flex h-[80px] sm:h-[120px] items-center justify-center text-sm text-muted-foreground">
-            No strategies running
-          </CardContent>
-        </Card>
-      )}
-
-    </div>
+    <OverviewContent
+      allStrategies={allStrategies}
+      allRuns={allRuns}
+      activeStrategies={activeStrategies}
+      runningRunIds={runningRunIds}
+      shareRatioMap={shareRatioMap}
+      runToStrategyMap={runToStrategyMap}
+      strategyNameMap={Object.fromEntries(strategyNameMap)}
+      metricsData={{
+        latestEquities,
+        equities24hAgo,
+        todayTrades,
+      }}
+      equityData={equityData}
+      combinedTradesData={combinedTradesData}
+      strategyRunIds={strategyRunIds}
+    />
   );
 }
