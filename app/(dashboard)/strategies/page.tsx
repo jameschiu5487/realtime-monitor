@@ -12,9 +12,21 @@ export default async function StrategiesPage() {
   noStore();
   const supabase = await createClient();
 
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser();
+
+  // Get strategies the user has access to
+  const { data: accessData } = await supabase
+    .from("user_strategy_access")
+    .select("strategy_id")
+    .eq("user_id", user?.id ?? "");
+
+  const accessibleStrategyIds = (accessData ?? []).map((a: { strategy_id: string }) => a.strategy_id);
+
   const { data, error } = await supabase
     .from("strategies")
     .select("*")
+    .in("strategy_id", accessibleStrategyIds.length > 0 ? accessibleStrategyIds : ["none"])
     .order("created_at", { ascending: false });
 
   if (error) {
