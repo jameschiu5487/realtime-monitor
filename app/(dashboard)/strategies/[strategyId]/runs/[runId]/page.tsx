@@ -197,12 +197,23 @@ export default async function RunDetailsPage({ params, searchParams }: RunDetail
 
   // === Griffin: market maker dashboard ===
   if (strategyId === GRIFFIN_STRATEGY_ID) {
-    const tradesRes = await supabase
-      .from("trades")
-      .select("*")
-      .eq("run_id", runId)
-      .order("ts", { ascending: true });
-    const trades = (tradesRes.data ?? []) as import("@/lib/types/database").Trade[];
+    // Fetch ALL trades using pagination (Supabase default limit is 1000)
+    type Trade = import("@/lib/types/database").Trade;
+    const trades: Trade[] = [];
+    const PAGE_SIZE = 1000;
+    let offset = 0;
+    while (true) {
+      const { data } = await supabase
+        .from("trades")
+        .select("*")
+        .eq("run_id", runId)
+        .order("ts", { ascending: true })
+        .range(offset, offset + PAGE_SIZE - 1);
+      const batch = (data ?? []) as Trade[];
+      trades.push(...batch);
+      if (batch.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
 
     return (
       <div className="space-y-4 sm:space-y-6">

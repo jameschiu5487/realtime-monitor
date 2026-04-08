@@ -10,6 +10,7 @@ import type {
   PolymarketEquity,
   PolymarketPosition,
   PolymarketSymbolPnl,
+  Trade,
 } from "@/lib/types/database";
 
 // Return type for hooks that includes loading state
@@ -196,6 +197,18 @@ export function useRealtimePnlSeries(runId: string, initialData: PnlSeries[]): R
     runId,
     initialData,
     "ts",
+    "ts",
+    "asc"
+  );
+}
+
+// Hook for trades data (Griffin)
+export function useRealtimeTrades(runId: string, initialData: Trade[]): RealtimeDataResult<Trade> {
+  return useRealtimeSubscription<Trade>(
+    "trades",
+    runId,
+    initialData,
+    "trade_id",
     "ts",
     "asc"
   );

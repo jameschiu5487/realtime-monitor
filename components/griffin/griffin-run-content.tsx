@@ -8,6 +8,7 @@ import {
   useRealtimeEquityCurve,
   useRealtimePnlSeries,
   useRealtimePositions,
+  useRealtimeTrades,
 } from "@/lib/hooks/use-realtime-data";
 import type { EquityCurveDataPoint } from "@/components/charts/equity-curve-chart";
 import type {
@@ -62,6 +63,7 @@ export function GriffinRunContent({
   const { data: equityCurve } = useRealtimeEquityCurve(runId, initialEquityCurve);
   const { data: pnlSeries } = useRealtimePnlSeries(runId, initialPnlSeries);
   const { data: positions } = useRealtimePositions(runId, initialPositions);
+  const { data: trades } = useRealtimeTrades(runId, initialTrades);
 
   // === Equity Curve Data ===
   const equityCurveData = useMemo((): EquityCurveDataPoint[] => {
@@ -115,7 +117,7 @@ export function GriffinRunContent({
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Griffin Performance Stats */}
-      <GriffinStats equityCurve={equityCurve} positions={positions} initialCapital={initialCapital} pnlSeries={pnlSeries} trades={initialTrades} />
+      <GriffinStats equityCurve={equityCurve} positions={positions} initialCapital={initialCapital} pnlSeries={pnlSeries} trades={trades} />
 
       {/* Equity Curve */}
       <EquityCurveWithBrush data={equityCurveData} />
