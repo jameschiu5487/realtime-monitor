@@ -108,14 +108,14 @@ export function FundingRateMonitor({ positions }: FundingRateMonitorProps) {
 
     for (const symbol of symbols) {
       // Same approach as entry time lookup: latest Open trade for this symbol, no run_id filter
-      // Get the 2 most recent Open trades (one per exchange: Binance + Bybit)
+      // Get the most recent Open trades (one per exchange)
       const { data: trades } = await supabase
         .from("trades")
         .select("symbol, exchange, funding_rate, interval_hours")
         .eq("symbol", symbol)
         .eq("action", "Open")
         .order("ts", { ascending: false })
-        .limit(2);
+        .limit(4);
 
       if (trades) {
         type TradeRecord = { symbol: string; exchange: string; funding_rate: number; interval_hours: string | null };
@@ -144,7 +144,7 @@ export function FundingRateMonitor({ positions }: FundingRateMonitorProps) {
       const key = `${pos.symbol}-${pos.exchange.toLowerCase()}`;
       let info: LiveFundingInfo | null = null;
 
-      if (pos.exchange.toLowerCase() === "binance" || pos.exchange.toLowerCase() === "bybit") {
+      if (pos.exchange.toLowerCase() === "binance" || pos.exchange.toLowerCase() === "bybit" || pos.exchange.toLowerCase() === "zoomex") {
         info = await fetchFundingRate(pos.symbol, pos.exchange);
       }
 
@@ -257,6 +257,8 @@ export function FundingRateMonitor({ positions }: FundingRateMonitorProps) {
                             ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20"
                             : row.exchange.toLowerCase() === "bybit"
                             ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20"
+                            : row.exchange.toLowerCase() === "zoomex"
+                            ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
                             : "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20"
                         }
                       >

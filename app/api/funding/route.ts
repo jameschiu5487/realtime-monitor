@@ -24,8 +24,11 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    if (exchange.toLowerCase() === "bybit") {
-      const url = `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${symbol.toUpperCase()}`;
+    if (exchange.toLowerCase() === "bybit" || exchange.toLowerCase() === "zoomex") {
+      const baseUrl = exchange.toLowerCase() === "zoomex"
+        ? "https://api.zoomex.com"
+        : "https://api.bybit.com";
+      const url = `${baseUrl}/v5/market/tickers?category=linear&symbol=${symbol.toUpperCase()}`;
       const res = await fetch(url);
       if (!res.ok) return NextResponse.json(null);
       const data = await res.json();
