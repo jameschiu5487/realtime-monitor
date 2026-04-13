@@ -133,9 +133,11 @@ export default async function DashboardPage() {
     strategyNameMap.set(s.strategy_id, s.name);
   }
 
-  // Group by strategy for combined display
+  // Group by strategy for combined display — only show "realtime" mode strategies
   const activeStrategyIds = new Set(
-    allRuns.filter((r) => r.status === "running").map((r) => r.strategy_id)
+    allRuns
+      .filter((r) => r.status === "running" && r.mode === "realtime")
+      .map((r) => r.strategy_id)
   );
   const activeStrategies = Array.from(activeStrategyIds).map((strategyId) => {
     const strategyRuns = allRuns.filter((r) => r.strategy_id === strategyId);
