@@ -120,7 +120,7 @@ export default async function DashboardPage() {
   }
 
   const runningRunIds = allRuns
-    .filter((r) => r.status === "running")
+    .filter((r) => r.status === "running" && (r.mode as string) === "realtime")
     .map((r) => r.run_id);
 
   const runToStrategyMap: Record<string, string> = {};
@@ -136,7 +136,7 @@ export default async function DashboardPage() {
   // Group by strategy for combined display — only show "realtime" mode strategies
   const activeStrategyIds = new Set(
     allRuns
-      .filter((r) => r.status === "running" && r.mode === "realtime")
+      .filter((r) => r.status === "running" && (r.mode as string) === "realtime")
       .map((r) => r.strategy_id)
   );
   const activeStrategies = Array.from(activeStrategyIds).map((strategyId) => {
@@ -159,12 +159,12 @@ export default async function DashboardPage() {
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
 
-  // Pre-fetch chart data: get all run IDs for active strategies
+  // Pre-fetch chart data: only "realtime" mode runs for active strategies
   const strategyRunIds: Record<string, string[]> = {};
   const allActiveRunIds: string[] = [];
   for (const strategyId of activeStrategyIds) {
     const runIds = allRuns
-      .filter((r) => r.strategy_id === strategyId)
+      .filter((r) => r.strategy_id === strategyId && (r.mode as string) === "realtime")
       .map((r) => r.run_id);
     strategyRunIds[strategyId] = runIds;
     allActiveRunIds.push(...runIds);
