@@ -140,7 +140,7 @@ export default async function DashboardPage() {
       .map((r) => r.strategy_id)
   );
   const activeStrategies = Array.from(activeStrategyIds).map((strategyId) => {
-    const strategyRuns = allRuns.filter((r) => r.strategy_id === strategyId);
+    const strategyRuns = allRuns.filter((r) => r.strategy_id === strategyId && (r.mode as string) === "realtime");
     const runningRun = strategyRuns.find((r) => r.status === "running");
     return {
       strategyId,

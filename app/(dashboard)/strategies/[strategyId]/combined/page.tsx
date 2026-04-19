@@ -128,14 +128,15 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
     return notFound();
   }
 
-  // Fetch all runs for this strategy
-  const { data: runs } = await supabase
+  // Fetch all runs for this strategy, only include "realtime" mode (exclude "test-realtime" etc.)
+  const { data: allRuns } = await supabase
     .from("strategy_runs")
     .select("*")
     .eq("strategy_id", strategyId)
     .order("start_time", { ascending: true });
 
-  const runIds = (runs ?? []).map((r: StrategyRun) => r.run_id);
+  const runs = (allRuns ?? []).filter((r: StrategyRun) => (r.mode as string) === "realtime");
+  const runIds = runs.map((r: StrategyRun) => r.run_id);
 
   if (runIds.length === 0) {
     return (
