@@ -12,8 +12,10 @@ import {
   Tooltip,
 } from "recharts";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Exchange } from "@/lib/types/opportunity";
+import { KLINE_CONFIGS, getKlineConfig } from "@/lib/kline-config";
 
 interface DataPoint {
   time: number;
@@ -45,8 +47,7 @@ interface OpportunitySpreadModalProps {
 
 // ── Constants ──────────────────────────────────────────────
 
-const DISPLAY_KLINES = 1440;
-const MA_WINDOW = 1440;
+// Config is now dynamic via KLINE_CONFIGS
 
 const EXCHANGE_COLORS: Record<Exchange, string> = {
   Binance: "#eab308",
@@ -188,7 +189,7 @@ function connectExchangeWs(exchange: Exchange, symbol: string, onPrice: (price: 
 
 // ── Merge & Calculate ──────────────────────────────────────
 
-function mergeKlinesAndCalculateSpread(klinesA: [number, number][], klinesB: [number, number][]): DataPoint[] {
+function mergeKlinesAndCalculateSpread(klinesA: [number, number][], klinesB: [number, number][], displayKlines: number, maWindow: number): DataPoint[] {
   const mapA = new Map(klinesA);
   const mapB = new Map(klinesB);
   const allTimestamps = new Set([...klinesA.map((k) => k[0]), ...klinesB.map((k) => k[0])]);
@@ -216,15 +217,15 @@ function mergeKlinesAndCalculateSpread(klinesA: [number, number][], klinesB: [nu
 
   // Calculate MA and Bollinger Bands
   for (let i = 0; i < result.length; i++) {
-    if (i >= MA_WINDOW - 1) {
+    if (i >= maWindow - 1) {
       let sum = 0;
-      for (let j = i - MA_WINDOW + 1; j <= i; j++) sum += result[j].spread;
-      const ma = sum / MA_WINDOW;
+      for (let j = i - maWindow + 1; j <= i; j++) sum += result[j].spread;
+      const ma = sum / maWindow;
       result[i].ma = ma;
 
       let sumSquaredDiff = 0;
-      for (let j = i - MA_WINDOW + 1; j <= i; j++) sumSquaredDiff += Math.pow(result[j].spread - ma, 2);
-      const std = Math.sqrt(sumSquaredDiff / MA_WINDOW);
+      for (let j = i - maWindow + 1; j <= i; j++) sumSquaredDiff += Math.pow(result[j].spread - ma, 2);
+      const std = Math.sqrt(sumSquaredDiff / maWindow);
       result[i].std = std;
       result[i].upper1 = ma + std;
       result[i].upper2 = ma + 2 * std;
@@ -235,7 +236,7 @@ function mergeKlinesAndCalculateSpread(klinesA: [number, number][], klinesB: [nu
     }
   }
 
-  return result.length > DISPLAY_KLINES ? result.slice(-DISPLAY_KLINES) : result;
+  return result.length > displayKlines ? result.slice(-displayKlines) : result;
 }
 
 // ── Component ──────────────────────────────────────────────
@@ -243,6 +244,7 @@ function mergeKlinesAndCalculateSpread(klinesA: [number, number][], klinesB: [nu
 export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: OpportunitySpreadModalProps) {
   const [data, setData] = useState<DataPoint[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedDays, setSelectedDays] = useState(1);
   const [currentSpread, setCurrentSpread] = useState<number | null>(null);
   const [currentPrices, setCurrentPrices] = useState<{ a: number; b: number } | null>(null);
   const [fundingRates, setFundingRates] = useState<{ exchangeA: FundingRateEntry[]; exchangeB: FundingRateEntry[] }>({ exchangeA: [], exchangeB: [] });
@@ -250,6 +252,7 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
   const wsBRef = useRef<WebSocket | null>(null);
   const latestPricesRef = useRef<{ a: number; b: number }>({ a: 0, b: 0 });
 
+  const config = getKlineConfig(selectedDays);
   const colorA = EXCHANGE_COLORS[exchangeA];
   const colorB = EXCHANGE_COLORS[exchangeB];
   const textClassA = EXCHANGE_TEXT_CLASSES[exchangeA];
@@ -266,12 +269,13 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
 
     const fetchData = async () => {
       setIsLoading(true);
+      const daysParam = selectedDays > 1 ? `&days=${selectedDays}` : "";
       const [klinesA, klinesB] = await Promise.all([
-        fetchKlines(exchangeA, symbol),
-        fetchKlines(exchangeB, symbol),
+        fetch(`/api/klines?exchange=${encodeURIComponent(exchangeA)}&symbol=${encodeURIComponent(symbol)}${daysParam}`).then(r => r.ok ? r.json() : []).catch(() => []) as Promise<[number, number][]>,
+        fetch(`/api/klines?exchange=${encodeURIComponent(exchangeB)}&symbol=${encodeURIComponent(symbol)}${daysParam}`).then(r => r.ok ? r.json() : []).catch(() => []) as Promise<[number, number][]>,
       ]);
       if (cancelled) return;
-      const mergedData = mergeKlinesAndCalculateSpread(klinesA, klinesB);
+      const mergedData = mergeKlinesAndCalculateSpread(klinesA, klinesB, config.displayKlines, config.maWindow);
       setData(mergedData);
 
       if (mergedData.length > 0) {
@@ -291,7 +295,7 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
     });
 
     return () => { cancelled = true; };
-  }, [symbol, exchangeA, exchangeB]);
+  }, [symbol, exchangeA, exchangeB, selectedDays, config]);
 
   // WebSocket for real-time updates (deferred to avoid Strict Mode double-mount warnings)
   useEffect(() => {
@@ -497,7 +501,19 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
           <Badge variant="outline" className="text-lg px-3 py-1">
             {symbol}
           </Badge>
-          <span className="text-sm text-muted-foreground">(1d / MA 1440)</span>
+          <div className="flex items-center gap-1">
+            {KLINE_CONFIGS.map((c) => (
+              <Button
+                key={c.days}
+                variant={selectedDays === c.days ? "default" : "outline"}
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => setSelectedDays(c.days)}
+              >
+                {c.label}
+              </Button>
+            ))}
+          </div>
           <div className="flex items-center gap-3 ml-4 text-xs">
             <div className="flex items-center gap-1">
               <div className="w-3 h-0.5 bg-blue-500"></div>

@@ -13,7 +13,9 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { KLINE_CONFIGS, getKlineConfig } from "@/lib/kline-config";
 
 interface SpreadDataPoint {
   time: number; // timestamp in ms
@@ -79,7 +81,7 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
       </div>
       {ma !== undefined && ma !== null && (
         <div className="text-amber-500 font-medium mt-1">
-          MA(1440): {ma.toFixed(2)} bp
+          MA(1D): {ma.toFixed(2)} bp
         </div>
       )}
       {std !== undefined && std !== null && (
@@ -101,100 +103,12 @@ function normalizeSymbol(symbol: string): string {
   return symbol.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-// Display 1 day of data = 1 * 24 * 60 = 1440 klines
-const DISPLAY_KLINES = 1440;
-// Fetch 2 days of data = 2 * 24 * 60 = 2880 klines (extra day for MA calculation)
-const FETCH_KLINES = 2880;
-// Moving average window = 1 day = 1440 minutes
-const MA_WINDOW = 1440;
-
-// Fetch kline data from Binance Futures (need 2 requests for 2880 klines)
-async function fetchBinanceKlines(symbol: string, interval: string = "1m"): Promise<[number, number][]> {
-  try {
-    const allKlines: [number, number][] = [];
-    let oldestTime = Date.now();
-
-    // Binance has a max limit of 1500 per request, so we need 2 requests for 2880
-    for (let i = 0; i < 2 && allKlines.length < FETCH_KLINES; i++) {
-      const url = i === 0
-        ? `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=1500`
-        : `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=1500&endTime=${oldestTime - 1}`;
-
-      console.log(`[SpreadChart] Fetching Binance klines (${i + 1}): ${url}`);
-      const response = await fetch(url);
-      if (!response.ok) {
-        const text = await response.text();
-        console.error(`[SpreadChart] Binance API error: ${response.status}`, text);
-        break;
-      }
-      const data = await response.json();
-      const klines: [number, number][] = data.map((k: (string | number)[]) => [Number(k[0]), parseFloat(k[4] as string)]);
-
-      if (klines.length === 0) break;
-
-      // Insert older klines at the beginning
-      allKlines.unshift(...klines);
-      oldestTime = klines[0][0];
-
-      if (klines.length < 1500) break;
-    }
-
-    console.log(`[SpreadChart] Binance returned ${allKlines.length} klines total`);
-    return allKlines;
-  } catch (error) {
-    console.error("[SpreadChart] Error fetching Binance klines:", error);
-    return [];
-  }
-}
-
-// Fetch kline data from Bybit (need 3 requests for 2880 klines)
-async function fetchBybitKlines(symbol: string, interval: string = "1"): Promise<[number, number][]> {
-  try {
-    const allKlines: [number, number][] = [];
-    let endTime = Date.now();
-
-    // Bybit has a max limit of 1000 per request, so we need 3 requests for 2880
-    for (let i = 0; i < 3 && allKlines.length < FETCH_KLINES; i++) {
-      const url = `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol.toUpperCase()}&interval=${interval}&limit=1000&end=${endTime}`;
-      console.log(`[SpreadChart] Fetching Bybit klines (${i + 1}): ${url}`);
-      const response = await fetch(url);
-      if (!response.ok) {
-        const text = await response.text();
-        console.error(`[SpreadChart] Bybit API error: ${response.status}`, text);
-        break;
-      }
-      const data = await response.json();
-
-      if (data.retCode !== 0 || !data.result?.list?.length) {
-        console.error(`[SpreadChart] Bybit returned error or no data:`, data);
-        break;
-      }
-
-      // Bybit returns: [[startTime, open, high, low, close, volume, turnover], ...]
-      const klines: [number, number][] = data.result.list.map((k: string[]) => [parseInt(k[0]), parseFloat(k[4])]);
-      allKlines.push(...klines);
-
-      // Get oldest timestamp for next request
-      const oldestTime = Math.min(...klines.map((k) => k[0]));
-      endTime = oldestTime - 1;
-
-      if (klines.length < 1000) break; // No more data
-    }
-
-    console.log(`[SpreadChart] Bybit returned ${allKlines.length} klines total`);
-
-    // Sort by time ascending (Bybit returns newest first)
-    return allKlines.sort((a, b) => a[0] - b[0]);
-  } catch (error) {
-    console.error("[SpreadChart] Error fetching Bybit klines:", error);
-    return [];
-  }
-}
-
 // Merge Binance and Bybit klines and calculate spread (bybit - binance) with moving average
 function mergeKlinesAndCalculateSpread(
   binanceKlines: [number, number][],
-  bybitKlines: [number, number][]
+  bybitKlines: [number, number][],
+  displayKlines: number,
+  maWindow: number
 ): SpreadDataPoint[] {
   // Create maps for quick lookup
   const binanceMap = new Map(binanceKlines);
@@ -236,23 +150,22 @@ function mergeKlinesAndCalculateSpread(
     }
   }
 
-  // Calculate moving average and standard deviation with window = MA_WINDOW (1440)
+  // Calculate moving average and standard deviation
   for (let i = 0; i < result.length; i++) {
-    if (i >= MA_WINDOW - 1) {
-      // Calculate average of last MA_WINDOW points
+    if (i >= maWindow - 1) {
       let sum = 0;
-      for (let j = i - MA_WINDOW + 1; j <= i; j++) {
+      for (let j = i - maWindow + 1; j <= i; j++) {
         sum += result[j].spread;
       }
-      const ma = sum / MA_WINDOW;
+      const ma = sum / maWindow;
       result[i].ma = ma;
 
       // Calculate standard deviation
       let sumSquaredDiff = 0;
-      for (let j = i - MA_WINDOW + 1; j <= i; j++) {
+      for (let j = i - maWindow + 1; j <= i; j++) {
         sumSquaredDiff += Math.pow(result[j].spread - ma, 2);
       }
-      const std = Math.sqrt(sumSquaredDiff / MA_WINDOW);
+      const std = Math.sqrt(sumSquaredDiff / maWindow);
       result[i].std = std;
 
       // Bollinger Bands
@@ -265,10 +178,8 @@ function mergeKlinesAndCalculateSpread(
     }
   }
 
-  // Only return the last 2 days (DISPLAY_KLINES) for chart display
-  // The first day is only used for MA calculation
-  if (result.length > DISPLAY_KLINES) {
-    return result.slice(-DISPLAY_KLINES);
+  if (result.length > displayKlines) {
+    return result.slice(-displayKlines);
   }
 
   return result;
@@ -277,11 +188,13 @@ function mergeKlinesAndCalculateSpread(
 export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSymbolClear }: SpreadChartProps) {
   const [data, setData] = useState<SpreadDataPoint[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedDays, setSelectedDays] = useState(1);
   const [currentSpread, setCurrentSpread] = useState<number | null>(null);
   const [currentPrices, setCurrentPrices] = useState<{ binance: number; bybit: number } | null>(null);
   const binanceWsRef = useRef<WebSocket | null>(null);
   const bybitWsRef = useRef<WebSocket | null>(null);
   const latestPricesRef = useRef<{ binance: number; bybit: number }>({ binance: 0, bybit: 0 });
+  const config = getKlineConfig(selectedDays);
 
   // Filter entry times to only show those within the chart's data range
   const validEntryTimes = useMemo(() => {
@@ -296,7 +209,7 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
     return filtered;
   }, [data, entryTimes]);
 
-  // Fetch historical data when symbol changes
+  // Fetch historical data when symbol or time range changes
   useEffect(() => {
     if (!symbol) {
       setData([]);
@@ -307,16 +220,17 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
 
     const fetchHistoricalData = async () => {
       setIsLoading(true);
-      console.log(`[SpreadChart] Fetching historical data for ${symbol}`);
+      console.log(`[SpreadChart] Fetching historical data for ${symbol} (${config.label})`);
 
+      const daysParam = selectedDays > 1 ? `&days=${selectedDays}` : "";
       const [binanceKlines, bybitKlines] = await Promise.all([
-        fetch(`/api/klines?exchange=Binance&symbol=${encodeURIComponent(symbol)}`).then(r => r.json()).catch(() => []) as Promise<[number, number][]>,
-        fetch(`/api/klines?exchange=Bybit&symbol=${encodeURIComponent(symbol)}`).then(r => r.json()).catch(() => []) as Promise<[number, number][]>,
+        fetch(`/api/klines?exchange=Binance&symbol=${encodeURIComponent(symbol)}${daysParam}`).then(r => r.json()).catch(() => []) as Promise<[number, number][]>,
+        fetch(`/api/klines?exchange=Bybit&symbol=${encodeURIComponent(symbol)}${daysParam}`).then(r => r.json()).catch(() => []) as Promise<[number, number][]>,
       ]);
 
       console.log(`[SpreadChart] Got ${binanceKlines.length} Binance klines, ${bybitKlines.length} Bybit klines`);
 
-      const mergedData = mergeKlinesAndCalculateSpread(binanceKlines, bybitKlines);
+      const mergedData = mergeKlinesAndCalculateSpread(binanceKlines, bybitKlines, config.displayKlines, config.maWindow);
       console.log(`[SpreadChart] Merged into ${mergedData.length} data points`);
 
       setData(mergedData);
@@ -332,7 +246,7 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
     };
 
     fetchHistoricalData();
-  }, [symbol]);
+  }, [symbol, selectedDays, config]);
 
   // Setup WebSocket connections for real-time updates
   useEffect(() => {
@@ -419,17 +333,16 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
             };
 
             // Calculate MA and Bollinger Bands for the new point
-            // We need the last MA_WINDOW-1 points plus the new point
-            const recentPoints = prev.slice(-(MA_WINDOW - 1));
-            if (recentPoints.length >= MA_WINDOW - 1) {
+            const recentPoints = prev.slice(-(config.maWindow - 1));
+            if (recentPoints.length >= config.maWindow - 1) {
               const allSpreads = [...recentPoints.map(p => p.spread), spreadBps];
               const sum = allSpreads.reduce((acc, s) => acc + s, 0);
-              const ma = sum / MA_WINDOW;
+              const ma = sum / config.maWindow;
               newPoint.ma = ma;
 
               // Calculate standard deviation
               const sumSquaredDiff = allSpreads.reduce((acc, s) => acc + Math.pow(s - ma, 2), 0);
-              const std = Math.sqrt(sumSquaredDiff / MA_WINDOW);
+              const std = Math.sqrt(sumSquaredDiff / config.maWindow);
               newPoint.std = std;
 
               // Bollinger Bands
@@ -516,7 +429,19 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
           <Badge variant="outline" className="text-lg px-3 py-1">
             {symbol}
           </Badge>
-          <span className="text-sm text-muted-foreground">(1天 / MA 1440)</span>
+          <div className="flex items-center gap-1">
+            {KLINE_CONFIGS.map((c) => (
+              <Button
+                key={c.days}
+                variant={selectedDays === c.days ? "default" : "outline"}
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => setSelectedDays(c.days)}
+              >
+                {c.label}
+              </Button>
+            ))}
+          </div>
           {onSymbolClear && (
             <button
               onClick={onSymbolClear}

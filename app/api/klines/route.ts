@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Exchange } from "@/lib/types/opportunity";
+import { getKlineConfig } from "@/lib/kline-config";
 
 export const runtime = "edge";
 export const preferredRegion = ["sin1", "hkg1", "kix1"];
-
-const FETCH_KLINES = 2880;
 
 function formatExchangeSymbol(symbol: string, exchange: Exchange): string {
   const base = symbol.replace(/USDT$/i, "");
@@ -18,14 +17,35 @@ function formatExchangeSymbol(symbol: string, exchange: Exchange): string {
   }
 }
 
-async function fetchBinanceKlines(symbol: string): Promise<[number, number][]> {
+function getExchangeInterval(exchange: Exchange, intervalMinutes: number): string {
+  switch (exchange) {
+    case "Binance":
+    case "BingX":
+      return intervalMinutes < 60 ? `${intervalMinutes}m` : `${intervalMinutes / 60}h`;
+    case "Gate":
+      return intervalMinutes < 60 ? `${intervalMinutes}m` : `${intervalMinutes / 60}h`;
+    case "Bybit":
+    case "Zoomex":
+      return String(intervalMinutes);
+    case "Bitget":
+      return intervalMinutes < 60 ? `${intervalMinutes}m` : `${intervalMinutes / 60}H`;
+    case "BitMart":
+      return String(intervalMinutes);
+    default:
+      return `${intervalMinutes}m`;
+  }
+}
+
+async function fetchBinanceKlines(symbol: string, interval: string, maxKlines: number): Promise<[number, number][]> {
+  const LIMIT = 1500;
+  const maxRequests = Math.ceil(maxKlines / LIMIT);
   const allKlines: [number, number][] = [];
   let oldestTime = Date.now();
-  for (let i = 0; i < 2 && allKlines.length < FETCH_KLINES; i++) {
+  for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
     const url =
       i === 0
-        ? `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol.toUpperCase()}&interval=1m&limit=1500`
-        : `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol.toUpperCase()}&interval=1m&limit=1500&endTime=${oldestTime - 1}`;
+        ? `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${LIMIT}`
+        : `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${LIMIT}&endTime=${oldestTime - 1}`;
     const response = await fetch(url);
     if (!response.ok) break;
     const data = await response.json();
@@ -33,16 +53,18 @@ async function fetchBinanceKlines(symbol: string): Promise<[number, number][]> {
     if (klines.length === 0) break;
     allKlines.unshift(...klines);
     oldestTime = klines[0][0];
-    if (klines.length < 1500) break;
+    if (klines.length < LIMIT) break;
   }
   return allKlines;
 }
 
-async function fetchBybitKlines(symbol: string): Promise<[number, number][]> {
+async function fetchBybitKlines(symbol: string, interval: string, maxKlines: number): Promise<[number, number][]> {
+  const LIMIT = 1000;
+  const maxRequests = Math.ceil(maxKlines / LIMIT);
   const allKlines: [number, number][] = [];
   let endTime = Date.now();
-  for (let i = 0; i < 3 && allKlines.length < FETCH_KLINES; i++) {
-    const url = `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol.toUpperCase()}&interval=1&limit=1000&end=${endTime}`;
+  for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
+    const url = `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${LIMIT}&end=${endTime}`;
     const response = await fetch(url);
     if (!response.ok) break;
     const data = await response.json();
@@ -51,17 +73,19 @@ async function fetchBybitKlines(symbol: string): Promise<[number, number][]> {
     allKlines.push(...klines);
     const oldest = Math.min(...klines.map((k) => k[0]));
     endTime = oldest - 1;
-    if (klines.length < 1000) break;
+    if (klines.length < LIMIT) break;
   }
   return allKlines.sort((a, b) => a[0] - b[0]);
 }
 
-async function fetchBingXKlines(symbol: string): Promise<[number, number][]> {
+async function fetchBingXKlines(symbol: string, interval: string, maxKlines: number): Promise<[number, number][]> {
   const fmtSymbol = formatExchangeSymbol(symbol, "BingX");
+  const LIMIT = 1440;
+  const maxRequests = Math.ceil(maxKlines / LIMIT);
   const allKlines: [number, number][] = [];
   let endTime = Date.now();
-  for (let i = 0; i < 2 && allKlines.length < FETCH_KLINES; i++) {
-    const url = `https://open-api.bingx.com/openApi/swap/v2/quote/klines?symbol=${encodeURIComponent(fmtSymbol)}&interval=1m&limit=1440&endTime=${endTime}`;
+  for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
+    const url = `https://open-api.bingx.com/openApi/swap/v2/quote/klines?symbol=${encodeURIComponent(fmtSymbol)}&interval=${interval}&limit=${LIMIT}&endTime=${endTime}`;
     const response = await fetch(url);
     if (!response.ok) break;
     const data = await response.json();
@@ -71,19 +95,20 @@ async function fetchBingXKlines(symbol: string): Promise<[number, number][]> {
     allKlines.unshift(...klines);
     const oldest = Math.min(...klines.map((k) => k[0]));
     endTime = oldest - 1;
-    if (klines.length < 1440) break;
+    if (klines.length < LIMIT) break;
   }
   return allKlines.sort((a, b) => a[0] - b[0]);
 }
 
-async function fetchGateKlines(symbol: string): Promise<[number, number][]> {
+async function fetchGateKlines(symbol: string, interval: string, maxKlines: number, intervalMinutes: number): Promise<[number, number][]> {
   const fmtSymbol = formatExchangeSymbol(symbol, "Gate");
+  const LIMIT = 2000;
+  const maxRequests = Math.ceil(maxKlines / LIMIT);
   const allKlines: [number, number][] = [];
   let to = Math.floor(Date.now() / 1000);
-  for (let i = 0; i < 2 && allKlines.length < FETCH_KLINES; i++) {
-    const from = to - 2000 * 60;
-    // Gate API does not allow limit + from/to together
-    const url = `https://api.gateio.ws/api/v4/futures/usdt/candlesticks?contract=${encodeURIComponent(fmtSymbol)}&interval=1m&from=${from}&to=${to}`;
+  for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
+    const from = to - LIMIT * intervalMinutes * 60;
+    const url = `https://api.gateio.ws/api/v4/futures/usdt/candlesticks?contract=${encodeURIComponent(fmtSymbol)}&interval=${interval}&from=${from}&to=${to}`;
     const response = await fetch(url);
     if (!response.ok) break;
     const data = await response.json();
@@ -91,16 +116,18 @@ async function fetchGateKlines(symbol: string): Promise<[number, number][]> {
     const klines: [number, number][] = data.map((k: { t: number; c: string }) => [k.t * 1000, parseFloat(k.c)]);
     allKlines.unshift(...klines);
     to = from - 1;
-    if (data.length < 2000) break;
+    if (data.length < LIMIT) break;
   }
   return allKlines.sort((a, b) => a[0] - b[0]);
 }
 
-async function fetchBitgetKlines(symbol: string): Promise<[number, number][]> {
+async function fetchBitgetKlines(symbol: string, interval: string, maxKlines: number): Promise<[number, number][]> {
+  const LIMIT = 1000;
+  const maxRequests = Math.ceil(maxKlines / LIMIT);
   const allKlines: [number, number][] = [];
   let endTime = String(Date.now());
-  for (let i = 0; i < 3 && allKlines.length < FETCH_KLINES; i++) {
-    const url = `https://api.bitget.com/api/v2/mix/market/candles?productType=USDT-FUTURES&symbol=${symbol.toUpperCase()}&granularity=1m&limit=1000&endTime=${endTime}`;
+  for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
+    const url = `https://api.bitget.com/api/v2/mix/market/candles?productType=USDT-FUTURES&symbol=${symbol.toUpperCase()}&granularity=${interval}&limit=${LIMIT}&endTime=${endTime}`;
     const response = await fetch(url);
     if (!response.ok) break;
     const data = await response.json();
@@ -109,15 +136,15 @@ async function fetchBitgetKlines(symbol: string): Promise<[number, number][]> {
     allKlines.push(...klines);
     const oldest = Math.min(...klines.map((k) => k[0]));
     endTime = String(oldest - 1);
-    if (klines.length < 1000) break;
+    if (klines.length < LIMIT) break;
   }
   return allKlines.sort((a, b) => a[0] - b[0]);
 }
 
-async function fetchBitMartKlines(symbol: string): Promise<[number, number][]> {
+async function fetchBitMartKlines(symbol: string, intervalMinutes: number, maxKlines: number): Promise<[number, number][]> {
   const now = Math.floor(Date.now() / 1000);
-  const start = now - FETCH_KLINES * 60;
-  const url = `https://api-cloud-v2.bitmart.com/contract/public/kline?symbol=${symbol.toUpperCase()}&step=1&start_time=${start}&end_time=${now}`;
+  const start = now - maxKlines * intervalMinutes * 60;
+  const url = `https://api-cloud-v2.bitmart.com/contract/public/kline?symbol=${symbol.toUpperCase()}&step=${intervalMinutes}&start_time=${start}&end_time=${now}`;
   const response = await fetch(url);
   if (!response.ok) return [];
   const data = await response.json();
@@ -127,11 +154,13 @@ async function fetchBitMartKlines(symbol: string): Promise<[number, number][]> {
     .sort((a: [number, number], b: [number, number]) => a[0] - b[0]);
 }
 
-async function fetchZoomexKlines(symbol: string): Promise<[number, number][]> {
+async function fetchZoomexKlines(symbol: string, interval: string, maxKlines: number): Promise<[number, number][]> {
+  const LIMIT = 1000;
+  const maxRequests = Math.ceil(maxKlines / LIMIT);
   const allKlines: [number, number][] = [];
   let endTime = Date.now();
-  for (let i = 0; i < 3 && allKlines.length < FETCH_KLINES; i++) {
-    const url = `https://openapi.zoomex.com/cloud/trade/v3/market/kline?category=linear&symbol=${symbol.toUpperCase()}&interval=1&limit=1000&end=${endTime}`;
+  for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
+    const url = `https://openapi.zoomex.com/cloud/trade/v3/market/kline?category=linear&symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${LIMIT}&end=${endTime}`;
     const response = await fetch(url);
     if (!response.ok) break;
     const data = await response.json();
@@ -140,21 +169,9 @@ async function fetchZoomexKlines(symbol: string): Promise<[number, number][]> {
     allKlines.push(...klines);
     const oldest = Math.min(...klines.map((k) => k[0]));
     endTime = oldest - 1;
-    if (klines.length < 1000) break;
+    if (klines.length < LIMIT) break;
   }
   return allKlines.sort((a, b) => a[0] - b[0]);
-}
-
-function getKlineFetcher(exchange: Exchange): (symbol: string) => Promise<[number, number][]> {
-  switch (exchange) {
-    case "Binance": return fetchBinanceKlines;
-    case "Bybit": return fetchBybitKlines;
-    case "BingX": return fetchBingXKlines;
-    case "Gate": return fetchGateKlines;
-    case "Bitget": return fetchBitgetKlines;
-    case "BitMart": return fetchBitMartKlines;
-    case "Zoomex": return fetchZoomexKlines;
-  }
 }
 
 const VALID_EXCHANGES: Exchange[] = ["Binance", "Bybit", "BingX", "Gate", "Bitget", "BitMart", "Zoomex"];
@@ -163,15 +180,41 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const exchange = searchParams.get("exchange") as Exchange | null;
   const symbol = searchParams.get("symbol");
+  const days = parseInt(searchParams.get("days") ?? "1", 10);
 
   if (!exchange || !symbol || !VALID_EXCHANGES.includes(exchange)) {
     return NextResponse.json({ error: "Missing or invalid exchange/symbol" }, { status: 400 });
   }
 
+  const config = getKlineConfig(days);
+  const interval = getExchangeInterval(exchange, config.intervalMinutes);
+
   try {
-    const fetcher = getKlineFetcher(exchange);
-    const klines = await fetcher(symbol);
-    console.log(`[klines] ${exchange}/${symbol}: ${klines.length} candles`);
+    let klines: [number, number][];
+    switch (exchange) {
+      case "Binance":
+        klines = await fetchBinanceKlines(symbol, interval, config.fetchKlines);
+        break;
+      case "Bybit":
+        klines = await fetchBybitKlines(symbol, interval, config.fetchKlines);
+        break;
+      case "BingX":
+        klines = await fetchBingXKlines(symbol, interval, config.fetchKlines);
+        break;
+      case "Gate":
+        klines = await fetchGateKlines(symbol, interval, config.fetchKlines, config.intervalMinutes);
+        break;
+      case "Bitget":
+        klines = await fetchBitgetKlines(symbol, interval, config.fetchKlines);
+        break;
+      case "BitMart":
+        klines = await fetchBitMartKlines(symbol, config.intervalMinutes, config.fetchKlines);
+        break;
+      case "Zoomex":
+        klines = await fetchZoomexKlines(symbol, interval, config.fetchKlines);
+        break;
+    }
+    console.log(`[klines] ${exchange}/${symbol} ${config.label} (${interval}): ${klines.length} candles`);
     return NextResponse.json(klines);
   } catch (e) {
     console.error(`[klines] ${exchange}/${symbol} error:`, e);
