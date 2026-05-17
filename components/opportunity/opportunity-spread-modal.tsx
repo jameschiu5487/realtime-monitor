@@ -31,6 +31,15 @@ interface DataPoint {
   lower1?: number;
   lower2?: number;
   lower3?: number;
+  // Price Bollinger Bands (based on mid-price)
+  midPrice?: number;
+  priceMa?: number;
+  priceUpper1?: number;
+  priceUpper2?: number;
+  priceUpper3?: number;
+  priceLower1?: number;
+  priceLower2?: number;
+  priceLower3?: number;
 }
 
 interface FundingRateEntry {
@@ -211,7 +220,7 @@ function mergeKlinesAndCalculateSpread(klinesA: [number, number][], klinesB: [nu
       const spreadPercent = (spread / priceA) * 100;
       const spreadBps = spreadPercent * 100;
 
-      result.push({ time: ts, exchangeAPrice: priceA, exchangeBPrice: priceB, spread: spreadBps, spreadPercent });
+      result.push({ time: ts, exchangeAPrice: priceA, exchangeBPrice: priceB, midPrice: (priceA + priceB) / 2, spread: spreadBps, spreadPercent });
     }
   }
 
@@ -233,6 +242,22 @@ function mergeKlinesAndCalculateSpread(klinesA: [number, number][], klinesB: [nu
       result[i].lower1 = ma - std;
       result[i].lower2 = ma - 2 * std;
       result[i].lower3 = ma - 3 * std;
+
+      // Price Bollinger Bands (based on mid-price)
+      let priceSum = 0;
+      for (let j = i - maWindow + 1; j <= i; j++) priceSum += result[j].midPrice!;
+      const priceMa = priceSum / maWindow;
+      result[i].priceMa = priceMa;
+
+      let priceSumSqDiff = 0;
+      for (let j = i - maWindow + 1; j <= i; j++) priceSumSqDiff += Math.pow(result[j].midPrice! - priceMa, 2);
+      const priceStd = Math.sqrt(priceSumSqDiff / maWindow);
+      result[i].priceUpper1 = priceMa + priceStd;
+      result[i].priceUpper2 = priceMa + 2 * priceStd;
+      result[i].priceUpper3 = priceMa + 3 * priceStd;
+      result[i].priceLower1 = priceMa - priceStd;
+      result[i].priceLower2 = priceMa - 2 * priceStd;
+      result[i].priceLower3 = priceMa - 3 * priceStd;
     }
   }
 
@@ -400,7 +425,12 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
 
   const priceYDomain = useMemo(() => {
     if (chartData.length === 0) return [0, 100];
-    const allPrices = chartData.flatMap((d) => [d.exchangeAPrice, d.exchangeBPrice]);
+    const allPrices: number[] = [];
+    chartData.forEach((d) => {
+      allPrices.push(d.exchangeAPrice, d.exchangeBPrice);
+      if (d.priceUpper3 !== undefined) allPrices.push(d.priceUpper3);
+      if (d.priceLower3 !== undefined) allPrices.push(d.priceLower3);
+    });
     const min = Math.min(...allPrices);
     const max = Math.max(...allPrices);
     const padding = (max - min) * 0.05 || 1;
@@ -446,6 +476,10 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
     const date = new Date(ts);
     const dataA = payload.find((p) => p.dataKey === "exchangeAPrice");
     const dataB = payload.find((p) => p.dataKey === "exchangeBPrice");
+    const priceMaData = payload.find((p) => p.dataKey === "priceMa");
+    const priceUpper1Data = payload.find((p) => p.dataKey === "priceUpper1");
+    const priceMa = priceMaData?.value;
+    const priceStd = priceMa !== undefined && priceUpper1Data?.value !== undefined ? priceUpper1Data.value - priceMa : undefined;
 
     const nextFunding = groupedFundingRates.find((g) => g.timestamp >= ts);
 
@@ -462,6 +496,14 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
         {dataB && (
           <div className={textClassB}>
             {exchangeB}: ${formatPrice(dataB.value)}
+          </div>
+        )}
+        {priceMa !== undefined && (
+          <div className="text-amber-500 mt-1">MA(1D): ${formatPrice(priceMa)}</div>
+        )}
+        {priceStd !== undefined && (
+          <div className="text-purple-500 mt-1 text-xs">
+            &sigma;: ${formatPrice(priceStd)}
           </div>
         )}
         {nextFunding && (
@@ -605,7 +647,27 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
 
       {/* Price Chart */}
       <div className="flex-1 min-h-0">
-        <div className="text-sm text-muted-foreground mb-1">Price</div>
+        <div className="flex items-center gap-3 text-sm mb-1">
+          <span className="text-muted-foreground">Price</span>
+          <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0.5 bg-amber-500"></div>
+              <span className="text-muted-foreground">MA(1D)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0.5 bg-purple-400"></div>
+              <span className="text-muted-foreground">&plusmn;1&sigma;</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0.5 bg-purple-300"></div>
+              <span className="text-muted-foreground">&plusmn;2&sigma;</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0.5 bg-purple-200"></div>
+              <span className="text-muted-foreground">&plusmn;3&sigma;</span>
+            </div>
+          </div>
+        </div>
         <div className="h-[calc(100%-20px)]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ left: 50, right: 20, top: 10, bottom: 10 }}>
@@ -635,6 +697,18 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
                   strokeDasharray="4 2"
                 />
               ))}
+              {/* Price Bollinger Bands - 3σ */}
+              <Line type="monotone" dataKey="priceUpper3" stroke="#d8b4fe" strokeWidth={1} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line type="monotone" dataKey="priceLower3" stroke="#d8b4fe" strokeWidth={1} dot={false} isAnimationActive={false} connectNulls={false} />
+              {/* Price Bollinger Bands - 2σ */}
+              <Line type="monotone" dataKey="priceUpper2" stroke="#c084fc" strokeWidth={1} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line type="monotone" dataKey="priceLower2" stroke="#c084fc" strokeWidth={1} dot={false} isAnimationActive={false} connectNulls={false} />
+              {/* Price Bollinger Bands - 1σ */}
+              <Line type="monotone" dataKey="priceUpper1" stroke="#a855f7" strokeWidth={1} dot={false} isAnimationActive={false} connectNulls={false} />
+              <Line type="monotone" dataKey="priceLower1" stroke="#a855f7" strokeWidth={1} dot={false} isAnimationActive={false} connectNulls={false} />
+              {/* Price MA */}
+              <Line type="monotone" dataKey="priceMa" stroke="#f59e0b" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false} />
+              {/* Exchange prices */}
               <Line type="monotone" dataKey="exchangeAPrice" name={exchangeA} stroke={colorA} strokeWidth={1.5} dot={false} isAnimationActive={false} />
               <Line type="monotone" dataKey="exchangeBPrice" name={exchangeB} stroke={colorB} strokeWidth={1.5} dot={false} isAnimationActive={false} />
             </LineChart>
