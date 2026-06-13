@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from "recharts";
-import { Loader2, Play } from "lucide-react";
+import { Loader2, Play, Save, Trash2, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -14,6 +14,13 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { PerformanceStats } from "@/components/charts/performance-stats";
 import { DatePickerField } from "@/components/report/date-picker-field";
 import { createClient } from "@/lib/supabase/client";
@@ -40,6 +47,20 @@ const chartConfig = {
     color: "hsl(142 76% 36%)",
   },
 } satisfies ChartConfig;
+
+interface SavedReport {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  selected_strategy_ids: string[];
+  forward_fill_ids: string[];
+  max_nav_change: number;
+  total_chart_data: ChartDataPoint[];
+  total_equity_curve: EquityCurve[];
+  total_combined_trades: CombinedTrade[];
+  created_at: string;
+}
 
 interface ReportContentProps {
   allStrategies: Strategy[];
@@ -253,7 +274,26 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
     currentName: "",
   });
 
+  const [savedReports, setSavedReports] = useState<SavedReport[]>([]);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [loadedReport, setLoadedReport] = useState<SavedReport | null>(null);
+
   const restoredRef = useRef(false);
+
+  // Fetch saved reports on mount
+  useEffect(() => {
+    const supabase = createClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from("saved_reports")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .then(({ data }: { data: SavedReport[] | null }) => {
+        if (data) setSavedReports(data);
+      });
+  }, []);
 
   // Restore state from sessionStorage on mount
   useEffect(() => {
@@ -441,6 +481,60 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
     }
   }, [startDate, endDate, selectedStrategyIds, forwardFillIds, allRuns, shareRatioMap, strategyNameMap]);
 
+  const handleSaveReport = useCallback(async () => {
+    if (!saveName.trim() || !reportResult || !startDate || !endDate) return;
+    setIsSaving(true);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const chartData = maxNavChange > 0
+        ? adjustNavTransfers(reportResult.totalChartData, maxNavChange)
+        : reportResult.totalChartData;
+      const equityCurve = maxNavChange > 0
+        ? adjustEquityCurveTransfers(reportResult.totalEquityCurve, maxNavChange)
+        : reportResult.totalEquityCurve;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error: saveError } = await (supabase as any)
+        .from("saved_reports")
+        .insert({
+          user_id: user.id,
+          name: saveName.trim(),
+          start_date: startDate.toISOString(),
+          end_date: endDate.toISOString(),
+          selected_strategy_ids: Array.from(selectedStrategyIds),
+          forward_fill_ids: Array.from(forwardFillIds),
+          max_nav_change: maxNavChange,
+          total_chart_data: chartData,
+          total_equity_curve: equityCurve,
+          total_combined_trades: reportResult.totalCombinedTrades,
+        })
+        .select()
+        .single();
+
+      if (saveError) throw saveError;
+      if (data) setSavedReports((prev) => [data as SavedReport, ...prev]);
+      setSaveDialogOpen(false);
+      setSaveName("");
+    } catch (e) {
+      console.error("Save report error:", e);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [saveName, reportResult, startDate, endDate, selectedStrategyIds, forwardFillIds, maxNavChange]);
+
+  const handleDeleteReport = useCallback(async (id: string) => {
+    const supabase = createClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: delError } = await (supabase as any).from("saved_reports").delete().eq("id", id);
+    if (!delError) {
+      setSavedReports((prev) => prev.filter((r) => r.id !== id));
+      if (loadedReport?.id === id) setLoadedReport(null);
+    }
+  }, [loadedReport]);
+
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
@@ -450,6 +544,63 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
           Select a date range and strategies to generate performance reports.
         </p>
       </div>
+
+      {/* Saved Reports */}
+      {savedReports.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Saved Reports</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {savedReports.map((r) => (
+                <div
+                  key={r.id}
+                  className={`flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors hover:bg-accent ${
+                    loadedReport?.id === r.id ? "border-primary bg-accent" : ""
+                  }`}
+                  onClick={() => setLoadedReport(loadedReport?.id === r.id ? null : r)}
+                >
+                  <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{r.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(r.start_date).toLocaleDateString()} - {new Date(r.end_date).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteReport(r.id);
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Loaded Saved Report */}
+      {loadedReport && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">{loadedReport.name}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <EquityChart data={loadedReport.total_chart_data} />
+            <PerformanceStats
+              filteredEquityCurve={loadedReport.total_equity_curve}
+              filteredCombinedTrades={loadedReport.total_combined_trades}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Configuration */}
       <Card>
@@ -590,7 +741,17 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
           {selectedStrategyIds.size > 1 && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Combined Performance</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Combined Performance</CardTitle>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSaveDialogOpen(true)}
+                  >
+                    <Save className="mr-1.5 h-3.5 w-3.5" />
+                    Save
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <EquityChart
@@ -613,6 +774,30 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
               </CardContent>
             </Card>
           )}
+
+          {/* Save Dialog */}
+          <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Save Report</DialogTitle>
+              </DialogHeader>
+              <Input
+                placeholder="Report name"
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSaveReport()}
+              />
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setSaveDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSaveReport} disabled={!saveName.trim() || isSaving}>
+                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Save
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Per-Strategy Sections */}
           {Array.from(selectedStrategyIds).map((strategyId) => {

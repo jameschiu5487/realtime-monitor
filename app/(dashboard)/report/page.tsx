@@ -16,8 +16,15 @@ export default async function ReportPage() {
     }>,
   ]);
 
-  const allStrategies = (strategiesData ?? []) as Strategy[];
-  const allRuns = (runsData ?? []) as StrategyRun[];
+  const accessRows = accessResult.data ?? [];
+  const accessibleIds = new Set(accessRows.map((r) => r.strategy_id));
+
+  const allStrategies = ((strategiesData ?? []) as Strategy[]).filter(
+    (s) => accessibleIds.has(s.strategy_id)
+  );
+  const allRuns = ((runsData ?? []) as StrategyRun[]).filter(
+    (r) => accessibleIds.has(r.strategy_id)
+  );
 
   const shareRatioMap: Record<string, number> = {};
   for (const row of accessResult.data ?? []) {
