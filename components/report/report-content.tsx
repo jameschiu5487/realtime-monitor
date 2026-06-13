@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from "recharts";
 import { Loader2, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -134,7 +134,18 @@ function formatPrice(price: number): string {
   return `$${price.toFixed(2)}`;
 }
 
-function EquityChart({ data, height = 300 }: { data: ChartDataPoint[]; height?: number }) {
+function detectTransferPoints(data: ChartDataPoint[], threshold: number): number[] {
+  if (data.length < 2 || threshold <= 0) return [];
+  const points: number[] = [];
+  for (let i = 1; i < data.length; i++) {
+    if (Math.abs(data[i].equity - data[i - 1].equity) > threshold) {
+      points.push(data[i].time);
+    }
+  }
+  return points;
+}
+
+function EquityChart({ data, transferPoints, height = 300 }: { data: ChartDataPoint[]; transferPoints?: number[]; height?: number }) {
   const displayData = useMemo(() => downsample(data), [data]);
 
   const yDomain = useMemo(() => {
@@ -213,6 +224,15 @@ function EquityChart({ data, height = 300 }: { data: ChartDataPoint[]; height?: 
           strokeWidth={2}
           isAnimationActive={false}
         />
+        {transferPoints?.map((t) => (
+          <ReferenceLine
+            key={t}
+            x={t}
+            stroke="hsl(0 72% 51%)"
+            strokeDasharray="4 3"
+            strokeWidth={1.5}
+          />
+        ))}
       </AreaChart>
     </ChartContainer>
   );
@@ -578,6 +598,10 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                     ? adjustNavTransfers(reportResult.totalChartData, maxNavChange)
                     : reportResult.totalChartData
                   }
+                  transferPoints={maxNavChange > 0
+                    ? detectTransferPoints(reportResult.totalChartData, maxNavChange)
+                    : undefined
+                  }
                 />
                 <PerformanceStats
                   filteredEquityCurve={maxNavChange > 0
@@ -599,12 +623,6 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
               time: new Date(e.ts).getTime(),
               equity: e.total_equity * ratio,
             }));
-            const adjustedChart = maxNavChange > 0
-              ? adjustNavTransfers(chartData, maxNavChange)
-              : chartData;
-            const adjustedEquity = maxNavChange > 0
-              ? adjustEquityCurveTransfers(equity, maxNavChange)
-              : equity;
 
             return (
               <Card key={strategyId}>
@@ -619,9 +637,9 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <EquityChart data={adjustedChart} height={250} />
+                  <EquityChart data={chartData} height={250} />
                   <PerformanceStats
-                    filteredEquityCurve={adjustedEquity}
+                    filteredEquityCurve={equity}
                     filteredCombinedTrades={trades}
                     shareRatio={shareRatioMap[strategyId]}
                   />
