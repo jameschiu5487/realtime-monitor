@@ -481,20 +481,27 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
     }
   }, [startDate, endDate, selectedStrategyIds, forwardFillIds, allRuns, shareRatioMap, strategyNameMap]);
 
+  const adjustedCombined = useMemo(() => {
+    if (!reportResult) return null;
+    const chartData = maxNavChange > 0
+      ? adjustNavTransfers(reportResult.totalChartData, maxNavChange)
+      : reportResult.totalChartData;
+    const equityCurve = maxNavChange > 0
+      ? adjustEquityCurveTransfers(reportResult.totalEquityCurve, maxNavChange)
+      : reportResult.totalEquityCurve;
+    const transferPoints = maxNavChange > 0
+      ? detectTransferPoints(reportResult.totalChartData, maxNavChange)
+      : undefined;
+    return { chartData, equityCurve, transferPoints };
+  }, [reportResult, maxNavChange]);
+
   const handleSaveReport = useCallback(async () => {
-    if (!saveName.trim() || !reportResult || !startDate || !endDate) return;
+    if (!saveName.trim() || !adjustedCombined || !reportResult || !startDate || !endDate) return;
     setIsSaving(true);
     try {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
-      const chartData = maxNavChange > 0
-        ? adjustNavTransfers(reportResult.totalChartData, maxNavChange)
-        : reportResult.totalChartData;
-      const equityCurve = maxNavChange > 0
-        ? adjustEquityCurveTransfers(reportResult.totalEquityCurve, maxNavChange)
-        : reportResult.totalEquityCurve;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error: saveError } = await (supabase as any)
@@ -507,8 +514,8 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
           selected_strategy_ids: Array.from(selectedStrategyIds),
           forward_fill_ids: Array.from(forwardFillIds),
           max_nav_change: maxNavChange,
-          total_chart_data: chartData,
-          total_equity_curve: equityCurve,
+          total_chart_data: adjustedCombined.chartData,
+          total_equity_curve: adjustedCombined.equityCurve,
           total_combined_trades: reportResult.totalCombinedTrades,
         })
         .select()
@@ -523,7 +530,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
     } finally {
       setIsSaving(false);
     }
-  }, [saveName, reportResult, startDate, endDate, selectedStrategyIds, forwardFillIds, maxNavChange]);
+  }, [saveName, adjustedCombined, reportResult, startDate, endDate, selectedStrategyIds, forwardFillIds, maxNavChange]);
 
   const handleDeleteReport = useCallback(async (id: string) => {
     const supabase = createClient();
@@ -754,23 +761,18 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <EquityChart
-                  data={maxNavChange > 0
-                    ? adjustNavTransfers(reportResult.totalChartData, maxNavChange)
-                    : reportResult.totalChartData
-                  }
-                  transferPoints={maxNavChange > 0
-                    ? detectTransferPoints(reportResult.totalChartData, maxNavChange)
-                    : undefined
-                  }
-                />
-                <PerformanceStats
-                  filteredEquityCurve={maxNavChange > 0
-                    ? adjustEquityCurveTransfers(reportResult.totalEquityCurve, maxNavChange)
-                    : reportResult.totalEquityCurve
-                  }
-                  filteredCombinedTrades={reportResult.totalCombinedTrades}
-                />
+                {adjustedCombined && (
+                  <>
+                    <EquityChart
+                      data={adjustedCombined.chartData}
+                      transferPoints={adjustedCombined.transferPoints}
+                    />
+                    <PerformanceStats
+                      filteredEquityCurve={adjustedCombined.equityCurve}
+                      filteredCombinedTrades={reportResult.totalCombinedTrades}
+                    />
+                  </>
+                )}
               </CardContent>
             </Card>
           )}
