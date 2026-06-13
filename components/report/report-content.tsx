@@ -56,10 +56,13 @@ interface SavedReport {
   selected_strategy_ids: string[];
   forward_fill_ids: string[];
   max_nav_change: number;
-  total_chart_data: ChartDataPoint[];
-  total_equity_curve: EquityCurve[];
-  total_combined_trades: CombinedTrade[];
   created_at: string;
+}
+
+interface SavedReportData {
+  totalChartData: ChartDataPoint[];
+  totalEquityCurve: EquityCurve[];
+  totalCombinedTrades: CombinedTrade[];
 }
 
 interface ReportContentProps {
@@ -279,6 +282,8 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
   const [saveName, setSaveName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [loadedReport, setLoadedReport] = useState<SavedReport | null>(null);
+  const [loadedReportData, setLoadedReportData] = useState<SavedReportData | null>(null);
+  const [isLoadingReport, setIsLoadingReport] = useState(false);
 
   const restoredRef = useRef(false);
 
@@ -503,26 +508,64 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error: saveError } = await (supabase as any)
-        .from("saved_reports")
-        .insert({
-          user_id: user.id,
-          name: saveName.trim(),
-          start_date: startDate.toISOString(),
-          end_date: endDate.toISOString(),
-          selected_strategy_ids: Array.from(selectedStrategyIds),
-          forward_fill_ids: Array.from(forwardFillIds),
-          max_nav_change: maxNavChange,
-          total_chart_data: adjustedCombined.chartData,
-          total_equity_curve: adjustedCombined.equityCurve,
-          total_combined_trades: reportResult.totalCombinedTrades,
-        })
-        .select()
-        .single();
+      const reportId = crypto.randomUUID();
 
-      if (saveError) throw saveError;
-      if (data) setSavedReports((prev) => [data as SavedReport, ...prev]);
+      // Strip fields not needed by PerformanceStats to reduce file size
+      const trimmedEquity = adjustedCombined.equityCurve.map((e) => ({
+        ts: e.ts,
+        total_equity: e.total_equity,
+        drawdown_pct: e.drawdown_pct,
+        total_position_value: e.total_position_value,
+      }));
+      const trimmedTrades = reportResult.totalCombinedTrades.map((t) => ({
+        quantity: t.quantity,
+        entry_price: t.entry_price,
+        exit_price: t.exit_price,
+        total_pnl: t.total_pnl,
+      }));
+
+      const jsonStr = JSON.stringify({
+        totalChartData: downsample(adjustedCombined.chartData),
+        totalEquityCurve: trimmedEquity,
+        totalCombinedTrades: trimmedTrades,
+      });
+
+      // Gzip compress
+      const stream = new Blob([jsonStr]).stream().pipeThrough(new CompressionStream("gzip"));
+      const compressedBlob = await new Response(stream).blob();
+
+      // DB insert + Storage upload in parallel
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const [dbResult, storageResult] = await Promise.all([
+        (supabase as any)
+          .from("saved_reports")
+          .insert({
+            id: reportId,
+            user_id: user.id,
+            name: saveName.trim(),
+            start_date: startDate.toISOString(),
+            end_date: endDate.toISOString(),
+            selected_strategy_ids: Array.from(selectedStrategyIds),
+            forward_fill_ids: Array.from(forwardFillIds),
+            max_nav_change: maxNavChange,
+          })
+          .select()
+          .single(),
+        supabase.storage
+          .from("reports")
+          .upload(`${user.id}/${reportId}.json.gz`, compressedBlob, {
+            upsert: true,
+            contentType: "application/gzip",
+          }),
+      ]);
+
+      if (dbResult.error) throw dbResult.error;
+      if (storageResult.error) {
+        await (supabase as any).from("saved_reports").delete().eq("id", reportId);
+        throw storageResult.error;
+      }
+
+      setSavedReports((prev) => [dbResult.data as SavedReport, ...prev]);
       setSaveDialogOpen(false);
       setSaveName("");
     } catch (e) {
@@ -534,11 +577,18 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
 
   const handleDeleteReport = useCallback(async (id: string) => {
     const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error: delError } = await (supabase as any).from("saved_reports").delete().eq("id", id);
     if (!delError) {
+      if (user) {
+        await supabase.storage.from("reports").remove([`${user.id}/${id}.json.gz`]);
+      }
       setSavedReports((prev) => prev.filter((r) => r.id !== id));
-      if (loadedReport?.id === id) setLoadedReport(null);
+      if (loadedReport?.id === id) {
+        setLoadedReport(null);
+        setLoadedReportData(null);
+      }
     }
   }, [loadedReport]);
 
@@ -566,7 +616,34 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                   className={`flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors hover:bg-accent ${
                     loadedReport?.id === r.id ? "border-primary bg-accent" : ""
                   }`}
-                  onClick={() => setLoadedReport(loadedReport?.id === r.id ? null : r)}
+                  onClick={async () => {
+                    if (loadedReport?.id === r.id) {
+                      setLoadedReport(null);
+                      setLoadedReportData(null);
+                      return;
+                    }
+                    setLoadedReport(r);
+                    setLoadedReportData(null);
+                    setIsLoadingReport(true);
+                    try {
+                      const supabase = createClient();
+                      const { data: { user } } = await supabase.auth.getUser();
+                      if (!user) return;
+                      const { data, error: dlError } = await supabase.storage
+                        .from("reports")
+                        .download(`${user.id}/${r.id}.json.gz`);
+                      if (dlError) throw dlError;
+                      const decompressed = data.stream().pipeThrough(new DecompressionStream("gzip"));
+                      const text = await new Response(decompressed).text();
+                      const json: SavedReportData = JSON.parse(text);
+                      setLoadedReportData(json);
+                    } catch (e) {
+                      console.error("Load report error:", e);
+                      setLoadedReport(null);
+                    } finally {
+                      setIsLoadingReport(false);
+                    }
+                  }}
                 >
                   <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="flex-1 min-w-0">
@@ -600,11 +677,20 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
             <CardTitle className="text-base">{loadedReport.name}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <EquityChart data={loadedReport.total_chart_data} />
-            <PerformanceStats
-              filteredEquityCurve={loadedReport.total_equity_curve}
-              filteredCombinedTrades={loadedReport.total_combined_trades}
-            />
+            {isLoadingReport ? (
+              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading report...
+              </div>
+            ) : loadedReportData ? (
+              <>
+                <EquityChart data={loadedReportData.totalChartData} />
+                <PerformanceStats
+                  filteredEquityCurve={loadedReportData.totalEquityCurve}
+                  filteredCombinedTrades={loadedReportData.totalCombinedTrades}
+                />
+              </>
+            ) : null}
           </CardContent>
         </Card>
       )}
