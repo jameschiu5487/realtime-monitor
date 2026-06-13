@@ -251,6 +251,61 @@ export function fillEquityGap(data: EquityCurve[], rangeStart: Date): EquityCurv
   return [makeZeroEquity(rangeStart), ...data];
 }
 
+/**
+ * Remove NAV spikes/drops caused by capital transfers.
+ * When |diff| > threshold, treat as transfer and adjust all subsequent values.
+ */
+export function adjustNavTransfers(data: ChartDataPoint[], threshold: number): ChartDataPoint[] {
+  if (data.length < 2 || threshold <= 0) return data;
+
+  const result: ChartDataPoint[] = [data[0]];
+  let cumulativeAdj = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const rawDiff = data[i].equity - data[i - 1].equity;
+    if (Math.abs(rawDiff) > threshold) {
+      cumulativeAdj += rawDiff;
+    }
+    result.push({
+      time: data[i].time,
+      equity: data[i].equity - cumulativeAdj,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Remove NAV spikes/drops from EquityCurve[] (for PerformanceStats).
+ */
+export function adjustEquityCurveTransfers(data: EquityCurve[], threshold: number): EquityCurve[] {
+  if (data.length < 2 || threshold <= 0) return data;
+
+  const result: EquityCurve[] = [data[0]];
+  let cumulativeAdj = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const rawDiff = data[i].total_equity - data[i - 1].total_equity;
+    if (Math.abs(rawDiff) > threshold) {
+      cumulativeAdj += rawDiff;
+    }
+    result.push({
+      ...data[i],
+      total_equity: data[i].total_equity - cumulativeAdj,
+      total_pnl: data[i].total_pnl - cumulativeAdj,
+    });
+  }
+
+  // Recalculate drawdown
+  let peak = 0;
+  for (const point of result) {
+    peak = Math.max(peak, point.total_equity);
+    point.drawdown_pct = peak > 0 ? ((peak - point.total_equity) / peak) * 100 : 0;
+  }
+
+  return result;
+}
+
 function makeZeroEquity(ts: Date): EquityCurve {
   return {
     run_id: "gap",

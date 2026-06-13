@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   ChartConfig,
   ChartContainer,
@@ -22,6 +23,8 @@ import {
   buildCombinedEquityCurve,
   downsample,
   fillRangeBoundaries,
+  adjustNavTransfers,
+  adjustEquityCurveTransfers,
   type ChartDataPoint,
 } from "@/lib/utils/equity";
 import type {
@@ -51,6 +54,7 @@ interface SerializedState {
   endDate: string | null;
   selectedStrategyIds: string[];
   forwardFillIds: string[];
+  maxNavChange: number;
   result: {
     strategyEquity: [string, EquityCurve[]][];
     strategyCombinedTrades: [string, CombinedTrade[]][];
@@ -219,6 +223,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
   const [endDate, setEndDate] = useState<Date | undefined>();
   const [selectedStrategyIds, setSelectedStrategyIds] = useState<Set<string>>(new Set());
   const [forwardFillIds, setForwardFillIds] = useState<Set<string>>(new Set());
+  const [maxNavChange, setMaxNavChange] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
   const [reportResult, setReportResult] = useState<ReportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -242,6 +247,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
       if (saved.endDate) setEndDate(new Date(saved.endDate));
       if (saved.selectedStrategyIds?.length) setSelectedStrategyIds(new Set(saved.selectedStrategyIds));
       if (saved.forwardFillIds?.length) setForwardFillIds(new Set(saved.forwardFillIds));
+      if (saved.maxNavChange) setMaxNavChange(saved.maxNavChange);
       if (saved.result) {
         setReportResult({
           strategyEquity: new Map(saved.result.strategyEquity),
@@ -263,6 +269,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
         endDate: endDate?.toISOString() ?? null,
         selectedStrategyIds: Array.from(selectedStrategyIds),
         forwardFillIds: Array.from(forwardFillIds),
+        maxNavChange,
         result: reportResult
           ? {
               strategyEquity: Array.from(reportResult.strategyEquity.entries()),
@@ -275,7 +282,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(state));
     } catch {}
-  }, [startDate, endDate, selectedStrategyIds, forwardFillIds, reportResult]);
+  }, [startDate, endDate, selectedStrategyIds, forwardFillIds, maxNavChange, reportResult]);
 
   // Group strategies with their run counts
   const strategiesWithRuns = useMemo(() => {
@@ -430,7 +437,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
           <CardTitle className="text-base">Report Settings</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Date Range */}
+          {/* Date Range & Max NAV Change */}
           <div className="flex items-end gap-4">
             <DatePickerField
               label="Start Date"
@@ -444,6 +451,20 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
               onSelect={setEndDate}
               maxDate={new Date()}
             />
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-muted-foreground">
+                Max NAV Change ($)
+              </label>
+              <Input
+                type="number"
+                min={0}
+                step={100}
+                placeholder="0 = disabled"
+                className="w-[160px]"
+                value={maxNavChange || ""}
+                onChange={(e) => setMaxNavChange(Number(e.target.value) || 0)}
+              />
+            </div>
           </div>
 
           {/* Strategy Selection */}
@@ -552,9 +573,17 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                 <CardTitle className="text-base">Combined Performance</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <EquityChart data={reportResult.totalChartData} />
+                <EquityChart
+                  data={maxNavChange > 0
+                    ? adjustNavTransfers(reportResult.totalChartData, maxNavChange)
+                    : reportResult.totalChartData
+                  }
+                />
                 <PerformanceStats
-                  filteredEquityCurve={reportResult.totalEquityCurve}
+                  filteredEquityCurve={maxNavChange > 0
+                    ? adjustEquityCurveTransfers(reportResult.totalEquityCurve, maxNavChange)
+                    : reportResult.totalEquityCurve
+                  }
                   filteredCombinedTrades={reportResult.totalCombinedTrades}
                 />
               </CardContent>
@@ -565,10 +594,17 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
           {Array.from(selectedStrategyIds).map((strategyId) => {
             const equity = reportResult.strategyEquity.get(strategyId) ?? [];
             const trades = reportResult.strategyCombinedTrades.get(strategyId) ?? [];
+            const ratio = shareRatioMap[strategyId] ?? 1;
             const chartData = equity.map((e) => ({
               time: new Date(e.ts).getTime(),
-              equity: e.total_equity * (shareRatioMap[strategyId] ?? 1),
+              equity: e.total_equity * ratio,
             }));
+            const adjustedChart = maxNavChange > 0
+              ? adjustNavTransfers(chartData, maxNavChange)
+              : chartData;
+            const adjustedEquity = maxNavChange > 0
+              ? adjustEquityCurveTransfers(equity, maxNavChange)
+              : equity;
 
             return (
               <Card key={strategyId}>
@@ -583,9 +619,9 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <EquityChart data={chartData} height={250} />
+                  <EquityChart data={adjustedChart} height={250} />
                   <PerformanceStats
-                    filteredEquityCurve={equity}
+                    filteredEquityCurve={adjustedEquity}
                     filteredCombinedTrades={trades}
                     shareRatio={shareRatioMap[strategyId]}
                   />
