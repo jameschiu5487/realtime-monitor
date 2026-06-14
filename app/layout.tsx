@@ -17,6 +17,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "中低頻量化交易系統",
   description: "專業的中低頻量化交易管理平台",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Trading",
+  },
 };
 
 export default function RootLayout({

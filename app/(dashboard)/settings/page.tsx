@@ -11,8 +11,27 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Settings, Repeat, Bell, Key } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { NotificationSettings } from "@/components/settings/notification-settings";
 
-export default function SettingsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function SettingsPage() {
+  const supabase = await createClient();
+
+  const [{ data: strategiesData }, accessResult] = await Promise.all([
+    supabase.from("strategies").select("strategy_id, name"),
+    supabase.from("user_strategy_access").select("strategy_id") as unknown as Promise<{
+      data: { strategy_id: string }[] | null;
+    }>,
+  ]);
+
+  const accessibleIds = new Set((accessResult.data ?? []).map((r) => r.strategy_id));
+  const allStrategies = (strategiesData ?? []) as { strategy_id: string; name: string }[];
+  const strategies = allStrategies
+    .filter((s) => accessibleIds.has(s.strategy_id))
+    .map((s) => ({ strategy_id: s.strategy_id, name: s.name }));
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div>
@@ -79,22 +98,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="notifications">
-          <Card>
-            <CardHeader className="px-4 sm:px-6 py-3 sm:py-4">
-              <div className="flex items-center gap-2.5">
-                <Bell className="h-4 w-4 text-muted-foreground" />
-                <CardTitle className="text-base sm:text-lg font-medium">
-                  Notification Settings
-                </CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="px-4 sm:px-6">
-              <div className="flex flex-col h-[140px] sm:h-[180px] items-center justify-center gap-3 text-muted-foreground">
-                <Bell className="h-8 w-8 opacity-40" />
-                <p className="text-sm">Notification settings area</p>
-              </div>
-            </CardContent>
-          </Card>
+          <NotificationSettings strategies={strategies} />
         </TabsContent>
 
         <TabsContent value="api">

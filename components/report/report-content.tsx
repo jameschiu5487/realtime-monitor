@@ -642,6 +642,11 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
         target_email: shareEmail.trim(),
       });
       if (error) throw error;
+      fetch("/api/notifications/report-shared", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetEmail: shareEmail.trim(), reportName: loadedReport.name }),
+      }).catch(() => {});
       setShareSuccess(true);
       setTimeout(() => {
         setShareDialogOpen(false);
