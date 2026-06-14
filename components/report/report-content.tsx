@@ -2,12 +2,13 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from "recharts";
-import { Loader2, Play, Save, Trash2, FolderOpen } from "lucide-react";
+import { Loader2, Play, Save, Trash2, FolderOpen, Send, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   ChartConfig,
   ChartContainer,
@@ -56,6 +57,9 @@ interface SavedReport {
   selected_strategy_ids: string[];
   forward_fill_ids: string[];
   max_nav_change: number;
+  notes: string;
+  storage_user_id: string;
+  storage_report_id: string;
   created_at: string;
 }
 
@@ -284,6 +288,16 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
   const [loadedReport, setLoadedReport] = useState<SavedReport | null>(null);
   const [loadedReportData, setLoadedReportData] = useState<SavedReportData | null>(null);
   const [isLoadingReport, setIsLoadingReport] = useState(false);
+  const [editingNotes, setEditingNotes] = useState("");
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const notesDirty = loadedReport ? editingNotes !== loadedReport.notes : false;
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareEmail, setShareEmail] = useState("");
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareSuccess, setShareSuccess] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const restoredRef = useRef(false);
 
@@ -578,10 +592,12 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
   const handleDeleteReport = useCallback(async (id: string) => {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
+    const report = savedReports.find((r) => r.id === id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error: delError } = await (supabase as any).from("saved_reports").delete().eq("id", id);
     if (!delError) {
-      if (user) {
+      // Only delete file if this user owns it (not a shared copy)
+      if (user && report && report.storage_user_id === user.id && report.storage_report_id === report.id) {
         await supabase.storage.from("reports").remove([`${user.id}/${id}.json.gz`]);
       }
       setSavedReports((prev) => prev.filter((r) => r.id !== id));
@@ -590,7 +606,70 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
         setLoadedReportData(null);
       }
     }
-  }, [loadedReport]);
+  }, [loadedReport, savedReports]);
+
+  const handleSaveNotes = useCallback(async () => {
+    if (!loadedReport) return;
+    setIsSavingNotes(true);
+    try {
+      const supabase = createClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: updateError } = await (supabase as any)
+        .from("saved_reports")
+        .update({ notes: editingNotes })
+        .eq("id", loadedReport.id);
+      if (!updateError) {
+        const updated = { ...loadedReport, notes: editingNotes };
+        setLoadedReport(updated);
+        setSavedReports((prev) => prev.map((r) => r.id === updated.id ? updated : r));
+      }
+    } catch (e) {
+      console.error("Save notes error:", e);
+    } finally {
+      setIsSavingNotes(false);
+    }
+  }, [loadedReport, editingNotes]);
+
+  const handleShareReport = useCallback(async () => {
+    if (!loadedReport || !shareEmail.trim()) return;
+    setIsSharing(true);
+    setShareError(null);
+    try {
+      const supabase = createClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase as any).rpc("share_report", {
+        source_report_id: loadedReport.id,
+        target_email: shareEmail.trim(),
+      });
+      if (error) throw error;
+      setShareSuccess(true);
+      setTimeout(() => {
+        setShareDialogOpen(false);
+        setShareEmail("");
+        setShareSuccess(false);
+      }, 1500);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to share";
+      setShareError(msg);
+    } finally {
+      setIsSharing(false);
+    }
+  }, [loadedReport, shareEmail]);
+
+  const handleRename = useCallback(async (id: string) => {
+    if (!renameValue.trim()) return;
+    const supabase = createClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any)
+      .from("saved_reports")
+      .update({ name: renameValue.trim() })
+      .eq("id", id);
+    if (!error) {
+      setSavedReports((prev) => prev.map((r) => r.id === id ? { ...r, name: renameValue.trim() } : r));
+      if (loadedReport?.id === id) setLoadedReport({ ...loadedReport, name: renameValue.trim() });
+    }
+    setRenamingId(null);
+  }, [renameValue, loadedReport]);
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -620,9 +699,11 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                     if (loadedReport?.id === r.id) {
                       setLoadedReport(null);
                       setLoadedReportData(null);
+                      setEditingNotes("");
                       return;
                     }
                     setLoadedReport(r);
+                    setEditingNotes(r.notes || "");
                     setLoadedReportData(null);
                     setIsLoadingReport(true);
                     try {
@@ -631,7 +712,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                       if (!user) return;
                       const { data, error: dlError } = await supabase.storage
                         .from("reports")
-                        .download(`${user.id}/${r.id}.json.gz`);
+                        .download(`${r.storage_user_id}/${r.storage_report_id}.json.gz`);
                       if (dlError) throw dlError;
                       const decompressed = data.stream().pipeThrough(new DecompressionStream("gzip"));
                       const text = await new Response(decompressed).text();
@@ -647,11 +728,43 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                 >
                   <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{r.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {new Date(r.start_date).toLocaleDateString()} - {new Date(r.end_date).toLocaleDateString()}
-                    </div>
+                    {renamingId === r.id ? (
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <Input
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleRename(r.id); if (e.key === "Escape") setRenamingId(null); }}
+                          className="h-6 text-sm px-1"
+                          autoFocus
+                        />
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleRename(r.id)}>
+                          <Check className="h-3 w-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => setRenamingId(null)}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-sm font-medium truncate">{r.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(r.start_date).toLocaleDateString()} - {new Date(r.end_date).toLocaleDateString()}
+                        </div>
+                      </>
+                    )}
                   </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRenamingId(r.id);
+                      setRenameValue(r.name);
+                    }}
+                  >
+                    <Pencil className="h-3 w-3 text-muted-foreground" />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -674,7 +787,18 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
       {loadedReport && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">{loadedReport.name}</CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base truncate">{loadedReport.name}</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => { setShareDialogOpen(true); setShareError(null); setShareSuccess(false); setShareEmail(""); }}
+              >
+                <Send className="mr-1.5 h-3.5 w-3.5" />
+                Share
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             {isLoadingReport ? (
@@ -691,6 +815,30 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                 />
               </>
             ) : null}
+            {/* Notes */}
+            <div className="space-y-2 pt-2 border-t">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-muted-foreground">Notes</span>
+                {notesDirty && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={handleSaveNotes}
+                    disabled={isSavingNotes}
+                  >
+                    {isSavingNotes ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Save className="mr-1 h-3 w-3" />}
+                    Save
+                  </Button>
+                )}
+              </div>
+              <Textarea
+                placeholder="Add notes about this report..."
+                value={editingNotes}
+                onChange={(e) => setEditingNotes(e.target.value)}
+                className="min-h-[80px] resize-y"
+              />
+            </div>
           </CardContent>
         </Card>
       )}
@@ -702,7 +850,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Date Range & Max NAV Change */}
-          <div className="flex items-end gap-4">
+          <div className="flex flex-wrap items-end gap-3 sm:gap-4">
             <DatePickerField
               label="Start Date"
               date={startDate}
@@ -724,7 +872,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                 min={0}
                 step={100}
                 placeholder="0 = disabled"
-                className="w-[160px]"
+                className="w-[140px] sm:w-[160px]"
                 value={maxNavChange || ""}
                 onChange={(e) => setMaxNavChange(Number(e.target.value) || 0)}
               />
@@ -742,7 +890,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                 Clear
               </Button>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
               {strategiesWithRuns.map((s) => {
                 const isSelected = selectedStrategyIds.has(s.strategy_id);
                 const isFf = forwardFillIds.has(s.strategy_id);
@@ -834,11 +982,12 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
           {selectedStrategyIds.size > 1 && (
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <CardTitle className="text-base">Combined Performance</CardTitle>
                   <Button
                     variant="outline"
                     size="sm"
+                    className="shrink-0"
                     onClick={() => setSaveDialogOpen(true)}
                   >
                     <Save className="mr-1.5 h-3.5 w-3.5" />
@@ -922,6 +1071,37 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
           })}
         </div>
       )}
+      {/* Share Dialog */}
+      <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Share Report</DialogTitle>
+          </DialogHeader>
+          {shareSuccess ? (
+            <p className="text-sm text-green-500 py-2">Sent successfully!</p>
+          ) : (
+            <>
+              <Input
+                type="email"
+                placeholder="User email"
+                value={shareEmail}
+                onChange={(e) => setShareEmail(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleShareReport()}
+              />
+              {shareError && <p className="text-sm text-destructive">{shareError}</p>}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShareDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleShareReport} disabled={!shareEmail.trim() || isSharing}>
+                  {isSharing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                  Send
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

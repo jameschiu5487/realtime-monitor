@@ -23,7 +23,7 @@ export function DatePickerField({ label, date, onSelect, maxDate }: DatePickerFi
           <Button
             variant="outline"
             className={cn(
-              "w-[200px] justify-start text-left font-normal",
+              "w-[160px] sm:w-[200px] justify-start text-left font-normal",
               !date && "text-muted-foreground"
             )}
           >
