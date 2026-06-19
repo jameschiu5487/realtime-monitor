@@ -18,6 +18,8 @@ interface Strategy {
 
 interface NotificationPrefs {
   trade_notifications: boolean;
+  trade_every: boolean;
+  trade_combined: boolean;
   nav_change_notifications: boolean;
   nav_change_threshold: number;
   nav_strategy_ids: string[];
@@ -26,6 +28,8 @@ interface NotificationPrefs {
 
 const defaultPrefs: NotificationPrefs = {
   trade_notifications: false,
+  trade_every: true,
+  trade_combined: false,
   nav_change_notifications: false,
   nav_change_threshold: 5,
   nav_strategy_ids: [],
@@ -46,6 +50,8 @@ export function NotificationSettings({ strategies }: { strategies: Strategy[] })
         if (!data.error) {
           setPrefs({
             trade_notifications: data.trade_notifications ?? false,
+            trade_every: data.trade_every ?? true,
+            trade_combined: data.trade_combined ?? false,
             nav_change_notifications: data.nav_change_notifications ?? false,
             nav_change_threshold: data.nav_change_threshold ?? 5,
             nav_strategy_ids: data.nav_strategy_ids ?? [],
@@ -181,15 +187,43 @@ export function NotificationSettings({ strategies }: { strategies: Strategy[] })
         </CardHeader>
         <CardContent className="px-4 sm:px-6 space-y-6">
           {/* Trade Notifications */}
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-sm font-medium">Trade Notifications</Label>
-              <p className="text-xs text-muted-foreground">Get notified when a trade is executed</p>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-medium">Trade Notifications</Label>
+                <p className="text-xs text-muted-foreground">Get notified when a trade is executed</p>
+              </div>
+              <Switch
+                checked={prefs.trade_notifications}
+                onCheckedChange={(v) => updatePref("trade_notifications", v)}
+              />
             </div>
-            <Switch
-              checked={prefs.trade_notifications}
-              onCheckedChange={(v) => updatePref("trade_notifications", v)}
-            />
+
+            {prefs.trade_notifications && (
+              <div className="space-y-2 pl-0 sm:pl-4">
+                <label className="flex items-center gap-2 p-2 rounded-md border hover:bg-accent transition-colors cursor-pointer">
+                  <Checkbox
+                    checked={prefs.trade_every}
+                    onCheckedChange={(v) => updatePref("trade_every", !!v)}
+                  />
+                  <div>
+                    <span className="text-sm">Every Trade</span>
+                    <p className="text-xs text-muted-foreground">Notify on each individual trade execution</p>
+                  </div>
+                </label>
+                <label className="flex items-center gap-2 p-2 rounded-md border hover:bg-accent transition-colors cursor-pointer">
+                  <Checkbox
+                    checked={prefs.trade_combined}
+                    onCheckedChange={(v) => updatePref("trade_combined", !!v)}
+                  />
+                  <div>
+                    <span className="text-sm">Combined Trades</span>
+                    <Badge variant="secondary" className="ml-1.5 text-[10px]">Coming Soon</Badge>
+                    <p className="text-xs text-muted-foreground">Notify on position open/close</p>
+                  </div>
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="border-t" />

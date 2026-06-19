@@ -22,6 +22,8 @@ export async function GET() {
   return NextResponse.json(
     data || {
       trade_notifications: false,
+      trade_every: true,
+      trade_combined: false,
       nav_change_notifications: false,
       nav_change_threshold: 5,
       nav_strategy_ids: [],
@@ -41,6 +43,8 @@ export async function PUT(request: Request) {
   const prefs = {
     user_id: user.id,
     trade_notifications: body.trade_notifications ?? false,
+    trade_every: body.trade_every ?? true,
+    trade_combined: body.trade_combined ?? false,
     nav_change_notifications: body.nav_change_notifications ?? false,
     nav_change_threshold: body.nav_change_threshold ?? 5,
     nav_strategy_ids: body.nav_strategy_ids ?? [],

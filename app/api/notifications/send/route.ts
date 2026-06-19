@@ -18,21 +18,27 @@ export async function POST(request: Request) {
   const supabase = getAdminClient();
 
   const { type, user_ids, payload } = (await request.json()) as {
-    type: "trade" | "nav_change" | "report";
+    type: "trade_every" | "trade_combined" | "nav_change" | "report";
     user_ids?: string[];
     payload: PushPayload;
   };
 
-  const prefColumn = {
-    trade: "trade_notifications",
-    nav_change: "nav_change_notifications",
-    report: "report_notifications",
-  }[type];
+  const prefFilters: Record<string, string[]> = {
+    trade_every: ["trade_notifications", "trade_every"],
+    trade_combined: ["trade_notifications", "trade_combined"],
+    nav_change: ["nav_change_notifications"],
+    report: ["report_notifications"],
+  };
+
+  const columns = prefFilters[type] ?? [type];
 
   let query = supabase
     .from("notification_preferences")
-    .select("user_id")
-    .eq(prefColumn, true);
+    .select("user_id");
+
+  for (const col of columns) {
+    query = query.eq(col, true);
+  }
 
   if (user_ids?.length) {
     query = query.in("user_id", user_ids);
