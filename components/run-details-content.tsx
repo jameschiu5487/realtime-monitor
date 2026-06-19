@@ -556,7 +556,7 @@ export function RunDetailsContent({
         {/* Row 2: Exposure (left) + Realtime Positions (right) */}
         <div className="grid gap-3 sm:gap-6 md:grid-cols-2">
           <ExposureChart data={filteredExposureData} />
-          <RealtimePositionChart data={realtimePositionData} lastInsertTime={positionsLastInsertTime} />
+          <RealtimePositionChart data={realtimePositionData} lastInsertTime={positionsLastInsertTime} runId={runId} />
         </div>
 
         {/* Row 3: PnL Breakdown */}
