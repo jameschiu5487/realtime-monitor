@@ -50,7 +50,9 @@ export async function POST(request: Request) {
     .single();
 
   let strategyName = "Unknown";
+  let strategyId = "";
   if (runData) {
+    strategyId = runData.strategy_id;
     const { data: strat } = await supabase
       .from("strategies")
       .select("name")
@@ -131,7 +133,7 @@ export async function POST(request: Request) {
           title,
           body,
           tag: match ? `hedge-${combined_trade_id}` : `combined-${combined_trade_id}`,
-          url: "/orders",
+          url: `/strategies/${strategyId}/runs/${run_id}`,
         });
         sent++;
       } catch (err: unknown) {

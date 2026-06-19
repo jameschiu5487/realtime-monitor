@@ -319,7 +319,9 @@ export function RealtimePositionChart({ data, lastInsertTime, runId }: RealtimeP
                           {formatCurrency(trade.price)}
                         </TableCell>
                         <TableCell className="text-right font-mono text-muted-foreground">
-                          {trade.fee_rate_bps?.toFixed(2) ?? "—"}
+                          {trade.quantity_actual && trade.price
+                            ? `${((trade.fee_amount_usdt / (trade.quantity_actual * trade.price)) * 10000).toFixed(2)} bp`
+                            : "—"}
                         </TableCell>
                         <TableCell className={cn(
                           "text-right font-mono",
