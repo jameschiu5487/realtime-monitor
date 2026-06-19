@@ -8,6 +8,40 @@ function getAdminClient() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildCombinedBody(strategyName: string, symbol: string, currentTrade: any, match: any, ratio: number): { title: string; body: string } {
+  if (match) {
+    const totalPnl = (Number(currentTrade.total_pnl) + Number(match.total_pnl)) * ratio;
+    const totalFee = (Number(currentTrade.commission_fee) + Number(match.commission_fee)) * ratio;
+    const totalFunding =
+      (Number(currentTrade.funding_fee_realized ?? 0) + Number(match.funding_fee_realized ?? 0)) * ratio;
+    const pnlSign = totalPnl >= 0 ? "+" : "";
+    const exchanges = `${currentTrade.exchange}/${match.exchange}`;
+
+    return {
+      title: "Hedge Closed",
+      body:
+        `${strategyName}: ${symbol} (${exchanges})` +
+        ` | PnL: ${pnlSign}${totalPnl.toFixed(2)}` +
+        ` | Fee: ${totalFee.toFixed(2)}` +
+        ` | Funding: ${totalFunding.toFixed(2)}`,
+    };
+  } else {
+    const pnl = Number(currentTrade.total_pnl) * ratio;
+    const pnlSign = pnl >= 0 ? "+" : "";
+
+    return {
+      title: "Position Closed",
+      body:
+        `${strategyName}: ${(currentTrade.side as string).toUpperCase()} ${symbol}` +
+        ` (${currentTrade.exchange})` +
+        ` | PnL: ${pnlSign}${pnl.toFixed(2)}` +
+        ` | Fee: ${(Number(currentTrade.commission_fee) * ratio).toFixed(2)}` +
+        ` | Funding: ${(Number(currentTrade.funding_fee_realized ?? 0) * ratio).toFixed(2)}`,
+    };
+  }
+}
+
 export async function POST(request: Request) {
   const authHeader = request.headers.get("authorization");
   const apiKey = process.env.NOTIFICATION_API_KEY;
@@ -72,39 +106,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Trade not found" }, { status: 404 });
   }
 
-  let title: string;
-  let body: string;
-
-  if (match) {
-    // Hedge summary
-    const totalPnl = Number(currentTrade.total_pnl) + Number(match.total_pnl);
-    const totalFee = Number(currentTrade.commission_fee) + Number(match.commission_fee);
-    const totalFunding =
-      Number(currentTrade.funding_fee_realized ?? 0) +
-      Number(match.funding_fee_realized ?? 0);
-    const pnlSign = totalPnl >= 0 ? "+" : "";
-    const exchanges = `${currentTrade.exchange}/${match.exchange}`;
-
-    title = "Hedge Closed";
-    body =
-      `${strategyName}: ${symbol} (${exchanges})` +
-      ` | PnL: ${pnlSign}${totalPnl.toFixed(2)}` +
-      ` | Fee: ${totalFee.toFixed(2)}` +
-      ` | Funding: ${totalFunding.toFixed(2)}`;
-  } else {
-    // Single position
-    const pnl = Number(currentTrade.total_pnl);
-    const pnlSign = pnl >= 0 ? "+" : "";
-
-    title = "Position Closed";
-    body =
-      `${strategyName}: ${(currentTrade.side as string).toUpperCase()} ${symbol}` +
-      ` (${exchange})` +
-      ` | PnL: ${pnlSign}${pnl.toFixed(2)}` +
-      ` | Fee: ${Number(currentTrade.commission_fee).toFixed(2)}` +
-      ` | Funding: ${Number(currentTrade.funding_fee_realized ?? 0).toFixed(2)}`;
-  }
-
   // Find users with trade_combined enabled, filtered by strategy
   const { data: enabledUsers } = await supabase
     .from("notification_preferences")
@@ -123,9 +124,23 @@ export async function POST(request: Request) {
 
   const userIds = filteredUsers.map((u: { user_id: string }) => u.user_id);
 
+  // Look up share_ratio per user
+  const ratioMap = new Map<string, number>();
+  if (strategyId) {
+    const { data: accessRows } = await supabase
+      .from("user_strategy_access")
+      .select("user_id, share_ratio")
+      .eq("strategy_id", strategyId)
+      .in("user_id", userIds);
+
+    for (const row of accessRows ?? []) {
+      ratioMap.set(row.user_id, Number(row.share_ratio) || 1);
+    }
+  }
+
   const { data: subs } = await supabase
     .from("push_subscriptions")
-    .select("id, endpoint, p256dh, auth")
+    .select("id, user_id, endpoint, p256dh, auth")
     .in("user_id", userIds);
 
   if (!subs?.length) return NextResponse.json({ sent: 0 });
@@ -134,8 +149,10 @@ export async function POST(request: Request) {
   const staleIds: string[] = [];
 
   await Promise.allSettled(
-    subs.map(async (sub: { id: string; endpoint: string; p256dh: string; auth: string }) => {
+    subs.map(async (sub: { id: string; user_id: string; endpoint: string; p256dh: string; auth: string }) => {
       try {
+        const ratio = ratioMap.get(sub.user_id) ?? 1;
+        const { title, body } = buildCombinedBody(strategyName, symbol, currentTrade, match, ratio);
         await sendPushNotification(sub, {
           title,
           body,
@@ -154,5 +171,5 @@ export async function POST(request: Request) {
     await supabase.from("push_subscriptions").delete().in("id", staleIds);
   }
 
-  return NextResponse.json({ sent, title, hedged: !!match });
+  return NextResponse.json({ sent, hedged: !!match });
 }
