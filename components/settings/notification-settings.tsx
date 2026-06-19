@@ -218,8 +218,7 @@ export function NotificationSettings({ strategies }: { strategies: Strategy[] })
                   />
                   <div>
                     <span className="text-sm">Combined Trades</span>
-                    <Badge variant="secondary" className="ml-1.5 text-[10px]">Coming Soon</Badge>
-                    <p className="text-xs text-muted-foreground">Notify on position open/close</p>
+                    <p className="text-xs text-muted-foreground">Notify on position close with PnL</p>
                   </div>
                 </label>
               </div>
