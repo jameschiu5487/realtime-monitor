@@ -105,16 +105,23 @@ export async function POST(request: Request) {
       ` | Funding: ${Number(currentTrade.funding_fee_realized ?? 0).toFixed(2)}`;
   }
 
-  // Find users with trade_combined enabled
+  // Find users with trade_combined enabled, filtered by strategy
   const { data: enabledUsers } = await supabase
     .from("notification_preferences")
-    .select("user_id")
+    .select("user_id, trade_strategy_ids")
     .eq("trade_notifications", true)
     .eq("trade_combined", true);
 
   if (!enabledUsers?.length) return NextResponse.json({ sent: 0 });
 
-  const userIds = enabledUsers.map((u: { user_id: string }) => u.user_id);
+  const filteredUsers = enabledUsers.filter((u: { user_id: string; trade_strategy_ids?: string[] }) => {
+    const ids = u.trade_strategy_ids ?? [];
+    return ids.length === 0 || ids.includes(strategyId);
+  });
+
+  if (!filteredUsers.length) return NextResponse.json({ sent: 0 });
+
+  const userIds = filteredUsers.map((u: { user_id: string }) => u.user_id);
 
   const { data: subs } = await supabase
     .from("push_subscriptions")

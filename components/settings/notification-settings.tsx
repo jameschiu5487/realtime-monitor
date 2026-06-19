@@ -20,6 +20,7 @@ interface NotificationPrefs {
   trade_notifications: boolean;
   trade_every: boolean;
   trade_combined: boolean;
+  trade_strategy_ids: string[];
   nav_change_notifications: boolean;
   nav_change_threshold: number;
   nav_strategy_ids: string[];
@@ -30,6 +31,7 @@ const defaultPrefs: NotificationPrefs = {
   trade_notifications: false,
   trade_every: true,
   trade_combined: false,
+  trade_strategy_ids: [],
   nav_change_notifications: false,
   nav_change_threshold: 5,
   nav_strategy_ids: [],
@@ -52,6 +54,7 @@ export function NotificationSettings({ strategies }: { strategies: Strategy[] })
             trade_notifications: data.trade_notifications ?? false,
             trade_every: data.trade_every ?? true,
             trade_combined: data.trade_combined ?? false,
+            trade_strategy_ids: data.trade_strategy_ids ?? [],
             nav_change_notifications: data.nav_change_notifications ?? false,
             nav_change_threshold: data.nav_change_threshold ?? 5,
             nav_strategy_ids: data.nav_strategy_ids ?? [],
@@ -69,6 +72,16 @@ export function NotificationSettings({ strategies }: { strategies: Strategy[] })
     },
     []
   );
+
+  const toggleTradeStrategy = useCallback((strategyId: string) => {
+    setPrefs((prev) => {
+      const ids = prev.trade_strategy_ids.includes(strategyId)
+        ? prev.trade_strategy_ids.filter((id) => id !== strategyId)
+        : [...prev.trade_strategy_ids, strategyId];
+      return { ...prev, trade_strategy_ids: ids };
+    });
+    setDirty(true);
+  }, []);
 
   const toggleNavStrategy = useCallback((strategyId: string) => {
     setPrefs((prev) => {
@@ -221,6 +234,27 @@ export function NotificationSettings({ strategies }: { strategies: Strategy[] })
                     <p className="text-xs text-muted-foreground">Notify on position close with PnL</p>
                   </div>
                 </label>
+
+                <div className="space-y-2 pt-2">
+                  <Label className="text-sm text-muted-foreground">Watched Strategies (empty = all)</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {strategies.map((s) => (
+                      <label
+                        key={s.strategy_id}
+                        className="flex items-center gap-2 p-2 rounded-md border hover:bg-accent transition-colors cursor-pointer"
+                      >
+                        <Checkbox
+                          checked={prefs.trade_strategy_ids.includes(s.strategy_id)}
+                          onCheckedChange={() => toggleTradeStrategy(s.strategy_id)}
+                        />
+                        <span className="text-sm truncate">{s.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {strategies.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No strategies available</p>
+                  )}
+                </div>
               </div>
             )}
           </div>

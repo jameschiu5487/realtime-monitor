@@ -17,9 +17,10 @@ export async function POST(request: Request) {
 
   const supabase = getAdminClient();
 
-  const { type, user_ids, payload } = (await request.json()) as {
+  const { type, user_ids, strategy_id, payload } = (await request.json()) as {
     type: "trade_every" | "trade_combined" | "nav_change" | "report";
     user_ids?: string[];
+    strategy_id?: string;
     payload: PushPayload;
   };
 
@@ -48,7 +49,23 @@ export async function POST(request: Request) {
   if (prefError) return NextResponse.json({ error: prefError.message }, { status: 500 });
   if (!enabledUsers?.length) return NextResponse.json({ sent: 0 });
 
-  const enabledIds = enabledUsers.map((u: { user_id: string }) => u.user_id);
+  // Filter by trade_strategy_ids if strategy_id is provided for trade notifications
+  let filteredUsers = enabledUsers as { user_id: string; trade_strategy_ids?: string[] }[];
+  if (strategy_id && (type === "trade_every" || type === "trade_combined")) {
+    // Re-query with trade_strategy_ids
+    const { data: prefsWithStrategies } = await supabase
+      .from("notification_preferences")
+      .select("user_id, trade_strategy_ids")
+      .in("user_id", enabledUsers.map((u: { user_id: string }) => u.user_id));
+
+    filteredUsers = (prefsWithStrategies ?? []).filter((u: { user_id: string; trade_strategy_ids?: string[] }) => {
+      const ids = u.trade_strategy_ids ?? [];
+      return ids.length === 0 || ids.includes(strategy_id);
+    });
+  }
+
+  const enabledIds = filteredUsers.map((u: { user_id: string }) => u.user_id);
+  if (!enabledIds.length) return NextResponse.json({ sent: 0 });
 
   const { data: subs, error: subError } = await supabase
     .from("push_subscriptions")
