@@ -50,6 +50,7 @@ interface Trade {
   quantity_actual: number;
   price: number;
   fee_amount_usdt: number;
+  fee_rate_bps: number;
   status: string;
 }
 
@@ -114,7 +115,7 @@ export function RealtimePositionChart({ data, lastInsertTime, runId }: RealtimeP
       const supabase = createClient();
       const { data: tradesData } = await supabase
         .from("trades")
-        .select("trade_id, ts, action, side, symbol, exchange, quantity_actual, price, fee_amount_usdt, status")
+        .select("trade_id, ts, action, side, symbol, exchange, quantity_actual, price, fee_amount_usdt, fee_rate_bps, status")
         .eq("run_id", runId)
         .order("ts", { ascending: false })
         .limit(100);
@@ -166,44 +167,46 @@ export function RealtimePositionChart({ data, lastInsertTime, runId }: RealtimeP
 
   return (
     <Card>
-      <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
-        <div className="flex flex-1 flex-col justify-center gap-1 px-4 py-3 sm:px-6 sm:py-5">
-          <CardTitle className="text-base sm:text-lg">
-            {tab === "positions" ? "Realtime Positions" : "Executed Orders"}
-          </CardTitle>
-          <CardDescription className="text-xs sm:text-sm">
-            {tab === "positions"
-              ? `Open positions (${latestPositions.length})`
-              : `Recent ${trades.length} orders`}
-          </CardDescription>
-        </div>
-        {tab === "positions" && (
-          <div className="flex">
-            <div className="flex flex-1 flex-col justify-center gap-1 border-t px-3 py-2 text-left sm:border-t-0 sm:border-l sm:px-6 sm:py-5">
-              <span className="text-xs text-muted-foreground">Total Notional</span>
-              <span className="text-base font-bold leading-none sm:text-2xl">
-                {formatCurrency(totalNotional, 0)}
-              </span>
-            </div>
-            <div className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-3 py-2 text-left sm:border-t-0 sm:px-6 sm:py-5">
-              <span className="text-xs text-muted-foreground">Unrealized P&L</span>
-              <span className={cn(
-                "text-base font-bold leading-none sm:text-2xl",
-                getPnLColor(totalUnrealizedPnl)
-              )}>
-                {formatCurrency(totalUnrealizedPnl)}
-              </span>
-            </div>
-          </div>
-        )}
-      </CardHeader>
       <Tabs value={tab} onValueChange={setTab}>
-        <div className="px-4 pt-2 sm:px-6">
-          <TabsList className="w-full sm:w-auto">
-            <TabsTrigger value="positions" className="text-xs sm:text-sm">Positions</TabsTrigger>
-            <TabsTrigger value="orders" className="text-xs sm:text-sm">Executed Orders</TabsTrigger>
-          </TabsList>
-        </div>
+        <CardHeader className="flex flex-col items-stretch p-0">
+          <div className="flex flex-col sm:flex-row items-stretch">
+            <div className="flex flex-1 flex-col justify-center gap-1 px-4 py-3 sm:px-6 sm:py-5">
+              <CardTitle className="text-base sm:text-lg">
+                {tab === "positions" ? "Realtime Positions" : "Executed Orders"}
+              </CardTitle>
+              <CardDescription className="text-xs sm:text-sm">
+                {tab === "positions"
+                  ? `Open positions (${latestPositions.length})`
+                  : `Recent ${trades.length} orders`}
+              </CardDescription>
+            </div>
+            {tab === "positions" && (
+              <div className="flex">
+                <div className="flex flex-1 flex-col justify-center gap-1 border-t px-3 py-2 text-left sm:border-t-0 sm:border-l sm:px-6 sm:py-5">
+                  <span className="text-xs text-muted-foreground">Total Notional</span>
+                  <span className="text-base font-bold leading-none sm:text-2xl">
+                    {formatCurrency(totalNotional, 0)}
+                  </span>
+                </div>
+                <div className="flex flex-1 flex-col justify-center gap-1 border-t border-l px-3 py-2 text-left sm:border-t-0 sm:px-6 sm:py-5">
+                  <span className="text-xs text-muted-foreground">Unrealized P&L</span>
+                  <span className={cn(
+                    "text-base font-bold leading-none sm:text-2xl",
+                    getPnLColor(totalUnrealizedPnl)
+                  )}>
+                    {formatCurrency(totalUnrealizedPnl)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="px-4 pb-2 sm:px-6 border-b">
+            <TabsList className="w-full sm:w-auto">
+              <TabsTrigger value="positions" className="text-xs sm:text-sm">Positions</TabsTrigger>
+              <TabsTrigger value="orders" className="text-xs sm:text-sm">Executed Orders</TabsTrigger>
+            </TabsList>
+          </div>
+        </CardHeader>
         <TabsContent value="positions" className="mt-0">
           <CardContent className="p-0">
             {latestPositions.length === 0 ? (
@@ -287,6 +290,7 @@ export function RealtimePositionChart({ data, lastInsertTime, runId }: RealtimeP
                       <TableHead>Side</TableHead>
                       <TableHead className="text-right">Quantity</TableHead>
                       <TableHead className="text-right">Price</TableHead>
+                      <TableHead className="text-right">Fee Rate</TableHead>
                       <TableHead className="text-right">Fee</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -313,6 +317,9 @@ export function RealtimePositionChart({ data, lastInsertTime, runId }: RealtimeP
                         </TableCell>
                         <TableCell className="text-right font-mono">
                           {formatCurrency(trade.price)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-muted-foreground">
+                          {trade.fee_rate_bps?.toFixed(2) ?? "—"}
                         </TableCell>
                         <TableCell className={cn(
                           "text-right font-mono",
