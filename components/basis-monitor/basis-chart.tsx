@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import { format } from "date-fns";
 import {
@@ -17,31 +18,75 @@ import {
 } from "@/components/ui/chart";
 import type { BasisPoint } from "@/lib/basis";
 
-const chartConfig = {
-  basis: {
-    label: "Basis",
-    // Tailwind v4 的 --chart-1 已是 oklch 完整色值，不可再包 hsl()
-    color: "var(--chart-1)",
-  },
-} satisfies ChartConfig;
+// 與 opportunity-spread-modal 同色系：band 紫色由深到淺、MA 橘色
+const BB_COLORS = ["#a855f7", "#c084fc", "#d8b4fe", "#e9d5ff"];
+const MA_COLOR = "#f59e0b";
+
+export interface BollingerConfig {
+  window: number;
+  stds: number[];
+}
 
 interface BasisChartProps {
   points: BasisPoint[];
   mode: "pct" | "abs";
   title: string;
+  bb: BollingerConfig | null;
 }
 
-export function BasisChart({ points, mode, title }: BasisChartProps) {
-  // Store time as numeric string so ChartTooltipContent's labelFormatter receives
-  // the raw timestamp string (typeof label === "string" branch) rather than falling
-  // back to itemConfig?.label which would be "Basis"
-  const data = points.map((p) => ({
-    time: String(p.time),
-    // bp 模式：basisPct 是百分比，×100 換算 basis points
-    basis: mode === "pct" ? p.basisPct * 100 : p.basisAbs,
-  }));
-  const current = data.length > 0 ? data[data.length - 1].basis : null;
+type ChartRow = { time: string; basis: number } & Record<string, string | number | undefined>;
+
+export function BasisChart({ points, mode, title, bb }: BasisChartProps) {
   const fmt = (v: number) => (mode === "pct" ? `${v.toFixed(1)} bp` : v.toFixed(4));
+
+  const data = useMemo(() => {
+    // Store time as numeric string so ChartTooltipContent's labelFormatter receives
+    // the raw timestamp string (typeof label === "string" branch) rather than falling
+    // back to itemConfig?.label which would be "Basis"
+    const rows: ChartRow[] = points.map((p) => ({
+      time: String(p.time),
+      // bp 模式：basisPct 是百分比，×100 換算 basis points
+      basis: mode === "pct" ? p.basisPct * 100 : p.basisAbs,
+    }));
+    if (bb) {
+      // population std、window 內不足的點留 undefined（同 opportunity-spread-modal 慣例）
+      for (let i = bb.window - 1; i < rows.length; i++) {
+        let sum = 0;
+        for (let j = i - bb.window + 1; j <= i; j++) sum += rows[j].basis;
+        const ma = sum / bb.window;
+        let ssd = 0;
+        for (let j = i - bb.window + 1; j <= i; j++) ssd += Math.pow(rows[j].basis - ma, 2);
+        const std = Math.sqrt(ssd / bb.window);
+        rows[i].ma = ma;
+        bb.stds.forEach((m, k) => {
+          rows[i][`upper${k}`] = ma + m * std;
+          rows[i][`lower${k}`] = ma - m * std;
+        });
+      }
+    }
+    return rows;
+  }, [points, mode, bb]);
+
+  const chartConfig = useMemo(() => {
+    const cfg: ChartConfig = {
+      basis: {
+        label: "Basis",
+        // Tailwind v4 的 --chart-1 已是 oklch 完整色值，不可再包 hsl()
+        color: "var(--chart-1)",
+      },
+    };
+    if (bb) {
+      cfg.ma = { label: `MA${bb.window}`, color: MA_COLOR };
+      bb.stds.forEach((m, k) => {
+        const color = BB_COLORS[k % BB_COLORS.length];
+        cfg[`upper${k}`] = { label: `+${m}σ`, color };
+        cfg[`lower${k}`] = { label: `-${m}σ`, color };
+      });
+    }
+    return cfg;
+  }, [bb]);
+
+  const current = data.length > 0 ? data[data.length - 1].basis : null;
 
   return (
     <Card>
@@ -92,10 +137,46 @@ export function BasisChart({ points, mode, title }: BasisChartProps) {
               content={
                 <ChartTooltipContent
                   labelFormatter={(value) => format(new Date(Number(value)), "MM/dd HH:mm")}
-                  formatter={(value) => fmt(Number(value))}
+                  formatter={(value, name) => (
+                    <div className="flex w-full items-center justify-between gap-4 leading-none">
+                      <span className="text-muted-foreground">
+                        {chartConfig[name as string]?.label ?? name}
+                      </span>
+                      <span className="font-mono font-medium tabular-nums">
+                        {fmt(Number(value))}
+                      </span>
+                    </div>
+                  )}
                 />
               }
             />
+            {bb &&
+              bb.stds.flatMap((m, k) => {
+                const color = BB_COLORS[k % BB_COLORS.length];
+                const common = {
+                  type: "monotone" as const,
+                  stroke: color,
+                  strokeWidth: 1,
+                  dot: false,
+                  isAnimationActive: false,
+                  connectNulls: false,
+                };
+                return [
+                  <Line key={`upper${k}`} dataKey={`upper${k}`} {...common} />,
+                  <Line key={`lower${k}`} dataKey={`lower${k}`} {...common} />,
+                ];
+              })}
+            {bb && (
+              <Line
+                dataKey="ma"
+                type="monotone"
+                stroke={MA_COLOR}
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
             <Line
               dataKey="basis"
               type="monotone"

@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LegSelector } from "./leg-selector";
 import { BasisChart } from "./basis-chart";
@@ -40,6 +43,23 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   const [saving, setSaving] = useState(false);
   const [pairs, setPairs] = useState<BasisPair[]>(initialPairs);
   const [tickers, setTickers] = useState<Record<string, Record<string, number>>>({});
+  const [bbEnabled, setBbEnabled] = useState(false);
+  const [bbWindow, setBbWindow] = useState(20);
+  const [bbStdsInput, setBbStdsInput] = useState("2");
+
+  // "1,2,3" → [1, 2, 3]；非法輸入直接濾掉
+  const bbStds = useMemo(
+    () =>
+      bbStdsInput
+        .split(",")
+        .map((s) => parseFloat(s.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0),
+    [bbStdsInput]
+  );
+  const bb = useMemo(
+    () => (bbEnabled && bbWindow >= 2 && bbStds.length > 0 ? { window: bbWindow, stds: bbStds } : null),
+    [bbEnabled, bbWindow, bbStds]
+  );
 
   const ready = leg1.symbol !== "" && leg2.symbol !== "";
   // 快速切換 leg/range 時，較晚 resolve 的舊請求不得覆蓋新資料
@@ -203,6 +223,35 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
                 <TabsTrigger value="abs">USDT</TabsTrigger>
               </TabsList>
             </Tabs>
+            <div className="flex items-center gap-2">
+              <Switch id="bb-switch" checked={bbEnabled} onCheckedChange={setBbEnabled} />
+              <Label htmlFor="bb-switch">BB</Label>
+              {bbEnabled && (
+                <>
+                  <Label htmlFor="bb-window" className="text-xs text-muted-foreground">
+                    window
+                  </Label>
+                  <Input
+                    id="bb-window"
+                    type="number"
+                    min={2}
+                    value={bbWindow}
+                    onChange={(e) => setBbWindow(Number(e.target.value))}
+                    className="h-8 w-20"
+                  />
+                  <Label htmlFor="bb-stds" className="text-xs text-muted-foreground">
+                    σ
+                  </Label>
+                  <Input
+                    id="bb-stds"
+                    value={bbStdsInput}
+                    onChange={(e) => setBbStdsInput(e.target.value)}
+                    placeholder="1,2,3"
+                    className="h-8 w-24"
+                  />
+                </>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -224,7 +273,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
           </CardContent>
         </Card>
       ) : (
-        <BasisChart points={points} mode={mode} title={pairLabel(leg1, leg2)} />
+        <BasisChart points={points} mode={mode} title={pairLabel(leg1, leg2)} bb={bb} />
       )}
 
       <SavedPairsList
