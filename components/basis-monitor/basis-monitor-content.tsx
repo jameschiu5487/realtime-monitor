@@ -44,8 +44,10 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   const [pairs, setPairs] = useState<BasisPair[]>(initialPairs);
   const [tickers, setTickers] = useState<Record<string, Record<string, number>>>({});
   const [bbEnabled, setBbEnabled] = useState(false);
-  const [bbWindowMin, setBbWindowMin] = useState(240);
+  // 輸入框用字串 state，避免 controlled number input 把空字串/中間態強制正規化成 0
+  const [bbWindowInput, setBbWindowInput] = useState("240");
   const [bbStdsInput, setBbStdsInput] = useState("2");
+  const bbWindowMin = parseFloat(bbWindowInput);
 
   // "1,2,3" → [1, 2, 3]；非法輸入直接濾掉
   const bbStds = useMemo(
@@ -249,8 +251,8 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
                     type="number"
                     min={1}
                     step={30}
-                    value={bbWindowMin}
-                    onChange={(e) => setBbWindowMin(Number(e.target.value))}
+                    value={bbWindowInput}
+                    onChange={(e) => setBbWindowInput(e.target.value)}
                     className="h-8 w-24"
                   />
                   <Label htmlFor="bb-stds" className="text-xs text-muted-foreground">
