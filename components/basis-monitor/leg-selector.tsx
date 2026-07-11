@@ -31,6 +31,8 @@ export function LegSelector({ label, value, onChange }: LegSelectorProps) {
     const cached = symbolCache.get(cacheKey);
     if (cached) {
       setSymbols(cached);
+      // 前一組合的 fetch 可能仍在途中（其 finally 被 cancelled guard 擋掉），這裡要清 loading
+      setLoading(false);
       return;
     }
     setLoading(true);
