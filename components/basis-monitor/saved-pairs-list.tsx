@@ -49,7 +49,7 @@ export function SavedPairsList({ pairs, tickers, onSelect, onDelete }: SavedPair
               <TableRow>
                 <TableHead>Leg 1</TableHead>
                 <TableHead>Leg 2</TableHead>
-                <TableHead className="text-right">Basis %</TableHead>
+                <TableHead className="text-right">Basis (bp)</TableHead>
                 <TableHead className="text-right">價差 (USDT)</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
@@ -84,7 +84,7 @@ export function SavedPairsList({ pairs, tickers, onSelect, onDelete }: SavedPair
                             : "text-red-600 dark:text-red-400")
                       )}
                     >
-                      {snap !== null ? `${snap.pct.toFixed(3)}%` : "—"}
+                      {snap !== null ? `${(snap.pct * 100).toFixed(1)} bp` : "—"}
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       {snap !== null ? snap.abs.toFixed(4) : "—"}

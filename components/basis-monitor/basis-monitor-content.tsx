@@ -199,7 +199,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
             </Tabs>
             <Tabs value={mode} onValueChange={(v) => setMode(v as "pct" | "abs")}>
               <TabsList>
-                <TabsTrigger value="pct">%</TabsTrigger>
+                <TabsTrigger value="pct">bp</TabsTrigger>
                 <TabsTrigger value="abs">USDT</TabsTrigger>
               </TabsList>
             </Tabs>

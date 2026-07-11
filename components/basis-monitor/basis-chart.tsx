@@ -37,10 +37,11 @@ export function BasisChart({ points, mode, title }: BasisChartProps) {
   // back to itemConfig?.label which would be "Basis"
   const data = points.map((p) => ({
     time: String(p.time),
-    basis: mode === "pct" ? p.basisPct : p.basisAbs,
+    // bp 模式：basisPct 是百分比，×100 換算 basis points
+    basis: mode === "pct" ? p.basisPct * 100 : p.basisAbs,
   }));
   const current = data.length > 0 ? data[data.length - 1].basis : null;
-  const fmt = (v: number) => (mode === "pct" ? `${v.toFixed(3)}%` : v.toFixed(4));
+  const fmt = (v: number) => (mode === "pct" ? `${v.toFixed(1)} bp` : v.toFixed(4));
 
   return (
     <Card>
@@ -48,7 +49,7 @@ export function BasisChart({ points, mode, title }: BasisChartProps) {
         <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5 sm:py-6">
           <CardTitle className="font-mono text-base">{title}</CardTitle>
           <CardDescription>
-            {mode === "pct" ? "Basis %（(leg1 − leg2) / leg2）" : "價差（leg1 − leg2，USDT）"}
+            {mode === "pct" ? "Basis（bp，(leg1 − leg2) / leg2）" : "價差（leg1 − leg2，USDT）"}
           </CardDescription>
         </div>
         <div className="flex">
