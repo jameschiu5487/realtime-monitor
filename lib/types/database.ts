@@ -443,11 +443,11 @@ export type Database = {
         Row: {
           id: string;
           user_id: string;
-          leg1_exchange: string;
-          leg1_market: string;
+          leg1_exchange: "Binance" | "Bybit";
+          leg1_market: "perp" | "spot";
           leg1_symbol: string;
-          leg2_exchange: string;
-          leg2_market: string;
+          leg2_exchange: "Binance" | "Bybit";
+          leg2_market: "perp" | "spot";
           leg2_symbol: string;
           alert_enabled: boolean;
           alert_threshold_pct: number | null;
@@ -456,11 +456,11 @@ export type Database = {
         Insert: {
           id?: string;
           user_id?: string;
-          leg1_exchange: string;
-          leg1_market: string;
+          leg1_exchange: "Binance" | "Bybit";
+          leg1_market: "perp" | "spot";
           leg1_symbol: string;
-          leg2_exchange: string;
-          leg2_market: string;
+          leg2_exchange: "Binance" | "Bybit";
+          leg2_market: "perp" | "spot";
           leg2_symbol: string;
           alert_enabled?: boolean;
           alert_threshold_pct?: number | null;
@@ -469,11 +469,11 @@ export type Database = {
         Update: {
           id?: string;
           user_id?: string;
-          leg1_exchange?: string;
-          leg1_market?: string;
+          leg1_exchange?: "Binance" | "Bybit";
+          leg1_market?: "perp" | "spot";
           leg1_symbol?: string;
-          leg2_exchange?: string;
-          leg2_market?: string;
+          leg2_exchange?: "Binance" | "Bybit";
+          leg2_market?: "perp" | "spot";
           leg2_symbol?: string;
           alert_enabled?: boolean;
           alert_threshold_pct?: number | null;
