@@ -439,6 +439,47 @@ export type Database = {
           win_rate?: number;
         };
       };
+      basis_pairs: {
+        Row: {
+          id: string;
+          user_id: string;
+          leg1_exchange: string;
+          leg1_market: string;
+          leg1_symbol: string;
+          leg2_exchange: string;
+          leg2_market: string;
+          leg2_symbol: string;
+          alert_enabled: boolean;
+          alert_threshold_pct: number | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          leg1_exchange: string;
+          leg1_market: string;
+          leg1_symbol: string;
+          leg2_exchange: string;
+          leg2_market: string;
+          leg2_symbol: string;
+          alert_enabled?: boolean;
+          alert_threshold_pct?: number | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          leg1_exchange?: string;
+          leg1_market?: string;
+          leg1_symbol?: string;
+          leg2_exchange?: string;
+          leg2_market?: string;
+          leg2_symbol?: string;
+          alert_enabled?: boolean;
+          alert_threshold_pct?: number | null;
+          created_at?: string;
+        };
+      };
     };
     Views: {
       [_ in never]: never;
@@ -484,6 +525,7 @@ export type PositionUpdate = Database["public"]["Tables"]["positions"]["Update"]
 export type PolymarketEquity = Database["public"]["Tables"]["polymarket_equity"]["Row"];
 export type PolymarketPosition = Database["public"]["Tables"]["polymarket_positions"]["Row"];
 export type PolymarketSymbolPnl = Database["public"]["Tables"]["polymarket_symbol_pnl"]["Row"];
+export type BasisPair = Database["public"]["Tables"]["basis_pairs"]["Row"];
 
 // Run mode and status types
 export type RunMode = StrategyRun["mode"];
