@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -42,10 +42,13 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   const [tickers, setTickers] = useState<Record<string, Record<string, number>>>({});
 
   const ready = leg1.symbol !== "" && leg2.symbol !== "";
+  // 快速切換 leg/range 時，較晚 resolve 的舊請求不得覆蓋新資料
+  const loadGeneration = useRef(0);
 
   // 兩腳選齊（或改時間範圍）就重拉 K 線
   const loadChart = useCallback(async () => {
     if (!ready) return;
+    const generation = ++loadGeneration.current;
     setChartLoading(true);
     setChartError(null);
     try {
@@ -57,6 +60,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
         return res.json();
       };
       const [klines1, klines2] = await Promise.all([fetchLeg(leg1), fetchLeg(leg2)]);
+      if (generation !== loadGeneration.current) return;
       if (klines1.length === 0 || klines2.length === 0) {
         throw new Error("其中一腳沒有 K 線資料（symbol 可能不存在於該市場）");
       }
@@ -64,10 +68,11 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
       const config = getKlineConfig(days);
       setPoints(series.slice(-config.displayKlines));
     } catch (e) {
+      if (generation !== loadGeneration.current) return;
       setPoints([]);
       setChartError(e instanceof Error ? e.message : "載入失敗");
     } finally {
-      setChartLoading(false);
+      if (generation === loadGeneration.current) setChartLoading(false);
     }
   }, [ready, leg1, leg2, days]);
 
@@ -99,40 +104,49 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   const savePair = async () => {
     if (!ready) return;
     setSaving(true);
-    const supabase = createClient();
-    const { data, error } = await (supabase as any)
-      .from("basis_pairs")
-      .insert({
-        leg1_exchange: leg1.exchange,
-        leg1_market: leg1.market,
-        leg1_symbol: leg1.symbol,
-        leg2_exchange: leg2.exchange,
-        leg2_market: leg2.market,
-        leg2_symbol: leg2.symbol,
-      })
-      .select()
-      .single();
-    setSaving(false);
-    if (error) {
-      if (error.code === "23505") {
-        toast.info("這個 pair 已在清單中");
-      } else {
-        toast.error(`儲存失敗：${error.message}`);
+    try {
+      const supabase = createClient();
+      const { data, error } = await (supabase as any)
+        .from("basis_pairs")
+        .insert({
+          leg1_exchange: leg1.exchange,
+          leg1_market: leg1.market,
+          leg1_symbol: leg1.symbol,
+          leg2_exchange: leg2.exchange,
+          leg2_market: leg2.market,
+          leg2_symbol: leg2.symbol,
+        })
+        .select()
+        .single();
+      if (error) {
+        if (error.code === "23505") {
+          toast.info("這個 pair 已在清單中");
+        } else {
+          toast.error(`儲存失敗：${error.message}`);
+        }
+        return;
       }
-      return;
+      setPairs((prev) => [...prev, data as BasisPair]);
+      toast.success("已加入 Monitor");
+    } catch (e) {
+      toast.error(`儲存失敗：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(false);
     }
-    setPairs((prev) => [...prev, data as BasisPair]);
-    toast.success("已加入 Monitor");
   };
 
   const deletePair = async (id: string) => {
-    const supabase = createClient();
-    const { error } = await (supabase as any).from("basis_pairs").delete().eq("id", id);
-    if (error) {
-      toast.error(`刪除失敗：${error.message}`);
-      return;
+    try {
+      const supabase = createClient();
+      const { error } = await (supabase as any).from("basis_pairs").delete().eq("id", id);
+      if (error) {
+        toast.error(`刪除失敗：${error.message}`);
+        return;
+      }
+      setPairs((prev) => prev.filter((p) => p.id !== id));
+    } catch (e) {
+      toast.error(`刪除失敗：${e instanceof Error ? e.message : String(e)}`);
     }
-    setPairs((prev) => prev.filter((p) => p.id !== id));
   };
 
   const selectPair = (pair: BasisPair) => {
