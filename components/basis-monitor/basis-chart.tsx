@@ -20,7 +20,8 @@ import type { BasisPoint } from "@/lib/basis";
 const chartConfig = {
   basis: {
     label: "Basis",
-    color: "hsl(var(--chart-1))",
+    // Tailwind v4 的 --chart-1 已是 oklch 完整色值，不可再包 hsl()
+    color: "var(--chart-1)",
   },
 } satisfies ChartConfig;
 
@@ -85,7 +86,7 @@ export function BasisChart({ points, mode, title }: BasisChartProps) {
               domain={["auto", "auto"]}
               tickFormatter={(value) => fmt(Number(value))}
             />
-            <ReferenceLine y={0} strokeDasharray="3 3" stroke="hsl(var(--muted-foreground))" />
+            <ReferenceLine y={0} strokeDasharray="3 3" stroke="var(--muted-foreground)" />
             <ChartTooltip
               content={
                 <ChartTooltipContent
