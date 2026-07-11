@@ -211,30 +211,35 @@ export async function GET(request: NextRequest) {
 
   const config = getKlineConfig(days);
   const interval = getExchangeInterval(exchange, config.intervalMinutes);
+  // 可選 limit（根數）：呼叫方要額外 indicator warmup 時帶入，覆蓋 config.fetchKlines
+  const limitParam = parseInt(searchParams.get("limit") ?? "", 10);
+  const MAX_LIMIT = 15000;
+  const maxKlines =
+    Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, MAX_LIMIT) : config.fetchKlines;
 
   try {
     let klines: [number, number][];
     switch (exchange) {
       case "Binance":
-        klines = await fetchBinanceKlines(symbol, interval, config.fetchKlines, market);
+        klines = await fetchBinanceKlines(symbol, interval, maxKlines, market);
         break;
       case "Bybit":
-        klines = await fetchBybitKlines(symbol, interval, config.fetchKlines, market);
+        klines = await fetchBybitKlines(symbol, interval, maxKlines, market);
         break;
       case "BingX":
-        klines = await fetchBingXKlines(symbol, interval, config.fetchKlines);
+        klines = await fetchBingXKlines(symbol, interval, maxKlines);
         break;
       case "Gate":
-        klines = await fetchGateKlines(symbol, interval, config.fetchKlines, config.intervalMinutes);
+        klines = await fetchGateKlines(symbol, interval, maxKlines, config.intervalMinutes);
         break;
       case "Bitget":
-        klines = await fetchBitgetKlines(symbol, interval, config.fetchKlines);
+        klines = await fetchBitgetKlines(symbol, interval, maxKlines);
         break;
       case "BitMart":
-        klines = await fetchBitMartKlines(symbol, config.intervalMinutes, config.fetchKlines);
+        klines = await fetchBitMartKlines(symbol, config.intervalMinutes, maxKlines);
         break;
       case "Zoomex":
-        klines = await fetchZoomexKlines(symbol, interval, config.fetchKlines);
+        klines = await fetchZoomexKlines(symbol, interval, maxKlines);
         break;
     }
     console.log(`[klines] ${exchange}/${symbol} ${market} ${config.label} (${interval}): ${klines.length} candles`);

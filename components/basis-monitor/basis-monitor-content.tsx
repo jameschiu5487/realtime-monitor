@@ -70,7 +70,16 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   // 快速切換 leg/range 時，較晚 resolve 的舊請求不得覆蓋新資料
   const loadGeneration = useRef(0);
 
-  // 兩腳選齊（或改時間範圍）就重拉 K 線
+  // 抓取根數 = 顯示根數 + indicator warmup。warmup 依 BB window 決定，
+  // 無條件進位到整天（1440m 的倍數），打字調 window 時不會每個字元都觸發重抓
+  const klineLimit = useMemo(() => {
+    const config = getKlineConfig(days);
+    const warmupDays = bb ? Math.ceil(bbWindowMin / 1440) : 1;
+    const warmupCandles = Math.round((warmupDays * 1440) / config.intervalMinutes);
+    return config.displayKlines + warmupCandles;
+  }, [days, bb, bbWindowMin]);
+
+  // 兩腳選齊（或改時間範圍 / 需要更多 warmup）就重拉 K 線
   const loadChart = useCallback(async () => {
     if (!ready) return;
     const generation = ++loadGeneration.current;
@@ -79,7 +88,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
     try {
       const fetchLeg = async (leg: BasisLeg): Promise<[number, number][]> => {
         const res = await fetch(
-          `/api/klines?exchange=${leg.exchange}&symbol=${encodeURIComponent(leg.symbol)}&days=${days}&market=${leg.market}`
+          `/api/klines?exchange=${leg.exchange}&symbol=${encodeURIComponent(leg.symbol)}&days=${days}&market=${leg.market}&limit=${klineLimit}`
         );
         if (!res.ok) throw new Error(`${legLabel(leg)} K 線載入失敗`);
         return res.json();
@@ -98,7 +107,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
     } finally {
       if (generation === loadGeneration.current) setChartLoading(false);
     }
-  }, [ready, leg1, leg2, days]);
+  }, [ready, leg1, leg2, days, klineLimit]);
 
   // pair 本身變了（非 days/mode 切換）就先清掉舊序列，避免舊圖掛新標題
   const pairKey = ready ? `${legLabel(leg1)}|${legLabel(leg2)}` : "";
