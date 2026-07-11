@@ -29,15 +29,17 @@ export interface BollingerConfig {
 }
 
 interface BasisChartProps {
+  // 完整序列，開頭含約 1 天的 warmup 資料（供 indicator 起算），尾端 displayCount 根才上圖
   points: BasisPoint[];
   mode: "pct" | "abs";
   title: string;
   bb: BollingerConfig | null;
+  displayCount: number;
 }
 
 type ChartRow = { time: string; basis: number } & Record<string, string | number | undefined>;
 
-export function BasisChart({ points, mode, title, bb }: BasisChartProps) {
+export function BasisChart({ points, mode, title, bb, displayCount }: BasisChartProps) {
   const fmt = (v: number) => (mode === "pct" ? `${v.toFixed(1)} bp` : v.toFixed(4));
 
   const data = useMemo(() => {
@@ -65,8 +67,9 @@ export function BasisChart({ points, mode, title, bb }: BasisChartProps) {
         });
       }
     }
-    return rows;
-  }, [points, mode, bb]);
+    // indicator 用完整序列（含 warmup）計算後，只顯示尾端 displayCount 根
+    return rows.slice(-displayCount);
+  }, [points, mode, bb, displayCount]);
 
   const chartConfig = useMemo(() => {
     const cfg: ChartConfig = {

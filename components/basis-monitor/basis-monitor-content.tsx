@@ -89,9 +89,8 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
       if (klines1.length === 0 || klines2.length === 0) {
         throw new Error("其中一腳沒有 K 線資料（symbol 可能不存在於該市場）");
       }
-      const series = computeBasisSeries(klines1, klines2);
-      const config = getKlineConfig(days);
-      setPoints(series.slice(-config.displayKlines));
+      // 不在這裡裁切：完整序列（含 1 天 warmup）交給圖表先算 indicator 再裁切顯示
+      setPoints(computeBasisSeries(klines1, klines2));
     } catch (e) {
       if (generation !== loadGeneration.current) return;
       setPoints([]);
@@ -279,7 +278,13 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
           </CardContent>
         </Card>
       ) : (
-        <BasisChart points={points} mode={mode} title={pairLabel(leg1, leg2)} bb={bb} />
+        <BasisChart
+          points={points}
+          mode={mode}
+          title={pairLabel(leg1, leg2)}
+          bb={bb}
+          displayCount={getKlineConfig(days).displayKlines}
+        />
       )}
 
       <SavedPairsList
