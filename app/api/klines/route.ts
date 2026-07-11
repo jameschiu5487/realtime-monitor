@@ -36,16 +36,26 @@ function getExchangeInterval(exchange: Exchange, intervalMinutes: number): strin
   }
 }
 
-async function fetchBinanceKlines(symbol: string, interval: string, maxKlines: number): Promise<[number, number][]> {
-  const LIMIT = 1500;
+async function fetchBinanceKlines(
+  symbol: string,
+  interval: string,
+  maxKlines: number,
+  market: "perp" | "spot"
+): Promise<[number, number][]> {
+  // spot 端點單次上限 1000，futures 為 1500
+  const LIMIT = market === "perp" ? 1500 : 1000;
+  const baseUrl =
+    market === "perp"
+      ? "https://fapi.binance.com/fapi/v1/klines"
+      : "https://api.binance.com/api/v3/klines";
   const maxRequests = Math.ceil(maxKlines / LIMIT);
   const allKlines: [number, number][] = [];
   let oldestTime = Date.now();
   for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
     const url =
       i === 0
-        ? `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${LIMIT}`
-        : `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${LIMIT}&endTime=${oldestTime - 1}`;
+        ? `${baseUrl}?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${LIMIT}`
+        : `${baseUrl}?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${LIMIT}&endTime=${oldestTime - 1}`;
     const response = await fetch(url);
     if (!response.ok) break;
     const data = await response.json();
@@ -58,13 +68,19 @@ async function fetchBinanceKlines(symbol: string, interval: string, maxKlines: n
   return allKlines;
 }
 
-async function fetchBybitKlines(symbol: string, interval: string, maxKlines: number): Promise<[number, number][]> {
+async function fetchBybitKlines(
+  symbol: string,
+  interval: string,
+  maxKlines: number,
+  market: "perp" | "spot"
+): Promise<[number, number][]> {
+  const category = market === "perp" ? "linear" : "spot";
   const LIMIT = 1000;
   const maxRequests = Math.ceil(maxKlines / LIMIT);
   const allKlines: [number, number][] = [];
   let endTime = Date.now();
   for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
-    const url = `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${LIMIT}&end=${endTime}`;
+    const url = `https://api.bybit.com/v5/market/kline?category=${category}&symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${LIMIT}&end=${endTime}`;
     const response = await fetch(url);
     if (!response.ok) break;
     const data = await response.json();
@@ -181,9 +197,16 @@ export async function GET(request: NextRequest) {
   const exchange = searchParams.get("exchange") as Exchange | null;
   const symbol = searchParams.get("symbol");
   const days = parseInt(searchParams.get("days") ?? "1", 10);
+  const market = (searchParams.get("market") ?? "perp") as "perp" | "spot";
 
   if (!exchange || !symbol || !VALID_EXCHANGES.includes(exchange)) {
     return NextResponse.json({ error: "Missing or invalid exchange/symbol" }, { status: 400 });
+  }
+  if (market !== "perp" && market !== "spot") {
+    return NextResponse.json({ error: "Invalid market" }, { status: 400 });
+  }
+  if (market === "spot" && exchange !== "Binance" && exchange !== "Bybit") {
+    return NextResponse.json({ error: "spot only supported for Binance/Bybit" }, { status: 400 });
   }
 
   const config = getKlineConfig(days);
@@ -193,10 +216,10 @@ export async function GET(request: NextRequest) {
     let klines: [number, number][];
     switch (exchange) {
       case "Binance":
-        klines = await fetchBinanceKlines(symbol, interval, config.fetchKlines);
+        klines = await fetchBinanceKlines(symbol, interval, config.fetchKlines, market);
         break;
       case "Bybit":
-        klines = await fetchBybitKlines(symbol, interval, config.fetchKlines);
+        klines = await fetchBybitKlines(symbol, interval, config.fetchKlines, market);
         break;
       case "BingX":
         klines = await fetchBingXKlines(symbol, interval, config.fetchKlines);
@@ -214,7 +237,7 @@ export async function GET(request: NextRequest) {
         klines = await fetchZoomexKlines(symbol, interval, config.fetchKlines);
         break;
     }
-    console.log(`[klines] ${exchange}/${symbol} ${config.label} (${interval}): ${klines.length} candles`);
+    console.log(`[klines] ${exchange}/${symbol} ${market} ${config.label} (${interval}): ${klines.length} candles`);
     return NextResponse.json(klines);
   } catch (e) {
     console.error(`[klines] ${exchange}/${symbol} error:`, e);
