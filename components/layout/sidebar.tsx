@@ -16,6 +16,7 @@ import {
   X,
   Dice5,
   FileBarChart,
+  ArrowRightLeft,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -34,6 +35,7 @@ const navItems = [
   { title: "Strategies", href: "/strategies", icon: TrendingUp },
   { title: "Positions", href: "/positions", icon: Wallet },
   { title: "Opportunity", href: "/opportunity", icon: Radar },
+  { title: "Basis", href: "/basis-monitor", icon: ArrowRightLeft },
   { title: "Polymarket", href: "/polymarket", icon: Dice5 },
   { title: "Backtest", href: "/backtest", icon: TestTube },
   { title: "Report", href: "/report", icon: FileBarChart },
