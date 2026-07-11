@@ -113,6 +113,16 @@ create table basis_pairs (
 - 交易所 API 失敗、symbol 下架、回傳空陣列：圖表區顯示錯誤訊息，不擋整頁其他功能。
 - 兩腳選成完全相同的標的：照常畫（basis 恆為 0），不特別擋。
 
+## 實作修訂（plan 撰寫時依現有程式碼調整，2026-07-11）
+
+1. **時間粒度沿用現有 `lib/kline-config.ts`**：1D→1m、7D→15m、30D→1h（非原訂
+   5m/1h/4h）。`/api/klines` 以 `days` 查 `KLINE_CONFIGS` 是既有機制，沿用即可，
+   零新增參數；前端以 `displayKlines` 截尾控制點數。
+2. **exchange 值存大寫 `'Binance' | 'Bybit'`**（非小寫），與全 app 的
+   `Exchange` 型別（`lib/types/opportunity.ts`）一致，DB 加 check constraint。
+3. **`user_id` 設 `default auth.uid()`**，client insert 不必手動帶。
+4. **symbol 清單只列 USDT 報價對**（basis 絕對值以 USDT 計，非 USDT 報價無法比較）。
+
 ## 驗證（完成定義）
 
 1. `pnpm build` 通過。
