@@ -28,7 +28,7 @@ function snapshot(
 ): { pct: number; abs: number } | null {
   const p1 = tickers[`${pair.leg1_exchange}|${pair.leg1_market}`]?.[pair.leg1_symbol];
   const p2 = tickers[`${pair.leg2_exchange}|${pair.leg2_market}`]?.[pair.leg2_symbol];
-  if (p1 === undefined || p2 === undefined || p2 === 0) return null;
+  if (p1 === undefined || p2 === undefined || !Number.isFinite(p1) || !Number.isFinite(p2) || p2 === 0) return null;
   return { pct: ((p1 - p2) / p2) * 100, abs: p1 - p2 };
 }
 

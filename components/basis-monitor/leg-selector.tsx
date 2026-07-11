@@ -37,8 +37,9 @@ export function LegSelector({ label, value, onChange }: LegSelectorProps) {
     }
     setLoading(true);
     fetch(`/api/symbols?exchange=${value.exchange}&market=${value.market}`)
-      .then((res) => (res.ok ? res.json() : []))
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`symbols ${res.status}`))))
       .then((list: string[]) => {
+        // 只快取成功結果，失敗留給下次進入時重試
         symbolCache.set(cacheKey, list);
         if (!cancelled) setSymbols(list);
       })

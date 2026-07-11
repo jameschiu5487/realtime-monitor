@@ -76,6 +76,16 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
     }
   }, [ready, leg1, leg2, days]);
 
+  // pair 本身變了（非 days/mode 切換）就先清掉舊序列，避免舊圖掛新標題
+  const pairKey = ready ? `${legLabel(leg1)}|${legLabel(leg2)}` : "";
+  const prevPairKey = useRef(pairKey);
+  useEffect(() => {
+    if (prevPairKey.current !== pairKey) {
+      prevPairKey.current = pairKey;
+      setPoints([]);
+    }
+  }, [pairKey]);
+
   useEffect(() => {
     loadChart();
   }, [loadChart]);
@@ -91,9 +101,10 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
       if (tickers[combo]) continue;
       const [exchange, market] = combo.split("|");
       fetch(`/api/tickers?exchange=${exchange}&market=${market}`)
-        .then((res) => (res.ok ? res.json() : {}))
-        .then((map: Record<string, number>) => {
-          setTickers((prev) => ({ ...prev, [combo]: map }));
+        .then((res) => (res.ok ? res.json() : null))
+        .then((map: Record<string, number> | null) => {
+          // 失敗不落 cache，pairs 下次變動時會重試
+          if (map) setTickers((prev) => ({ ...prev, [combo]: map }));
         })
         .catch(() => {});
     }
