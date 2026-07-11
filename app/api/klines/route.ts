@@ -240,7 +240,7 @@ export async function GET(request: NextRequest) {
     console.log(`[klines] ${exchange}/${symbol} ${market} ${config.label} (${interval}): ${klines.length} candles`);
     return NextResponse.json(klines);
   } catch (e) {
-    console.error(`[klines] ${exchange}/${symbol} error:`, e);
+    console.error(`[klines] ${exchange}/${symbol} ${market} error:`, e);
     return NextResponse.json([], { status: 200 });
   }
 }

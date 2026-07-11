@@ -31,9 +31,11 @@ async function fetchBybitSymbols(market: Market): Promise<string[]> {
   const category = market === "perp" ? "linear" : "spot";
   const symbols: string[] = [];
   let cursor = "";
-  do {
+  const MAX_PAGES = 20;
+  for (let page = 0; page < MAX_PAGES; page++) {
     const url = `https://api.bybit.com/v5/market/instruments-info?category=${category}&limit=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-    const response = await fetch(url, CACHE_1H);
+    // cursor 頁不可快取：快取的第一頁可能回傳過期 cursor，後續頁會靜默失敗
+    const response = await fetch(url, cursor ? { cache: "no-store" } : CACHE_1H);
     if (!response.ok) break;
     const data = await response.json();
     if (data.retCode !== 0) break;
@@ -52,7 +54,8 @@ async function fetchBybitSymbols(market: Market): Promise<string[]> {
       }
     }
     cursor = data.result?.nextPageCursor ?? "";
-  } while (cursor);
+    if (!cursor) break;
+  }
   return symbols.sort();
 }
 
