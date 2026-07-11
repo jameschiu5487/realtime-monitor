@@ -44,7 +44,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   const [pairs, setPairs] = useState<BasisPair[]>(initialPairs);
   const [tickers, setTickers] = useState<Record<string, Record<string, number>>>({});
   const [bbEnabled, setBbEnabled] = useState(false);
-  const [bbWindow, setBbWindow] = useState(20);
+  const [bbWindowMin, setBbWindowMin] = useState(240);
   const [bbStdsInput, setBbStdsInput] = useState("2");
 
   // "1,2,3" → [1, 2, 3]；非法輸入直接濾掉
@@ -56,10 +56,15 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
         .filter((n) => Number.isFinite(n) && n > 0),
     [bbStdsInput]
   );
-  const bb = useMemo(
-    () => (bbEnabled && bbWindow >= 2 && bbStds.length > 0 ? { window: bbWindow, stds: bbStds } : null),
-    [bbEnabled, bbWindow, bbStds]
-  );
+  // window 輸入單位是分鐘，依當前範圍的 K 線粒度換算成根數（至少 2 根）
+  const bb = useMemo(() => {
+    if (!bbEnabled || bbStds.length === 0 || !Number.isFinite(bbWindowMin) || bbWindowMin <= 0) {
+      return null;
+    }
+    const intervalMinutes = getKlineConfig(days).intervalMinutes;
+    const window = Math.max(2, Math.round(bbWindowMin / intervalMinutes));
+    return { window, windowLabel: `${bbWindowMin}m`, stds: bbStds };
+  }, [bbEnabled, bbWindowMin, bbStds, days]);
 
   const ready = leg1.symbol !== "" && leg2.symbol !== "";
   // 快速切換 leg/range 時，較晚 resolve 的舊請求不得覆蓋新資料
@@ -229,15 +234,16 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
               {bbEnabled && (
                 <>
                   <Label htmlFor="bb-window" className="text-xs text-muted-foreground">
-                    window
+                    window (m)
                   </Label>
                   <Input
                     id="bb-window"
                     type="number"
-                    min={2}
-                    value={bbWindow}
-                    onChange={(e) => setBbWindow(Number(e.target.value))}
-                    className="h-8 w-20"
+                    min={1}
+                    step={30}
+                    value={bbWindowMin}
+                    onChange={(e) => setBbWindowMin(Number(e.target.value))}
+                    className="h-8 w-24"
                   />
                   <Label htmlFor="bb-stds" className="text-xs text-muted-foreground">
                     σ

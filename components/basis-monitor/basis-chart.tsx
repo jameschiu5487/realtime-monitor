@@ -23,7 +23,8 @@ const BB_COLORS = ["#a855f7", "#c084fc", "#d8b4fe", "#e9d5ff"];
 const MA_COLOR = "#f59e0b";
 
 export interface BollingerConfig {
-  window: number;
+  window: number; // 根數（由分鐘依當前 K 線粒度換算而來）
+  windowLabel: string; // 顯示用，例如 "240m"
   stds: number[];
 }
 
@@ -76,7 +77,7 @@ export function BasisChart({ points, mode, title, bb }: BasisChartProps) {
       },
     };
     if (bb) {
-      cfg.ma = { label: `MA${bb.window}`, color: MA_COLOR };
+      cfg.ma = { label: `MA(${bb.windowLabel})`, color: MA_COLOR };
       bb.stds.forEach((m, k) => {
         const color = BB_COLORS[k % BB_COLORS.length];
         cfg[`upper${k}`] = { label: `+${m}σ`, color };
