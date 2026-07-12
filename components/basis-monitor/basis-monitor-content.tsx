@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LegSelector } from "./leg-selector";
-import { BasisChart } from "./basis-chart";
+import { BasisChart, type PairFunding } from "./basis-chart";
 import { SavedPairsList } from "./saved-pairs-list";
 import {
   computeBasisSeries,
@@ -43,6 +43,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   const [saving, setSaving] = useState(false);
   const [pairs, setPairs] = useState<BasisPair[]>(initialPairs);
   const [tickers, setTickers] = useState<Record<string, Record<string, number>>>({});
+  const [funding, setFunding] = useState<PairFunding | null>(null);
   const [bbEnabled, setBbEnabled] = useState(false);
   // 輸入框用字串 state，避免 controlled number input 把空字串/中間態強制正規化成 0
   const [bbWindowInput, setBbWindowInput] = useState("240");
@@ -125,6 +126,38 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   useEffect(() => {
     loadChart();
   }, [loadChart]);
+
+  // funding 歷史：每條 perp 腿各打一次 funding-history（兩腿 symbol 可能不同），
+  // API 的 exchangeA/exchangeB 皆必填，同一腿就重複帶同交易所、只讀 exchangeA 側
+  useEffect(() => {
+    if (!ready) {
+      setFunding(null);
+      return;
+    }
+    let cancelled = false;
+    const fetchLegFunding = async (leg: BasisLeg) => {
+      if (leg.market !== "perp") return null;
+      try {
+        const res = await fetch(
+          `/api/funding-history?symbol=${encodeURIComponent(leg.symbol)}&exchangeA=${leg.exchange}&exchangeB=${leg.exchange}`
+        );
+        if (!res.ok) return null;
+        const data = await res.json();
+        const events = ((data.exchangeA ?? []) as { timestamp: number; rate: number }[]).map(
+          (e) => ({ timestamp: e.timestamp, rateBp: e.rate * 10000 })
+        );
+        return { label: legLabel(leg), events };
+      } catch {
+        return null;
+      }
+    };
+    Promise.all([fetchLegFunding(leg1), fetchLegFunding(leg2)]).then(([f1, f2]) => {
+      if (!cancelled) setFunding(f1 || f2 ? { leg1: f1, leg2: f2 } : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, leg1, leg2]);
 
   // 清單快照：對清單涉及的每個 exchange+market 組合各拉一次 tickers
   useEffect(() => {
@@ -306,6 +339,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
           title={pairLabel(leg1, leg2)}
           bb={bb}
           displayCount={getKlineConfig(days).displayKlines}
+          funding={funding}
         />
       )}
 

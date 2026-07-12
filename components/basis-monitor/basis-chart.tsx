@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import { format } from "date-fns";
 import {
   Card,
@@ -18,15 +18,26 @@ import {
 } from "@/components/ui/chart";
 import type { BasisPoint } from "@/lib/basis";
 
-// 與 opportunity-spread-modal 同色系：band 紫色由深到淺、MA 橘色
+// 與 opportunity-spread-modal 同色系：band 紫色由深到淺、MA 橘色、funding 紅色虛線
 const BB_COLORS = ["#a855f7", "#c084fc", "#d8b4fe", "#e9d5ff"];
 const MA_COLOR = "#f59e0b";
+const FUNDING_COLORS = { leg1: "#ef4444", leg2: "#06b6d4" };
 
 export interface BollingerConfig {
   window: number; // 根數（由分鐘依當前 K 線粒度換算而來）
   windowLabel: string; // 顯示用，例如 "240m"
   widthMode: "std" | "abs"; // band 寬度：σ 倍數，或顯示單位（bp/USDT）的絕對偏移
   widths: number[];
+}
+
+export interface LegFunding {
+  label: string; // 例 "CRCLUSDT Bybit perp"
+  events: { timestamp: number; rateBp: number }[];
+}
+
+export interface PairFunding {
+  leg1: LegFunding | null; // spot 腿為 null
+  leg2: LegFunding | null;
 }
 
 interface BasisChartProps {
@@ -36,14 +47,15 @@ interface BasisChartProps {
   title: string;
   bb: BollingerConfig | null;
   displayCount: number;
+  funding: PairFunding | null;
 }
 
 type ChartRow = { time: string; basis: number } & Record<string, string | number | undefined>;
 
-export function BasisChart({ points, mode, title, bb, displayCount }: BasisChartProps) {
+export function BasisChart({ points, mode, title, bb, displayCount, funding }: BasisChartProps) {
   const fmt = (v: number) => (mode === "pct" ? `${v.toFixed(1)} bp` : v.toFixed(4));
 
-  const data = useMemo(() => {
+  const { data, fundingTimes1, fundingTimes2 } = useMemo(() => {
     // Store time as numeric string so ChartTooltipContent's labelFormatter receives
     // the raw timestamp string (typeof label === "string" branch) rather than falling
     // back to itemConfig?.label which would be "Basis"
@@ -73,8 +85,38 @@ export function BasisChart({ points, mode, title, bb, displayCount }: BasisChart
       }
     }
     // indicator 用完整序列（含 warmup）計算後，只顯示尾端 displayCount 根
-    return rows.slice(-displayCount);
-  }, [points, mode, bb, displayCount]);
+    const visible = rows.slice(-displayCount);
+
+    // funding 結算時間吸附到最近的蠟燭（X 軸是 category 字串軸，ReferenceLine
+    // 的 x 必須精確等於某個 data row 的 time 字串才會顯示）
+    const times1: string[] = [];
+    const times2: string[] = [];
+    const snap = (legFunding: LegFunding | null, key: string, collector: string[]) => {
+      if (!legFunding || legFunding.events.length === 0 || visible.length === 0) return;
+      const first = Number(visible[0].time);
+      const last = Number(visible[visible.length - 1].time);
+      const step = visible.length > 1 ? last - Number(visible[visible.length - 2].time) : 0;
+      for (const ev of legFunding.events) {
+        if (ev.timestamp < first || ev.timestamp > last + step) continue;
+        let best = 0;
+        let bestDiff = Infinity;
+        for (let i = 0; i < visible.length; i++) {
+          const diff = Math.abs(Number(visible[i].time) - ev.timestamp);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            best = i;
+          }
+        }
+        const row = visible[best];
+        // 同一根蠟燭若有多筆結算（理論上不會）就累加
+        row[key] = ((row[key] as number | undefined) ?? 0) + ev.rateBp;
+        collector.push(row.time);
+      }
+    };
+    snap(funding?.leg1 ?? null, "funding1", times1);
+    snap(funding?.leg2 ?? null, "funding2", times2);
+    return { data: visible, fundingTimes1: times1, fundingTimes2: times2 };
+  }, [points, mode, bb, displayCount, funding]);
 
   const chartConfig = useMemo(() => {
     const cfg: ChartConfig = {
@@ -93,10 +135,14 @@ export function BasisChart({ points, mode, title, bb, displayCount }: BasisChart
         cfg[`lower${k}`] = { label: `-${m}${unit}`, color };
       });
     }
+    if (funding?.leg1) cfg.funding1 = { label: funding.leg1.label, color: FUNDING_COLORS.leg1 };
+    if (funding?.leg2) cfg.funding2 = { label: funding.leg2.label, color: FUNDING_COLORS.leg2 };
     return cfg;
-  }, [bb, mode]);
+  }, [bb, mode, funding]);
 
   const current = data.length > 0 ? data[data.length - 1].basis : null;
+  const hasFundingBars = fundingTimes1.length > 0 || fundingTimes2.length > 0;
+  const timeLabel = (value: unknown) => format(new Date(Number(value)), "MM/dd HH:mm");
 
   return (
     <Card>
@@ -133,7 +179,7 @@ export function BasisChart({ points, mode, title, bb, displayCount }: BasisChart
               axisLine={false}
               tickMargin={8}
               minTickGap={48}
-              tickFormatter={(value) => format(new Date(Number(value)), "MM/dd HH:mm")}
+              tickFormatter={timeLabel}
             />
             <YAxis
               tickLine={false}
@@ -143,17 +189,37 @@ export function BasisChart({ points, mode, title, bb, displayCount }: BasisChart
               tickFormatter={(value) => fmt(Number(value))}
             />
             <ReferenceLine y={0} strokeDasharray="3 3" stroke="var(--muted-foreground)" />
+            {fundingTimes1.map((t) => (
+              <ReferenceLine
+                key={`f1-${t}`}
+                x={t}
+                stroke={FUNDING_COLORS.leg1}
+                strokeWidth={1}
+                strokeDasharray="4 2"
+              />
+            ))}
+            {fundingTimes2.map((t) => (
+              <ReferenceLine
+                key={`f2-${t}`}
+                x={t}
+                stroke={FUNDING_COLORS.leg2}
+                strokeWidth={1}
+                strokeDasharray="4 2"
+              />
+            ))}
             <ChartTooltip
               content={
                 <ChartTooltipContent
-                  labelFormatter={(value) => format(new Date(Number(value)), "MM/dd HH:mm")}
+                  labelFormatter={timeLabel}
                   formatter={(value, name) => (
                     <div className="flex w-full items-center justify-between gap-4 leading-none">
                       <span className="text-muted-foreground">
                         {chartConfig[name as string]?.label ?? name}
                       </span>
                       <span className="font-mono font-medium tabular-nums">
-                        {fmt(Number(value))}
+                        {name === "funding1" || name === "funding2"
+                          ? `${Number(value).toFixed(2)} bp`
+                          : fmt(Number(value))}
                       </span>
                     </div>
                   )}
@@ -197,6 +263,65 @@ export function BasisChart({ points, mode, title, bb, displayCount }: BasisChart
             />
           </LineChart>
         </ChartContainer>
+
+        {hasFundingBars && (
+          <div className="mt-3">
+            <div className="mb-1 flex flex-wrap items-center gap-3 px-3 text-xs text-muted-foreground">
+              <span>Funding（bp / 次）</span>
+              {funding?.leg1 && fundingTimes1.length > 0 && (
+                <span className="flex items-center gap-1">
+                  <span
+                    className="inline-block h-2 w-2 rounded-[2px]"
+                    style={{ backgroundColor: FUNDING_COLORS.leg1 }}
+                  />
+                  {funding.leg1.label}
+                </span>
+              )}
+              {funding?.leg2 && fundingTimes2.length > 0 && (
+                <span className="flex items-center gap-1">
+                  <span
+                    className="inline-block h-2 w-2 rounded-[2px]"
+                    style={{ backgroundColor: FUNDING_COLORS.leg2 }}
+                  />
+                  {funding.leg2.label}
+                </span>
+              )}
+            </div>
+            <ChartContainer config={chartConfig} className="aspect-auto h-[90px] w-full">
+              <BarChart accessibilityLayer data={data} margin={{ left: 12, right: 12 }}>
+                {/* 隱藏 X 軸但保留刻度定位，與上方主圖同資料列數 + 同 YAxis 寬度 → 垂直對齊 */}
+                <XAxis dataKey="time" hide />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  width={76}
+                  domain={["auto", "auto"]}
+                  tickFormatter={(value) => `${Number(value).toFixed(2)}`}
+                />
+                <ReferenceLine y={0} strokeDasharray="3 3" stroke="var(--muted-foreground)" />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent
+                      labelFormatter={timeLabel}
+                      formatter={(value, name) => (
+                        <div className="flex w-full items-center justify-between gap-4 leading-none">
+                          <span className="text-muted-foreground">
+                            {chartConfig[name as string]?.label ?? name}
+                          </span>
+                          <span className="font-mono font-medium tabular-nums">
+                            {`${Number(value).toFixed(2)} bp`}
+                          </span>
+                        </div>
+                      )}
+                    />
+                  }
+                />
+                <Bar dataKey="funding1" fill={FUNDING_COLORS.leg1} barSize={3} isAnimationActive={false} />
+                <Bar dataKey="funding2" fill={FUNDING_COLORS.leg2} barSize={3} isAnimationActive={false} />
+              </BarChart>
+            </ChartContainer>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
