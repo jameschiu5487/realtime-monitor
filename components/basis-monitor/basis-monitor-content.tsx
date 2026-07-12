@@ -46,27 +46,28 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   const [bbEnabled, setBbEnabled] = useState(false);
   // 輸入框用字串 state，避免 controlled number input 把空字串/中間態強制正規化成 0
   const [bbWindowInput, setBbWindowInput] = useState("240");
-  const [bbStdsInput, setBbStdsInput] = useState("2");
+  const [bbWidthMode, setBbWidthMode] = useState<"std" | "abs">("std");
+  const [bbWidthsInput, setBbWidthsInput] = useState("2");
   const bbWindowMin = parseFloat(bbWindowInput);
 
   // "1,2,3" → [1, 2, 3]；非法輸入直接濾掉
-  const bbStds = useMemo(
+  const bbWidths = useMemo(
     () =>
-      bbStdsInput
+      bbWidthsInput
         .split(",")
         .map((s) => parseFloat(s.trim()))
         .filter((n) => Number.isFinite(n) && n > 0),
-    [bbStdsInput]
+    [bbWidthsInput]
   );
   // window 輸入單位是分鐘，依當前範圍的 K 線粒度換算成根數（至少 2 根）
   const bb = useMemo(() => {
-    if (!bbEnabled || bbStds.length === 0 || !Number.isFinite(bbWindowMin) || bbWindowMin <= 0) {
+    if (!bbEnabled || bbWidths.length === 0 || !Number.isFinite(bbWindowMin) || bbWindowMin <= 0) {
       return null;
     }
     const intervalMinutes = getKlineConfig(days).intervalMinutes;
     const window = Math.max(2, Math.round(bbWindowMin / intervalMinutes));
-    return { window, windowLabel: `${bbWindowMin}m`, stds: bbStds };
-  }, [bbEnabled, bbWindowMin, bbStds, days]);
+    return { window, windowLabel: `${bbWindowMin}m`, widthMode: bbWidthMode, widths: bbWidths };
+  }, [bbEnabled, bbWindowMin, bbWidthMode, bbWidths, days]);
 
   const ready = leg1.symbol !== "" && leg2.symbol !== "";
   // 快速切換 leg/range 時，較晚 resolve 的舊請求不得覆蓋新資料
@@ -255,14 +256,24 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
                     onChange={(e) => setBbWindowInput(e.target.value)}
                     className="h-8 w-24"
                   />
-                  <Label htmlFor="bb-stds" className="text-xs text-muted-foreground">
-                    σ
-                  </Label>
+                  <Tabs
+                    value={bbWidthMode}
+                    onValueChange={(v) => setBbWidthMode(v as "std" | "abs")}
+                  >
+                    <TabsList className="h-8">
+                      <TabsTrigger value="std" className="text-xs">
+                        σ
+                      </TabsTrigger>
+                      <TabsTrigger value="abs" className="text-xs">
+                        {mode === "pct" ? "bp" : "USDT"}
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
                   <Input
-                    id="bb-stds"
-                    value={bbStdsInput}
-                    onChange={(e) => setBbStdsInput(e.target.value)}
-                    placeholder="1,2,3"
+                    id="bb-widths"
+                    value={bbWidthsInput}
+                    onChange={(e) => setBbWidthsInput(e.target.value)}
+                    placeholder={bbWidthMode === "std" ? "1,2,3" : "5,10"}
                     className="h-8 w-24"
                   />
                 </>

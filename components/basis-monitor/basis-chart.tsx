@@ -25,7 +25,8 @@ const MA_COLOR = "#f59e0b";
 export interface BollingerConfig {
   window: number; // 根數（由分鐘依當前 K 線粒度換算而來）
   windowLabel: string; // 顯示用，例如 "240m"
-  stds: number[];
+  widthMode: "std" | "abs"; // band 寬度：σ 倍數，或顯示單位（bp/USDT）的絕對偏移
+  widths: number[];
 }
 
 interface BasisChartProps {
@@ -57,13 +58,17 @@ export function BasisChart({ points, mode, title, bb, displayCount }: BasisChart
         let sum = 0;
         for (let j = i - bb.window + 1; j <= i; j++) sum += rows[j].basis;
         const ma = sum / bb.window;
-        let ssd = 0;
-        for (let j = i - bb.window + 1; j <= i; j++) ssd += Math.pow(rows[j].basis - ma, 2);
-        const std = Math.sqrt(ssd / bb.window);
+        let std = 0;
+        if (bb.widthMode === "std") {
+          let ssd = 0;
+          for (let j = i - bb.window + 1; j <= i; j++) ssd += Math.pow(rows[j].basis - ma, 2);
+          std = Math.sqrt(ssd / bb.window);
+        }
         rows[i].ma = ma;
-        bb.stds.forEach((m, k) => {
-          rows[i][`upper${k}`] = ma + m * std;
-          rows[i][`lower${k}`] = ma - m * std;
+        bb.widths.forEach((m, k) => {
+          const offset = bb.widthMode === "std" ? m * std : m;
+          rows[i][`upper${k}`] = ma + offset;
+          rows[i][`lower${k}`] = ma - offset;
         });
       }
     }
@@ -81,14 +86,15 @@ export function BasisChart({ points, mode, title, bb, displayCount }: BasisChart
     };
     if (bb) {
       cfg.ma = { label: `MA(${bb.windowLabel})`, color: MA_COLOR };
-      bb.stds.forEach((m, k) => {
+      const unit = bb.widthMode === "std" ? "σ" : mode === "pct" ? " bp" : " USDT";
+      bb.widths.forEach((m, k) => {
         const color = BB_COLORS[k % BB_COLORS.length];
-        cfg[`upper${k}`] = { label: `+${m}σ`, color };
-        cfg[`lower${k}`] = { label: `-${m}σ`, color };
+        cfg[`upper${k}`] = { label: `+${m}${unit}`, color };
+        cfg[`lower${k}`] = { label: `-${m}${unit}`, color };
       });
     }
     return cfg;
-  }, [bb]);
+  }, [bb, mode]);
 
   const current = data.length > 0 ? data[data.length - 1].basis : null;
 
@@ -155,7 +161,7 @@ export function BasisChart({ points, mode, title, bb, displayCount }: BasisChart
               }
             />
             {bb &&
-              bb.stds.flatMap((m, k) => {
+              bb.widths.flatMap((m, k) => {
                 const color = BB_COLORS[k % BB_COLORS.length];
                 const common = {
                   type: "monotone" as const,
