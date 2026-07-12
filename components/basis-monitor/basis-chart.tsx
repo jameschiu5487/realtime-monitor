@@ -48,11 +48,12 @@ interface BasisChartProps {
   bb: BollingerConfig | null;
   displayCount: number;
   funding: PairFunding | null;
+  legLabels: { leg1: string; leg2: string };
 }
 
 type ChartRow = { time: string; basis: number } & Record<string, string | number | undefined>;
 
-export function BasisChart({ points, mode, title, bb, displayCount, funding }: BasisChartProps) {
+export function BasisChart({ points, mode, title, bb, displayCount, funding, legLabels }: BasisChartProps) {
   const fmt = (v: number) => (mode === "pct" ? `${v.toFixed(1)} bp` : v.toFixed(4));
 
   const { data, fundingTimes1, fundingTimes2 } = useMemo(() => {
@@ -156,6 +157,20 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
   const hasFundingPanel = hasFunding1 || hasFunding2;
   const timeLabel = (value: unknown) => format(new Date(Number(value)), "MM/dd HH:mm");
 
+  // 賭收斂的交易方向：basis < 0 → leg1 便宜 → Long leg1 / Short leg2；反之相反
+  const convergenceHint = (row: ChartRow | undefined) => {
+    if (!row || typeof row.basis !== "number" || row.basis === 0) return null;
+    const longLabel = row.basis < 0 ? legLabels.leg1 : legLabels.leg2;
+    const shortLabel = row.basis < 0 ? legLabels.leg2 : legLabels.leg1;
+    return (
+      <div className="mt-1 flex flex-col gap-0.5 border-t border-border/50 pt-1 font-normal">
+        <span className="text-muted-foreground">賭收斂：</span>
+        <span className="text-emerald-600 dark:text-emerald-400">Long　{longLabel}</span>
+        <span className="text-red-600 dark:text-red-400">Short　{shortLabel}</span>
+      </div>
+    );
+  };
+
   // hover 蠟燭所屬期別的 funding（該期結束時結算的費率）
   const fundingPeriodLines = (row: ChartRow | undefined) => {
     if (!row || !funding) return null;
@@ -246,12 +261,16 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
             <ChartTooltip
               content={
                 <ChartTooltipContent
-                  labelFormatter={(value, payload) => (
-                    <div className="flex flex-col">
-                      <span>{timeLabel(value)}</span>
-                      {fundingPeriodLines(payload?.[0]?.payload as ChartRow | undefined)}
-                    </div>
-                  )}
+                  labelFormatter={(value, payload) => {
+                    const row = payload?.[0]?.payload as ChartRow | undefined;
+                    return (
+                      <div className="flex flex-col">
+                        <span>{timeLabel(value)}</span>
+                        {convergenceHint(row)}
+                        {fundingPeriodLines(row)}
+                      </div>
+                    );
+                  }}
                   formatter={(value, name) => (
                     <div className="flex w-full items-center justify-between gap-4 leading-none">
                       <span className="text-muted-foreground">

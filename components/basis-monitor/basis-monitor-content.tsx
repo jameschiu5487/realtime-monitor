@@ -342,6 +342,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
           bb={bb}
           displayCount={getKlineConfig(days).displayKlines}
           funding={funding}
+          legLabels={{ leg1: legLabel(leg1), leg2: legLabel(leg2) }}
         />
       )}
 
