@@ -21,7 +21,10 @@ async function fetchBinanceSymbols(market: Market): Promise<string[]> {
       (s) =>
         s.status === "TRADING" &&
         s.quoteAsset === "USDT" &&
-        (market === "spot" || s.contractType === "PERPETUAL")
+        // TRADIFI_PERPETUAL = 美股等傳統資產的永續（TSLAUSDT、CRCLUSDT…）
+        (market === "spot" ||
+          s.contractType === "PERPETUAL" ||
+          s.contractType === "TRADIFI_PERPETUAL")
     )
     .map((s) => s.symbol)
     .sort();
