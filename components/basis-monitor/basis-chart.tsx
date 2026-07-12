@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import { format } from "date-fns";
 import {
   Card,
@@ -55,7 +55,7 @@ type ChartRow = { time: string; basis: number } & Record<string, string | number
 export function BasisChart({ points, mode, title, bb, displayCount, funding }: BasisChartProps) {
   const fmt = (v: number) => (mode === "pct" ? `${v.toFixed(1)} bp` : v.toFixed(4));
 
-  const { data, hasFunding1, hasFunding2 } = useMemo(() => {
+  const { data, fundingTimes1, fundingTimes2 } = useMemo(() => {
     // Store time as numeric string so ChartTooltipContent's labelFormatter receives
     // the raw timestamp string (typeof label === "string" branch) rather than falling
     // back to itemConfig?.label which would be "Basis"
@@ -88,17 +88,17 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
     const visible = rows.slice(-displayCount);
 
     // funding 併入資料列：
-    // 1. 結算時間吸附到最近的蠟燭，掛 fundingN（副圖 bar 用；X 軸是 category 字串軸）
-    // 2. 每根蠟燭標註它所屬期別的結算（下一個 >= 蠟燭時間的結算），掛 nfNBp/nfNTime（tooltip 用）
-    let has1 = false;
-    let has2 = false;
-    const attach = (legFunding: LegFunding | null, n: 1 | 2): boolean => {
-      if (!legFunding || legFunding.events.length === 0 || visible.length === 0) return false;
+    // 1. 結算時間吸附到最近的蠟燭，收集 time 字串供主圖垂直虛線用
+    //    （X 軸是 category 字串軸，ReferenceLine 的 x 必須精確等於某個 row 的 time）
+    // 2. 每根蠟燭標註它所屬期別的結算（下一個 >= 蠟燭時間的結算），掛 nfNBp/nfNTime
+    //    （tooltip 顯示 + 副圖的 step 線）
+    const attach = (legFunding: LegFunding | null, n: 1 | 2): string[] => {
+      if (!legFunding || legFunding.events.length === 0 || visible.length === 0) return [];
       const events = [...legFunding.events].sort((a, b) => a.timestamp - b.timestamp);
       const first = Number(visible[0].time);
       const last = Number(visible[visible.length - 1].time);
       const step = visible.length > 1 ? last - Number(visible[visible.length - 2].time) : 0;
-      let attached = false;
+      const times: string[] = [];
       for (const ev of events) {
         if (ev.timestamp < first || ev.timestamp > last + step) continue;
         let best = 0;
@@ -110,10 +110,7 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
             best = i;
           }
         }
-        const row = visible[best];
-        // 同一根蠟燭若有多筆結算（理論上不會）就累加
-        row[`funding${n}`] = ((row[`funding${n}`] as number | undefined) ?? 0) + ev.rateBp;
-        attached = true;
+        times.push(visible[best].time);
       }
       // two-pointer：為每根蠟燭找它之後（含當根）最近的結算
       let idx = 0;
@@ -124,11 +121,11 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
         row[`nf${n}Bp`] = events[idx].rateBp;
         row[`nf${n}Time`] = events[idx].timestamp;
       }
-      return attached;
+      return times;
     };
-    has1 = attach(funding?.leg1 ?? null, 1);
-    has2 = attach(funding?.leg2 ?? null, 2);
-    return { data: visible, hasFunding1: has1, hasFunding2: has2 };
+    const times1 = attach(funding?.leg1 ?? null, 1);
+    const times2 = attach(funding?.leg2 ?? null, 2);
+    return { data: visible, fundingTimes1: times1, fundingTimes2: times2 };
   }, [points, mode, bb, displayCount, funding]);
 
   const chartConfig = useMemo(() => {
@@ -148,13 +145,15 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
         cfg[`lower${k}`] = { label: `-${m}${unit}`, color };
       });
     }
-    if (funding?.leg1) cfg.funding1 = { label: funding.leg1.label, color: FUNDING_COLORS.leg1 };
-    if (funding?.leg2) cfg.funding2 = { label: funding.leg2.label, color: FUNDING_COLORS.leg2 };
+    if (funding?.leg1) cfg.nf1Bp = { label: funding.leg1.label, color: FUNDING_COLORS.leg1 };
+    if (funding?.leg2) cfg.nf2Bp = { label: funding.leg2.label, color: FUNDING_COLORS.leg2 };
     return cfg;
   }, [bb, mode, funding]);
 
   const current = data.length > 0 ? data[data.length - 1].basis : null;
-  const hasFundingBars = hasFunding1 || hasFunding2;
+  const hasFunding1 = fundingTimes1.length > 0;
+  const hasFunding2 = fundingTimes2.length > 0;
+  const hasFundingPanel = hasFunding1 || hasFunding2;
   const timeLabel = (value: unknown) => format(new Date(Number(value)), "MM/dd HH:mm");
 
   // hover 蠟燭所屬期別的 funding（該期結束時結算的費率）
@@ -224,6 +223,26 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
               tickFormatter={(value) => fmt(Number(value))}
             />
             <ReferenceLine y={0} strokeDasharray="3 3" stroke="var(--muted-foreground)" />
+            {fundingTimes1.map((t) => (
+              <ReferenceLine
+                key={`f1-${t}`}
+                x={t}
+                stroke={FUNDING_COLORS.leg1}
+                strokeWidth={1}
+                strokeDasharray="4 2"
+                strokeOpacity={0.55}
+              />
+            ))}
+            {fundingTimes2.map((t) => (
+              <ReferenceLine
+                key={`f2-${t}`}
+                x={t}
+                stroke={FUNDING_COLORS.leg2}
+                strokeWidth={1}
+                strokeDasharray="4 2"
+                strokeOpacity={0.55}
+              />
+            ))}
             <ChartTooltip
               content={
                 <ChartTooltipContent
@@ -284,14 +303,14 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
           </LineChart>
         </ChartContainer>
 
-        {hasFundingBars && (
+        {hasFundingPanel && (
           <div className="mt-3">
             <div className="mb-1 flex flex-wrap items-center gap-3 px-3 text-xs text-muted-foreground">
-              <span>Funding（bp / 次）</span>
+              <span>Funding（bp / 期）</span>
               {funding?.leg1 && hasFunding1 && (
                 <span className="flex items-center gap-1">
                   <span
-                    className="inline-block h-2 w-2 rounded-[2px]"
+                    className="inline-block h-0.5 w-3"
                     style={{ backgroundColor: FUNDING_COLORS.leg1 }}
                   />
                   {funding.leg1.label}
@@ -300,22 +319,24 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
               {funding?.leg2 && hasFunding2 && (
                 <span className="flex items-center gap-1">
                   <span
-                    className="inline-block h-2 w-2 rounded-[2px]"
+                    className="inline-block h-0.5 w-3"
                     style={{ backgroundColor: FUNDING_COLORS.leg2 }}
                   />
                   {funding.leg2.label}
                 </span>
               )}
             </div>
-            <ChartContainer config={chartConfig} className="aspect-auto h-[90px] w-full">
-              <BarChart accessibilityLayer data={data} margin={{ left: 12, right: 12 }}>
-                {/* 隱藏 X 軸但保留刻度定位，與上方主圖同資料列數 + 同 YAxis 寬度 → 垂直對齊 */}
+            <ChartContainer config={chartConfig} className="aspect-auto h-[100px] w-full">
+              {/* 每期費率的階梯線；X 軸隱藏但與主圖同資料列數 + 同 YAxis 寬度 → 垂直對齊 */}
+              <LineChart accessibilityLayer data={data} margin={{ left: 12, right: 12 }}>
+                <CartesianGrid vertical={false} />
                 <XAxis dataKey="time" hide />
                 <YAxis
                   tickLine={false}
                   axisLine={false}
                   width={76}
                   domain={["auto", "auto"]}
+                  tickCount={3}
                   tickFormatter={(value) => `${Number(value).toFixed(2)}`}
                 />
                 <ReferenceLine y={0} strokeDasharray="3 3" stroke="var(--muted-foreground)" />
@@ -336,9 +357,29 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
                     />
                   }
                 />
-                <Bar dataKey="funding1" fill={FUNDING_COLORS.leg1} barSize={3} isAnimationActive={false} />
-                <Bar dataKey="funding2" fill={FUNDING_COLORS.leg2} barSize={3} isAnimationActive={false} />
-              </BarChart>
+                {hasFunding1 && (
+                  <Line
+                    dataKey="nf1Bp"
+                    type="stepAfter"
+                    stroke={FUNDING_COLORS.leg1}
+                    strokeWidth={1.5}
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls={false}
+                  />
+                )}
+                {hasFunding2 && (
+                  <Line
+                    dataKey="nf2Bp"
+                    type="stepAfter"
+                    stroke={FUNDING_COLORS.leg2}
+                    strokeWidth={1.5}
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls={false}
+                  />
+                )}
+              </LineChart>
             </ChartContainer>
           </div>
         )}
