@@ -135,11 +135,13 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
       return;
     }
     let cancelled = false;
+    // 抓滿整個顯示範圍（route 端會依 startTime 往回分頁）
+    const startTime = Date.now() - days * 86400_000;
     const fetchLegFunding = async (leg: BasisLeg) => {
       if (leg.market !== "perp") return null;
       try {
         const res = await fetch(
-          `/api/funding-history?symbol=${encodeURIComponent(leg.symbol)}&exchangeA=${leg.exchange}&exchangeB=${leg.exchange}`
+          `/api/funding-history?symbol=${encodeURIComponent(leg.symbol)}&exchangeA=${leg.exchange}&exchangeB=${leg.exchange}&startTime=${startTime}`
         );
         if (!res.ok) return null;
         const data = await res.json();
@@ -157,7 +159,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
     return () => {
       cancelled = true;
     };
-  }, [ready, leg1, leg2]);
+  }, [ready, leg1, leg2, days]);
 
   // 清單快照：對清單涉及的每個 exchange+market 組合各拉一次 tickers
   useEffect(() => {

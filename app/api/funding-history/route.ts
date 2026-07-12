@@ -30,35 +30,75 @@ function formatExchangeSymbol(symbol: string, exchange: Exchange): string {
   }
 }
 
-async function fetchBinanceFundingHistory(symbol: string): Promise<FundingRateEntry[]> {
+// startTime 分頁上限：10 頁已可涵蓋 Binance 10000 筆 / Bybit 2000 筆結算
+const MAX_HISTORY_PAGES = 10;
+
+async function fetchBinanceFundingHistory(symbol: string, startTime?: number): Promise<FundingRateEntry[]> {
   try {
-    const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol.toUpperCase()}&limit=30`;
-    const res = await fetchWithTimeout(url);
-    if (!res.ok) { console.warn(`[funding-history] Binance ${symbol}: HTTP ${res.status}`); return []; }
-    const data = await res.json();
-    return data.map((item: { fundingTime: number; fundingRate: string }) => ({
-      timestamp: item.fundingTime,
-      rate: parseFloat(item.fundingRate),
-      exchange: "Binance" as Exchange,
-    }));
+    const mapEntries = (data: { fundingTime: number; fundingRate: string }[]) =>
+      data.map((item) => ({
+        timestamp: item.fundingTime,
+        rate: parseFloat(item.fundingRate),
+        exchange: "Binance" as Exchange,
+      }));
+    if (startTime === undefined) {
+      const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol.toUpperCase()}&limit=30`;
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) { console.warn(`[funding-history] Binance ${symbol}: HTTP ${res.status}`); return []; }
+      return mapEntries(await res.json());
+    }
+    // 帶 startTime：由舊往新分頁抓滿 [startTime, now]
+    const entries: FundingRateEntry[] = [];
+    let from = startTime;
+    for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+      const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol.toUpperCase()}&startTime=${from}&limit=1000`;
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) { console.warn(`[funding-history] Binance ${symbol}: HTTP ${res.status}`); break; }
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) break;
+      entries.push(...mapEntries(data));
+      if (data.length < 1000) break;
+      from = data[data.length - 1].fundingTime + 1;
+    }
+    return entries;
   } catch (e) {
     console.warn(`[funding-history] Binance ${symbol} error:`, e instanceof Error ? e.message : e);
     return [];
   }
 }
 
-async function fetchBybitFundingHistory(symbol: string): Promise<FundingRateEntry[]> {
+async function fetchBybitFundingHistory(symbol: string, startTime?: number): Promise<FundingRateEntry[]> {
   try {
-    const url = `https://api.bybit.com/v5/market/funding/history?category=linear&symbol=${symbol.toUpperCase()}&limit=30`;
-    const res = await fetchWithTimeout(url);
-    if (!res.ok) { console.warn(`[funding-history] Bybit ${symbol}: HTTP ${res.status}`); return []; }
-    const data = await res.json();
-    if (data.retCode !== 0 || !data.result?.list?.length) return [];
-    return data.result.list.map((item: { fundingRateTimestamp: string; fundingRate: string }) => ({
-      timestamp: parseInt(item.fundingRateTimestamp),
-      rate: parseFloat(item.fundingRate),
-      exchange: "Bybit" as Exchange,
-    }));
+    const mapEntries = (list: { fundingRateTimestamp: string; fundingRate: string }[]) =>
+      list.map((item) => ({
+        timestamp: parseInt(item.fundingRateTimestamp),
+        rate: parseFloat(item.fundingRate),
+        exchange: "Bybit" as Exchange,
+      }));
+    if (startTime === undefined) {
+      const url = `https://api.bybit.com/v5/market/funding/history?category=linear&symbol=${symbol.toUpperCase()}&limit=30`;
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) { console.warn(`[funding-history] Bybit ${symbol}: HTTP ${res.status}`); return []; }
+      const data = await res.json();
+      if (data.retCode !== 0 || !data.result?.list?.length) return [];
+      return mapEntries(data.result.list);
+    }
+    // 帶 startTime：Bybit 回傳由新到舊、單頁上限 200，往回分頁到 startTime
+    const entries: FundingRateEntry[] = [];
+    let end = Date.now();
+    for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+      const url = `https://api.bybit.com/v5/market/funding/history?category=linear&symbol=${symbol.toUpperCase()}&limit=200&startTime=${startTime}&endTime=${end}`;
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) { console.warn(`[funding-history] Bybit ${symbol}: HTTP ${res.status}`); break; }
+      const data = await res.json();
+      if (data.retCode !== 0 || !data.result?.list?.length) break;
+      const batch = mapEntries(data.result.list);
+      entries.push(...batch);
+      const oldest = Math.min(...batch.map((e) => e.timestamp));
+      if (batch.length < 200 || oldest <= startTime) break;
+      end = oldest - 1;
+    }
+    return entries.sort((a, b) => a.timestamp - b.timestamp);
   } catch (e) {
     console.warn(`[funding-history] Bybit ${symbol} error:`, e instanceof Error ? e.message : e);
     return [];
@@ -126,7 +166,9 @@ async function fetchBitMartFundingHistory(_symbol: string): Promise<FundingRateE
   return [];
 }
 
-function getFundingHistoryFetcher(exchange: Exchange): (symbol: string) => Promise<FundingRateEntry[]> {
+function getFundingHistoryFetcher(
+  exchange: Exchange
+): (symbol: string, startTime?: number) => Promise<FundingRateEntry[]> {
   switch (exchange) {
     case "Binance": return fetchBinanceFundingHistory;
     case "Bybit": return fetchBybitFundingHistory;
@@ -145,6 +187,9 @@ export async function GET(request: NextRequest) {
   const exchangeA = searchParams.get("exchangeA") as Exchange | null;
   const exchangeB = searchParams.get("exchangeB") as Exchange | null;
   const symbol = searchParams.get("symbol");
+  // 可選 startTime(ms)：帶了就分頁抓滿 [startTime, now]（僅 Binance/Bybit 支援，其他交易所忽略）
+  const startTimeParam = parseInt(searchParams.get("startTime") ?? "", 10);
+  const startTime = Number.isFinite(startTimeParam) && startTimeParam > 0 ? startTimeParam : undefined;
 
   if (!exchangeA || !exchangeB || !symbol || !VALID_EXCHANGES.includes(exchangeA) || !VALID_EXCHANGES.includes(exchangeB)) {
     return NextResponse.json({ error: "Missing or invalid parameters" }, { status: 400 });
@@ -159,8 +204,8 @@ export async function GET(request: NextRequest) {
     };
 
     const [historyA, historyB] = await Promise.all([
-      getFundingHistoryFetcher(exchangeA)(symbol),
-      getFundingHistoryFetcher(exchangeB)(symbol),
+      getFundingHistoryFetcher(exchangeA)(symbol, startTime),
+      getFundingHistoryFetcher(exchangeB)(symbol, startTime),
     ]);
 
     console.warn = origWarn;

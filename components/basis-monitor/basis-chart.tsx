@@ -55,7 +55,7 @@ type ChartRow = { time: string; basis: number } & Record<string, string | number
 export function BasisChart({ points, mode, title, bb, displayCount, funding }: BasisChartProps) {
   const fmt = (v: number) => (mode === "pct" ? `${v.toFixed(1)} bp` : v.toFixed(4));
 
-  const { data, fundingTimes1, fundingTimes2 } = useMemo(() => {
+  const { data, hasFunding1, hasFunding2 } = useMemo(() => {
     // Store time as numeric string so ChartTooltipContent's labelFormatter receives
     // the raw timestamp string (typeof label === "string" branch) rather than falling
     // back to itemConfig?.label which would be "Basis"
@@ -87,16 +87,19 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
     // indicator 用完整序列（含 warmup）計算後，只顯示尾端 displayCount 根
     const visible = rows.slice(-displayCount);
 
-    // funding 結算時間吸附到最近的蠟燭（X 軸是 category 字串軸，ReferenceLine
-    // 的 x 必須精確等於某個 data row 的 time 字串才會顯示）
-    const times1: string[] = [];
-    const times2: string[] = [];
-    const snap = (legFunding: LegFunding | null, key: string, collector: string[]) => {
-      if (!legFunding || legFunding.events.length === 0 || visible.length === 0) return;
+    // funding 併入資料列：
+    // 1. 結算時間吸附到最近的蠟燭，掛 fundingN（副圖 bar 用；X 軸是 category 字串軸）
+    // 2. 每根蠟燭標註它所屬期別的結算（下一個 >= 蠟燭時間的結算），掛 nfNBp/nfNTime（tooltip 用）
+    let has1 = false;
+    let has2 = false;
+    const attach = (legFunding: LegFunding | null, n: 1 | 2): boolean => {
+      if (!legFunding || legFunding.events.length === 0 || visible.length === 0) return false;
+      const events = [...legFunding.events].sort((a, b) => a.timestamp - b.timestamp);
       const first = Number(visible[0].time);
       const last = Number(visible[visible.length - 1].time);
       const step = visible.length > 1 ? last - Number(visible[visible.length - 2].time) : 0;
-      for (const ev of legFunding.events) {
+      let attached = false;
+      for (const ev of events) {
         if (ev.timestamp < first || ev.timestamp > last + step) continue;
         let best = 0;
         let bestDiff = Infinity;
@@ -109,13 +112,23 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
         }
         const row = visible[best];
         // 同一根蠟燭若有多筆結算（理論上不會）就累加
-        row[key] = ((row[key] as number | undefined) ?? 0) + ev.rateBp;
-        collector.push(row.time);
+        row[`funding${n}`] = ((row[`funding${n}`] as number | undefined) ?? 0) + ev.rateBp;
+        attached = true;
       }
+      // two-pointer：為每根蠟燭找它之後（含當根）最近的結算
+      let idx = 0;
+      for (const row of visible) {
+        const t = Number(row.time);
+        while (idx < events.length && events[idx].timestamp < t) idx++;
+        if (idx >= events.length) break;
+        row[`nf${n}Bp`] = events[idx].rateBp;
+        row[`nf${n}Time`] = events[idx].timestamp;
+      }
+      return attached;
     };
-    snap(funding?.leg1 ?? null, "funding1", times1);
-    snap(funding?.leg2 ?? null, "funding2", times2);
-    return { data: visible, fundingTimes1: times1, fundingTimes2: times2 };
+    has1 = attach(funding?.leg1 ?? null, 1);
+    has2 = attach(funding?.leg2 ?? null, 2);
+    return { data: visible, hasFunding1: has1, hasFunding2: has2 };
   }, [points, mode, bb, displayCount, funding]);
 
   const chartConfig = useMemo(() => {
@@ -141,8 +154,30 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
   }, [bb, mode, funding]);
 
   const current = data.length > 0 ? data[data.length - 1].basis : null;
-  const hasFundingBars = fundingTimes1.length > 0 || fundingTimes2.length > 0;
+  const hasFundingBars = hasFunding1 || hasFunding2;
   const timeLabel = (value: unknown) => format(new Date(Number(value)), "MM/dd HH:mm");
+
+  // hover 蠟燭所屬期別的 funding（該期結束時結算的費率）
+  const fundingPeriodLines = (row: ChartRow | undefined) => {
+    if (!row || !funding) return null;
+    const legs = [
+      { legFunding: funding.leg1, bp: row.nf1Bp, time: row.nf1Time, color: FUNDING_COLORS.leg1 },
+      { legFunding: funding.leg2, bp: row.nf2Bp, time: row.nf2Time, color: FUNDING_COLORS.leg2 },
+    ].filter((l) => l.legFunding && typeof l.bp === "number" && typeof l.time === "number");
+    if (legs.length === 0) return null;
+    return (
+      <div className="mt-1 flex flex-col gap-0.5 border-t border-border/50 pt-1 font-normal">
+        {legs.map((l, i) => (
+          <span key={i} className="flex items-center justify-between gap-4" style={{ color: l.color }}>
+            <span>{l.legFunding!.label}</span>
+            <span className="font-mono tabular-nums">
+              {(l.bp as number).toFixed(2)} bp（{format(new Date(l.time as number), "MM/dd HH:mm")} 結算）
+            </span>
+          </span>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <Card>
@@ -189,37 +224,22 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
               tickFormatter={(value) => fmt(Number(value))}
             />
             <ReferenceLine y={0} strokeDasharray="3 3" stroke="var(--muted-foreground)" />
-            {fundingTimes1.map((t) => (
-              <ReferenceLine
-                key={`f1-${t}`}
-                x={t}
-                stroke={FUNDING_COLORS.leg1}
-                strokeWidth={1}
-                strokeDasharray="4 2"
-              />
-            ))}
-            {fundingTimes2.map((t) => (
-              <ReferenceLine
-                key={`f2-${t}`}
-                x={t}
-                stroke={FUNDING_COLORS.leg2}
-                strokeWidth={1}
-                strokeDasharray="4 2"
-              />
-            ))}
             <ChartTooltip
               content={
                 <ChartTooltipContent
-                  labelFormatter={timeLabel}
+                  labelFormatter={(value, payload) => (
+                    <div className="flex flex-col">
+                      <span>{timeLabel(value)}</span>
+                      {fundingPeriodLines(payload?.[0]?.payload as ChartRow | undefined)}
+                    </div>
+                  )}
                   formatter={(value, name) => (
                     <div className="flex w-full items-center justify-between gap-4 leading-none">
                       <span className="text-muted-foreground">
                         {chartConfig[name as string]?.label ?? name}
                       </span>
                       <span className="font-mono font-medium tabular-nums">
-                        {name === "funding1" || name === "funding2"
-                          ? `${Number(value).toFixed(2)} bp`
-                          : fmt(Number(value))}
+                        {fmt(Number(value))}
                       </span>
                     </div>
                   )}
@@ -268,7 +288,7 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
           <div className="mt-3">
             <div className="mb-1 flex flex-wrap items-center gap-3 px-3 text-xs text-muted-foreground">
               <span>Funding（bp / 次）</span>
-              {funding?.leg1 && fundingTimes1.length > 0 && (
+              {funding?.leg1 && hasFunding1 && (
                 <span className="flex items-center gap-1">
                   <span
                     className="inline-block h-2 w-2 rounded-[2px]"
@@ -277,7 +297,7 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding }: B
                   {funding.leg1.label}
                 </span>
               )}
-              {funding?.leg2 && fundingTimes2.length > 0 && (
+              {funding?.leg2 && hasFunding2 && (
                 <span className="flex items-center gap-1">
                   <span
                     className="inline-block h-2 w-2 rounded-[2px]"
