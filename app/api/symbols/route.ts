@@ -62,6 +62,19 @@ async function fetchBybitSymbols(market: Market): Promise<string[]> {
   return symbols.sort();
 }
 
+// Binance 美股 perp（TRADIFI_PERPETUAL）專用清單，供 Alpaca 交集過濾
+async function fetchBinanceEquityPerpSymbols(): Promise<string[]> {
+  const response = await fetch("https://fapi.binance.com/fapi/v1/exchangeInfo", CACHE_1H);
+  if (!response.ok) return [];
+  const data = await response.json();
+  return ((data.symbols ?? []) as { symbol: string; status: string; quoteAsset: string; contractType?: string }[])
+    .filter(
+      (s) =>
+        s.status === "TRADING" && s.quoteAsset === "USDT" && s.contractType === "TRADIFI_PERPETUAL"
+    )
+    .map((s) => s.symbol);
+}
+
 async function fetchAlpacaSymbols(): Promise<string[]> {
   const key = process.env.ALPACA_API_KEY;
   const secret = process.env.ALPACA_API_SECRET;
@@ -108,12 +121,24 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    if (exchange === "Alpaca") {
+      // 只留在 Binance/Bybit 有對應「美股」標的的 ticker：
+      // Binance 側只認 TRADIFI_PERPETUAL（`${ticker}USDT`，撞名 crypto 不會混入）
+      // Bybit 側認 spot xStocks（`${ticker}XUSDT`）
+      const [alpaca, binanceEquityPerp, bybitSpot] = await Promise.all([
+        fetchAlpacaSymbols(),
+        fetchBinanceEquityPerpSymbols(),
+        fetchBybitSymbols("spot"),
+      ]);
+      const equitySymbols = new Set(binanceEquityPerp);
+      const bybitSpotSet = new Set(bybitSpot);
+      const filtered = alpaca.filter(
+        (t) => equitySymbols.has(`${t}USDT`) || bybitSpotSet.has(`${t}XUSDT`)
+      );
+      return NextResponse.json(filtered);
+    }
     const symbols =
-      exchange === "Alpaca"
-        ? await fetchAlpacaSymbols()
-        : exchange === "Binance"
-          ? await fetchBinanceSymbols(market)
-          : await fetchBybitSymbols(market);
+      exchange === "Binance" ? await fetchBinanceSymbols(market) : await fetchBybitSymbols(market);
     return NextResponse.json(symbols);
   } catch (e) {
     console.error(`[symbols] ${exchange}/${market} error:`, e);
