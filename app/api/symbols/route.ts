@@ -69,10 +69,18 @@ async function fetchAlpacaSymbols(): Promise<string[]> {
     console.warn("[symbols] Alpaca API keys not configured");
     return [];
   }
-  const response = await fetch("https://api.alpaca.markets/v2/assets?status=active&asset_class=us_equity", {
-    headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret },
+  const headers = { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret };
+  // paper 金鑰只認 paper-api 主機（live 金鑰認 api 主機），先 live 後 fallback
+  let response = await fetch("https://api.alpaca.markets/v2/assets?status=active&asset_class=us_equity", {
+    headers,
     ...CACHE_1H,
   });
+  if (response.status === 401 || response.status === 403) {
+    response = await fetch(
+      "https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity",
+      { headers, ...CACHE_1H }
+    );
+  }
   if (!response.ok) {
     console.warn(`[symbols] Alpaca: HTTP ${response.status}`);
     return [];
