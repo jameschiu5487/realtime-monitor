@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, XAxis, YAxis } from "recharts";
 import { format } from "date-fns";
 import {
   Card,
@@ -51,7 +51,10 @@ interface BasisChartProps {
   legLabels: { leg1: string; leg2: string };
 }
 
-type ChartRow = { time: string; basis: number } & Record<string, string | number | undefined>;
+type ChartRow = { time: string; basis: number; fresh: boolean } & Record<
+  string,
+  string | number | boolean | undefined
+>;
 
 export function BasisChart({ points, mode, title, bb, displayCount, funding, legLabels }: BasisChartProps) {
   const fmt = (v: number) => (mode === "pct" ? `${v.toFixed(1)} bp` : v.toFixed(4));
@@ -64,6 +67,7 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
       time: String(p.time),
       // bp 模式：basisPct 是百分比，×100 換算 basis points
       basis: mode === "pct" ? p.basisPct * 100 : p.basisAbs,
+      fresh: p.fresh,
     }));
     if (bb) {
       // population std、window 內不足的點留 undefined（同 opportunity-spread-modal 慣例）
@@ -153,6 +157,22 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
     return cfg;
   }, [bb, mode, funding]);
 
+  // 混合市場（如美股腿）時，用底色標出兩腳皆有真實成交的時段（= 美股開盤）
+  const freshRanges = useMemo(() => {
+    if (!data.some((r) => !r.fresh)) return null; // 全程都 fresh（純 crypto pair）就不畫
+    const ranges: { start: string; end: string }[] = [];
+    let start: string | null = null;
+    for (let i = 0; i < data.length; i++) {
+      if (data[i].fresh && start === null) start = data[i].time;
+      if (!data[i].fresh && start !== null) {
+        ranges.push({ start, end: data[i - 1].time });
+        start = null;
+      }
+    }
+    if (start !== null) ranges.push({ start, end: data[data.length - 1].time });
+    return ranges;
+  }, [data]);
+
   const current = data.length > 0 ? data[data.length - 1].basis : null;
   const hasFunding1 = fundingTimes1.length > 0;
   const hasFunding2 = fundingTimes2.length > 0;
@@ -202,6 +222,7 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
           <CardTitle className="font-mono text-base">{title}</CardTitle>
           <CardDescription>
             {mode === "pct" ? "Basis（bp，(leg1 − leg2) / leg2）" : "價差（leg1 − leg2，USDT）"}
+            {freshRanges && "；亮底 = 美股開盤時段，其餘以最後收盤價 forward-fill"}
           </CardDescription>
         </div>
         <div className="flex">
@@ -224,6 +245,16 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
         <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full sm:h-[320px]">
           <LineChart accessibilityLayer data={data} margin={{ left: 12, right: 12 }}>
             <CartesianGrid vertical={false} />
+            {freshRanges?.map((r, i) => (
+              <ReferenceArea
+                key={`fresh-${i}`}
+                x1={r.start}
+                x2={r.end}
+                fill="var(--chart-1)"
+                fillOpacity={0.08}
+                strokeOpacity={0}
+              />
+            ))}
             <XAxis
               dataKey="time"
               tickLine={false}
