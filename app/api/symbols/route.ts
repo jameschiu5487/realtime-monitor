@@ -62,21 +62,50 @@ async function fetchBybitSymbols(market: Market): Promise<string[]> {
   return symbols.sort();
 }
 
+async function fetchAlpacaSymbols(): Promise<string[]> {
+  const key = process.env.ALPACA_API_KEY;
+  const secret = process.env.ALPACA_API_SECRET;
+  if (!key || !secret) {
+    console.warn("[symbols] Alpaca API keys not configured");
+    return [];
+  }
+  const response = await fetch("https://api.alpaca.markets/v2/assets?status=active&asset_class=us_equity", {
+    headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret },
+    ...CACHE_1H,
+  });
+  if (!response.ok) {
+    console.warn(`[symbols] Alpaca: HTTP ${response.status}`);
+    return [];
+  }
+  const data = (await response.json()) as { symbol: string; tradable: boolean }[];
+  return data
+    .filter((a) => a.tradable)
+    .map((a) => a.symbol)
+    .sort();
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const exchange = searchParams.get("exchange");
   const market = (searchParams.get("market") ?? "perp") as Market;
 
   if (
-    (exchange !== "Binance" && exchange !== "Bybit") ||
+    (exchange !== "Binance" && exchange !== "Bybit" && exchange !== "Alpaca") ||
     (market !== "perp" && market !== "spot")
   ) {
     return NextResponse.json({ error: "Invalid exchange/market" }, { status: 400 });
   }
+  if (exchange === "Alpaca" && market !== "spot") {
+    return NextResponse.json({ error: "Alpaca only supports spot" }, { status: 400 });
+  }
 
   try {
     const symbols =
-      exchange === "Binance" ? await fetchBinanceSymbols(market) : await fetchBybitSymbols(market);
+      exchange === "Alpaca"
+        ? await fetchAlpacaSymbols()
+        : exchange === "Binance"
+          ? await fetchBinanceSymbols(market)
+          : await fetchBybitSymbols(market);
     return NextResponse.json(symbols);
   } catch (e) {
     console.error(`[symbols] ${exchange}/${market} error:`, e);

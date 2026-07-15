@@ -190,6 +190,50 @@ async function fetchZoomexKlines(symbol: string, interval: string, maxKlines: nu
   return allKlines.sort((a, b) => a[0] - b[0]);
 }
 
+// --- Alpaca（美股實盤數據，IEX feed，僅 spot）---
+
+function alpacaTimeframe(intervalMinutes: number): string {
+  return intervalMinutes >= 60 ? `${Math.round(intervalMinutes / 60)}Hour` : `${intervalMinutes}Min`;
+}
+
+async function fetchAlpacaKlines(
+  symbol: string,
+  intervalMinutes: number,
+  maxKlines: number
+): Promise<[number, number][]> {
+  const key = process.env.ALPACA_API_KEY;
+  const secret = process.env.ALPACA_API_SECRET;
+  if (!key || !secret) {
+    console.warn("[klines] Alpaca API keys not configured");
+    return [];
+  }
+  const headers = { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret };
+  // 美股一天只交易約 6.5 小時，日曆時間抓 K 線數的 4 倍才夠湊滿根數（上限 90 天）
+  const spanMinutes = Math.min(intervalMinutes * maxKlines * 4, 90 * 1440);
+  const start = new Date(Date.now() - spanMinutes * 60_000).toISOString();
+  const bars: [number, number][] = [];
+  let pageToken = "";
+  for (let page = 0; page < 5; page++) {
+    const url =
+      `https://data.alpaca.markets/v2/stocks/${encodeURIComponent(symbol.toUpperCase())}/bars` +
+      `?timeframe=${alpacaTimeframe(intervalMinutes)}&start=${encodeURIComponent(start)}` +
+      `&limit=10000&adjustment=raw&feed=iex` +
+      (pageToken ? `&page_token=${encodeURIComponent(pageToken)}` : "");
+    const response = await fetch(url, { headers, cache: "no-store" });
+    if (!response.ok) {
+      console.warn(`[klines] Alpaca ${symbol}: HTTP ${response.status}`);
+      break;
+    }
+    const data = await response.json();
+    for (const b of (data.bars ?? []) as { t: string; c: number }[]) {
+      bars.push([Date.parse(b.t), b.c]);
+    }
+    pageToken = data.next_page_token ?? "";
+    if (!pageToken) break;
+  }
+  return bars.slice(-maxKlines);
+}
+
 const VALID_EXCHANGES: Exchange[] = ["Binance", "Bybit", "BingX", "Gate", "Bitget", "BitMart", "Zoomex"];
 
 export async function GET(request: NextRequest) {
@@ -198,6 +242,28 @@ export async function GET(request: NextRequest) {
   const symbol = searchParams.get("symbol");
   const days = parseInt(searchParams.get("days") ?? "1", 10);
   const market = (searchParams.get("market") ?? "perp") as "perp" | "spot";
+
+  // Alpaca 不在 Exchange 型別內，先於 VALID_EXCHANGES 檢查前分流
+  if (searchParams.get("exchange") === "Alpaca") {
+    if (market !== "spot") {
+      return NextResponse.json({ error: "Alpaca only supports spot" }, { status: 400 });
+    }
+    if (!symbol) {
+      return NextResponse.json({ error: "Missing symbol" }, { status: 400 });
+    }
+    const config = getKlineConfig(days);
+    const limitParam = parseInt(searchParams.get("limit") ?? "", 10);
+    const maxKlines =
+      Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 15000) : config.fetchKlines;
+    try {
+      const klines = await fetchAlpacaKlines(symbol, config.intervalMinutes, maxKlines);
+      console.log(`[klines] Alpaca/${symbol} spot ${config.label}: ${klines.length} candles`);
+      return NextResponse.json(klines);
+    } catch (e) {
+      console.error(`[klines] Alpaca/${symbol} error:`, e);
+      return NextResponse.json([], { status: 200 });
+    }
+  }
 
   if (!exchange || !symbol || !VALID_EXCHANGES.includes(exchange)) {
     return NextResponse.json({ error: "Missing or invalid exchange/symbol" }, { status: 400 });

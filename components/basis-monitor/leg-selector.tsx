@@ -60,7 +60,14 @@ export function LegSelector({ label, value, onChange }: LegSelectorProps) {
       <div className="flex flex-wrap gap-2">
         <Select
           value={value.exchange}
-          onValueChange={(v) => onChange({ ...value, exchange: v as BasisExchange, symbol: "" })}
+          onValueChange={(v) =>
+            onChange({
+              exchange: v as BasisExchange,
+              // Alpaca（美股）只有現貨
+              market: v === "Alpaca" ? "spot" : value.market,
+              symbol: "",
+            })
+          }
         >
           <SelectTrigger className="w-[120px]">
             <SelectValue />
@@ -75,6 +82,7 @@ export function LegSelector({ label, value, onChange }: LegSelectorProps) {
         </Select>
         <Select
           value={value.market}
+          disabled={value.exchange === "Alpaca"}
           onValueChange={(v) => onChange({ ...value, market: v as Market, symbol: "" })}
         >
           <SelectTrigger className="w-[100px]">

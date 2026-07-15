@@ -32,19 +32,52 @@ async function fetchBybitTickers(market: Market): Promise<Record<string, number>
   return map;
 }
 
+// Alpaca 沒有全量 ticker 端點，需帶 symbols（逗號分隔，上限 100）查最新成交價
+async function fetchAlpacaTickers(symbols: string[]): Promise<Record<string, number>> {
+  const key = process.env.ALPACA_API_KEY;
+  const secret = process.env.ALPACA_API_SECRET;
+  if (!key || !secret || symbols.length === 0) return {};
+  const url = `https://data.alpaca.markets/v2/stocks/trades/latest?symbols=${encodeURIComponent(symbols.join(","))}&feed=iex`;
+  const response = await fetch(url, {
+    headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret },
+    cache: "no-store",
+  });
+  if (!response.ok) return {};
+  const data = await response.json();
+  const map: Record<string, number> = {};
+  for (const [sym, trade] of Object.entries((data.trades ?? {}) as Record<string, { p: number }>)) {
+    map[sym] = trade.p;
+  }
+  return map;
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const exchange = searchParams.get("exchange");
   const market = (searchParams.get("market") ?? "perp") as Market;
 
   if (
-    (exchange !== "Binance" && exchange !== "Bybit") ||
+    (exchange !== "Binance" && exchange !== "Bybit" && exchange !== "Alpaca") ||
     (market !== "perp" && market !== "spot")
   ) {
     return NextResponse.json({ error: "Invalid exchange/market" }, { status: 400 });
   }
 
   try {
+    if (exchange === "Alpaca") {
+      if (market !== "spot") {
+        return NextResponse.json({ error: "Alpaca only supports spot" }, { status: 400 });
+      }
+      const symbols = (searchParams.get("symbols") ?? "")
+        .split(",")
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean)
+        .slice(0, 100);
+      if (symbols.length === 0) {
+        return NextResponse.json({ error: "Alpaca requires symbols param" }, { status: 400 });
+      }
+      return NextResponse.json(await fetchAlpacaTickers(symbols));
+    }
     const tickers =
       exchange === "Binance" ? await fetchBinanceTickers(market) : await fetchBybitTickers(market);
     return NextResponse.json(tickers);

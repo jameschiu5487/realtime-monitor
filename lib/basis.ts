@@ -1,7 +1,8 @@
 export type Market = "perp" | "spot";
-export type BasisExchange = "Binance" | "Bybit";
+// Alpaca 為美股實盤數據（僅 spot 市場）
+export type BasisExchange = "Binance" | "Bybit" | "Alpaca";
 
-export const BASIS_EXCHANGES: BasisExchange[] = ["Binance", "Bybit"];
+export const BASIS_EXCHANGES: BasisExchange[] = ["Binance", "Bybit", "Alpaca"];
 export const MARKETS: Market[] = ["perp", "spot"];
 
 export interface BasisLeg {

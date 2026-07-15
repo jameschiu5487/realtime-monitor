@@ -161,21 +161,34 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
     };
   }, [ready, leg1, leg2, days]);
 
-  // 清單快照：對清單涉及的每個 exchange+market 組合各拉一次 tickers
+  // 清單快照：對清單涉及的每個 exchange+market 組合各拉一次 tickers。
+  // 交易所回全量 map；Alpaca 沒有全量端點，要帶該組合實際用到的 symbols。
   useEffect(() => {
-    const combos = new Set<string>();
+    const comboSymbols = new Map<string, Set<string>>();
+    const add = (exchange: string, market: string, symbol: string) => {
+      const combo = `${exchange}|${market}`;
+      if (!comboSymbols.has(combo)) comboSymbols.set(combo, new Set());
+      comboSymbols.get(combo)!.add(symbol);
+    };
     for (const p of pairs) {
-      combos.add(`${p.leg1_exchange}|${p.leg1_market}`);
-      combos.add(`${p.leg2_exchange}|${p.leg2_market}`);
+      add(p.leg1_exchange, p.leg1_market, p.leg1_symbol);
+      add(p.leg2_exchange, p.leg2_market, p.leg2_symbol);
     }
-    for (const combo of combos) {
-      if (tickers[combo]) continue;
+    for (const [combo, symbols] of comboSymbols) {
+      const cached = tickers[combo];
+      // 新增 pair 帶進新 symbol 時（Alpaca 逐檔查價）也要補抓
+      const missing = !cached || [...symbols].some((s) => cached[s] === undefined);
+      if (!missing) continue;
       const [exchange, market] = combo.split("|");
-      fetch(`/api/tickers?exchange=${exchange}&market=${market}`)
+      const url =
+        exchange === "Alpaca"
+          ? `/api/tickers?exchange=Alpaca&market=${market}&symbols=${encodeURIComponent([...symbols].join(","))}`
+          : `/api/tickers?exchange=${exchange}&market=${market}`;
+      fetch(url)
         .then((res) => (res.ok ? res.json() : null))
         .then((map: Record<string, number> | null) => {
-          // 失敗不落 cache，pairs 下次變動時會重試
-          if (map) setTickers((prev) => ({ ...prev, [combo]: map }));
+          // 失敗不落 cache，pairs 下次變動時會重試；成功則與既有 map 合併
+          if (map) setTickers((prev) => ({ ...prev, [combo]: { ...(prev[combo] ?? {}), ...map } }));
         })
         .catch(() => {});
     }
