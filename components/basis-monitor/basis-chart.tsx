@@ -99,7 +99,8 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
       const first = Number(visible[0].time);
       const last = Number(visible[visible.length - 1].time);
       const step = visible.length > 1 ? last - Number(visible[visible.length - 2].time) : 0;
-      const times: string[] = [];
+      // Set 去重：兩筆結算吸附到同一根蠟燭（或 API 回重複 timestamp）時只畫一條線
+      const timeSet = new Set<string>();
       for (const ev of events) {
         if (ev.timestamp < first || ev.timestamp > last + step) continue;
         let best = 0;
@@ -111,8 +112,9 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
             best = i;
           }
         }
-        times.push(visible[best].time);
+        timeSet.add(visible[best].time);
       }
+      const times = [...timeSet];
       // two-pointer：為每根蠟燭找它之後（含當根）最近的結算
       let idx = 0;
       for (const row of visible) {
