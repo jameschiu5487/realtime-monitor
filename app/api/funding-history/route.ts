@@ -7,7 +7,7 @@ export const preferredRegion = ["sin1", "hkg1", "kix1"];
 interface FundingRateEntry {
   timestamp: number; // ms
   rate: number;
-  exchange: Exchange;
+  exchange: Exchange | "OKX";
 }
 
 const FETCH_TIMEOUT_MS = 5000;
@@ -166,8 +166,53 @@ async function fetchBitMartFundingHistory(_symbol: string): Promise<FundingRateE
   return [];
 }
 
+// OKX 不在 Exchange 型別內，比照 Alpaca 前置字串分流（走 perp instId）
+function okxInstId(symbol: string): string {
+  const base = symbol.replace(/USDT$/i, "");
+  return `${base}-USDT-SWAP`;
+}
+
+async function fetchOKXFundingHistory(symbol: string, startTime?: number): Promise<FundingRateEntry[]> {
+  try {
+    const instId = okxInstId(symbol);
+    const mapEntries = (list: { fundingRate: string; fundingTime: string }[]) =>
+      list.map((item) => ({
+        timestamp: parseInt(item.fundingTime, 10),
+        rate: parseFloat(item.fundingRate),
+        exchange: "OKX" as const,
+      }));
+    if (startTime === undefined) {
+      const url = `https://www.okx.com/api/v5/public/funding-rate-history?instId=${encodeURIComponent(instId)}&limit=100`;
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) { console.warn(`[funding-history] OKX ${symbol}: HTTP ${res.status}`); return []; }
+      const data = await res.json();
+      if (data.code !== "0" || !data.data?.length) return [];
+      return mapEntries(data.data).sort((a, b) => a.timestamp - b.timestamp);
+    }
+    // 帶 startTime：OKX 回傳由新到舊，用 after=<最舊 fundingTime> 往回分頁到 startTime
+    const entries: FundingRateEntry[] = [];
+    let after: string | undefined;
+    for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+      const url = `https://www.okx.com/api/v5/public/funding-rate-history?instId=${encodeURIComponent(instId)}&limit=100${after ? `&after=${after}` : ""}`;
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) { console.warn(`[funding-history] OKX ${symbol}: HTTP ${res.status}`); break; }
+      const data = await res.json();
+      if (data.code !== "0" || !data.data?.length) break;
+      const batch = mapEntries(data.data);
+      entries.push(...batch);
+      const oldest = Math.min(...batch.map((e) => e.timestamp));
+      after = String(oldest);
+      if (batch.length < 100 || oldest <= startTime) break;
+    }
+    return entries.filter((e) => e.timestamp >= startTime).sort((a, b) => a.timestamp - b.timestamp);
+  } catch (e) {
+    console.warn(`[funding-history] OKX ${symbol} error:`, e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
 function getFundingHistoryFetcher(
-  exchange: Exchange
+  exchange: Exchange | "OKX"
 ): (symbol: string, startTime?: number) => Promise<FundingRateEntry[]> {
   switch (exchange) {
     case "Binance": return fetchBinanceFundingHistory;
@@ -177,21 +222,26 @@ function getFundingHistoryFetcher(
     case "BingX": return fetchBingXFundingHistory;
     case "BitMart": return fetchBitMartFundingHistory;
     case "Zoomex": return async () => [];
+    case "OKX": return fetchOKXFundingHistory;
   }
 }
 
 const VALID_EXCHANGES: Exchange[] = ["Binance", "Bybit", "BingX", "Gate", "Bitget", "BitMart", "Zoomex"];
 
+function isValidExchangeParam(exchange: Exchange | "OKX"): boolean {
+  return exchange === "OKX" || VALID_EXCHANGES.includes(exchange);
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
-  const exchangeA = searchParams.get("exchangeA") as Exchange | null;
-  const exchangeB = searchParams.get("exchangeB") as Exchange | null;
+  const exchangeA = searchParams.get("exchangeA") as Exchange | "OKX" | null;
+  const exchangeB = searchParams.get("exchangeB") as Exchange | "OKX" | null;
   const symbol = searchParams.get("symbol");
-  // 可選 startTime(ms)：帶了就分頁抓滿 [startTime, now]（僅 Binance/Bybit 支援，其他交易所忽略）
+  // 可選 startTime(ms)：帶了就分頁抓滿 [startTime, now]（僅 Binance/Bybit/OKX 支援，其他交易所忽略）
   const startTimeParam = parseInt(searchParams.get("startTime") ?? "", 10);
   const startTime = Number.isFinite(startTimeParam) && startTimeParam > 0 ? startTimeParam : undefined;
 
-  if (!exchangeA || !exchangeB || !symbol || !VALID_EXCHANGES.includes(exchangeA) || !VALID_EXCHANGES.includes(exchangeB)) {
+  if (!exchangeA || !exchangeB || !symbol || !isValidExchangeParam(exchangeA) || !isValidExchangeParam(exchangeB)) {
     return NextResponse.json({ error: "Missing or invalid parameters" }, { status: 400 });
   }
 

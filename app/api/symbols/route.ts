@@ -105,13 +105,33 @@ async function fetchAlpacaSymbols(): Promise<string[]> {
     .sort();
 }
 
+// OKX 不在 Exchange 型別內，比照 Alpaca 用前置字串分流；instId -> canonical symbol
+function okxInstIdToSymbol(instId: string): string {
+  return instId.replace(/-SWAP$/, "").replace(/-/g, "");
+}
+
+async function fetchOKXSymbols(market: Market): Promise<string[]> {
+  const instType = market === "perp" ? "SWAP" : "SPOT";
+  const url = `https://www.okx.com/api/v5/public/instruments?instType=${instType}`;
+  const response = await fetch(url, CACHE_1H);
+  if (!response.ok) return [];
+  const data = await response.json();
+  if (data.code !== "0") return [];
+  return ((data.data ?? []) as { instId: string; state: string; settleCcy?: string; quoteCcy?: string }[])
+    .filter((i) =>
+      i.state === "live" && (market === "perp" ? i.settleCcy === "USDT" : i.quoteCcy === "USDT")
+    )
+    .map((i) => okxInstIdToSymbol(i.instId))
+    .sort();
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const exchange = searchParams.get("exchange");
   const market = (searchParams.get("market") ?? "perp") as Market;
 
   if (
-    (exchange !== "Binance" && exchange !== "Bybit" && exchange !== "Alpaca") ||
+    (exchange !== "Binance" && exchange !== "Bybit" && exchange !== "Alpaca" && exchange !== "OKX") ||
     (market !== "perp" && market !== "spot")
   ) {
     return NextResponse.json({ error: "Invalid exchange/market" }, { status: 400 });
@@ -121,6 +141,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    if (exchange === "OKX") {
+      return NextResponse.json(await fetchOKXSymbols(market));
+    }
     if (exchange === "Alpaca") {
       // 只留在 Binance/Bybit 有對應「美股」標的的 ticker：
       // Binance 側只認 TRADIFI_PERPETUAL（`${ticker}USDT`，撞名 crypto 不會混入）

@@ -51,19 +51,43 @@ async function fetchAlpacaTickers(symbols: string[]): Promise<Record<string, num
   return map;
 }
 
+// OKX 不在 Exchange 型別內，比照 Alpaca 用前置字串分流；instId -> canonical symbol
+function okxInstIdToSymbol(instId: string): string {
+  return instId.replace(/-SWAP$/, "").replace(/-/g, "");
+}
+
+async function fetchOKXTickers(market: Market): Promise<Record<string, number>> {
+  const instType = market === "perp" ? "SWAP" : "SPOT";
+  const suffix = market === "perp" ? "-USDT-SWAP" : "-USDT";
+  const url = `https://www.okx.com/api/v5/market/tickers?instType=${instType}`;
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) return {};
+  const data = await response.json();
+  if (data.code !== "0") return {};
+  const map: Record<string, number> = {};
+  for (const t of (data.data ?? []) as { instId: string; last: string }[]) {
+    if (!t.instId.endsWith(suffix)) continue;
+    map[okxInstIdToSymbol(t.instId)] = parseFloat(t.last);
+  }
+  return map;
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const exchange = searchParams.get("exchange");
   const market = (searchParams.get("market") ?? "perp") as Market;
 
   if (
-    (exchange !== "Binance" && exchange !== "Bybit" && exchange !== "Alpaca") ||
+    (exchange !== "Binance" && exchange !== "Bybit" && exchange !== "Alpaca" && exchange !== "OKX") ||
     (market !== "perp" && market !== "spot")
   ) {
     return NextResponse.json({ error: "Invalid exchange/market" }, { status: 400 });
   }
 
   try {
+    if (exchange === "OKX") {
+      return NextResponse.json(await fetchOKXTickers(market));
+    }
     if (exchange === "Alpaca") {
       if (market !== "spot") {
         return NextResponse.json({ error: "Alpaca only supports spot" }, { status: 400 });

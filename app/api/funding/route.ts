@@ -24,6 +24,25 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    if (exchange.toLowerCase() === "okx") {
+      const base = symbol.replace(/USDT$/i, "");
+      const instId = `${base}-USDT-SWAP`;
+      const url = `https://www.okx.com/api/v5/public/funding-rate?instId=${encodeURIComponent(instId)}`;
+      const res = await fetch(url);
+      if (!res.ok) return NextResponse.json(null);
+      const data = await res.json();
+      if (data.code !== "0" || !data.data?.length) return NextResponse.json(null);
+      const item = data.data[0];
+      const fundingTime = parseInt(item.fundingTime, 10);
+      const nextFundingTime = parseInt(item.nextFundingTime, 10);
+      return NextResponse.json({
+        currentRate: parseFloat(item.fundingRate),
+        nextFundingTime,
+        // OKX 各幣種 funding interval 不一，用 nextFundingTime - fundingTime 換算，不寫死 8
+        intervalHours: (nextFundingTime - fundingTime) / 3600000,
+      });
+    }
+
     if (exchange.toLowerCase() === "bybit" || exchange.toLowerCase() === "zoomex") {
       const baseUrl = exchange.toLowerCase() === "zoomex"
         ? "https://api.zoomex.com"

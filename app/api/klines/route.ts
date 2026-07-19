@@ -234,6 +234,49 @@ async function fetchAlpacaKlines(
   return bars.slice(-maxKlines);
 }
 
+// --- OKX（public API，免金鑰，spot + perp/swap）---
+
+function okxInstId(symbol: string, market: "perp" | "spot"): string {
+  const base = symbol.replace(/USDT$/i, "");
+  return market === "perp" ? `${base}-USDT-SWAP` : `${base}-USDT`;
+}
+
+// OKX K 線粒度：分鐘用小寫 m，小時用大寫 H，日線用 1Dutc；沒對應到的回 null
+function okxBar(intervalMinutes: number): string | null {
+  if ([1, 3, 5, 15, 30].includes(intervalMinutes)) return `${intervalMinutes}m`;
+  if (intervalMinutes === 60) return "1H";
+  if (intervalMinutes === 120) return "2H";
+  if (intervalMinutes === 240) return "4H";
+  if (intervalMinutes === 1440) return "1Dutc";
+  return null;
+}
+
+async function fetchOKXKlines(instId: string, bar: string, maxKlines: number): Promise<[number, number][]> {
+  const allKlines: [number, number][] = [];
+  const firstUrl = `https://www.okx.com/api/v5/market/candles?instId=${encodeURIComponent(instId)}&bar=${bar}&limit=300`;
+  const firstRes = await fetch(firstUrl);
+  if (!firstRes.ok) return [];
+  const firstData = await firstRes.json();
+  if (firstData.code !== "0") return [];
+  let page: [number, number][] = ((firstData.data ?? []) as string[][]).map((k) => [Number(k[0]), parseFloat(k[4])]);
+  allKlines.push(...page);
+  if (page.length === 0) return [];
+  let after = Math.min(...page.map((k) => k[0]));
+  const maxRequests = Math.ceil(maxKlines / 100);
+  for (let i = 0; i < maxRequests && allKlines.length < maxKlines && page.length > 0; i++) {
+    const url = `https://www.okx.com/api/v5/market/history-candles?instId=${encodeURIComponent(instId)}&bar=${bar}&after=${after}&limit=100`;
+    const res = await fetch(url);
+    if (!res.ok) break;
+    const data = await res.json();
+    if (data.code !== "0" || !data.data?.length) break;
+    page = (data.data as string[][]).map((k) => [Number(k[0]), parseFloat(k[4])]);
+    allKlines.push(...page);
+    after = Math.min(...page.map((k) => k[0]));
+    if (page.length < 100) break;
+  }
+  return allKlines.sort((a, b) => a[0] - b[0]).slice(-maxKlines);
+}
+
 const VALID_EXCHANGES: Exchange[] = ["Binance", "Bybit", "BingX", "Gate", "Bitget", "BitMart", "Zoomex"];
 
 export async function GET(request: NextRequest) {
@@ -261,6 +304,33 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(klines);
     } catch (e) {
       console.error(`[klines] Alpaca/${symbol} error:`, e);
+      return NextResponse.json([], { status: 200 });
+    }
+  }
+
+  // OKX 不在 Exchange 型別內，先於 VALID_EXCHANGES 檢查前分流
+  if (searchParams.get("exchange") === "OKX") {
+    if (!symbol) {
+      return NextResponse.json({ error: "Missing symbol" }, { status: 400 });
+    }
+    if (market !== "perp" && market !== "spot") {
+      return NextResponse.json({ error: "Invalid market" }, { status: 400 });
+    }
+    const config = getKlineConfig(days);
+    const bar = okxBar(config.intervalMinutes);
+    if (!bar) {
+      return NextResponse.json({ error: "Unsupported interval for OKX" }, { status: 400 });
+    }
+    const limitParam = parseInt(searchParams.get("limit") ?? "", 10);
+    const maxKlines =
+      Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 15000) : config.fetchKlines;
+    const instId = okxInstId(symbol, market);
+    try {
+      const klines = await fetchOKXKlines(instId, bar, maxKlines);
+      console.log(`[klines] OKX/${symbol} ${market} ${config.label} (${bar}): ${klines.length} candles`);
+      return NextResponse.json(klines);
+    } catch (e) {
+      console.error(`[klines] OKX/${symbol} ${market} error:`, e);
       return NextResponse.json([], { status: 200 });
     }
   }

@@ -443,10 +443,10 @@ export type Database = {
         Row: {
           id: string;
           user_id: string;
-          leg1_exchange: "Binance" | "Bybit" | "Alpaca";
+          leg1_exchange: "Binance" | "Bybit" | "Alpaca" | "OKX";
           leg1_market: "perp" | "spot";
           leg1_symbol: string;
-          leg2_exchange: "Binance" | "Bybit" | "Alpaca";
+          leg2_exchange: "Binance" | "Bybit" | "Alpaca" | "OKX";
           leg2_market: "perp" | "spot";
           leg2_symbol: string;
           alert_enabled: boolean;
@@ -456,10 +456,10 @@ export type Database = {
         Insert: {
           id?: string;
           user_id?: string;
-          leg1_exchange: "Binance" | "Bybit" | "Alpaca";
+          leg1_exchange: "Binance" | "Bybit" | "Alpaca" | "OKX";
           leg1_market: "perp" | "spot";
           leg1_symbol: string;
-          leg2_exchange: "Binance" | "Bybit" | "Alpaca";
+          leg2_exchange: "Binance" | "Bybit" | "Alpaca" | "OKX";
           leg2_market: "perp" | "spot";
           leg2_symbol: string;
           alert_enabled?: boolean;
@@ -469,10 +469,10 @@ export type Database = {
         Update: {
           id?: string;
           user_id?: string;
-          leg1_exchange?: "Binance" | "Bybit" | "Alpaca";
+          leg1_exchange?: "Binance" | "Bybit" | "Alpaca" | "OKX";
           leg1_market?: "perp" | "spot";
           leg1_symbol?: string;
-          leg2_exchange?: "Binance" | "Bybit" | "Alpaca";
+          leg2_exchange?: "Binance" | "Bybit" | "Alpaca" | "OKX";
           leg2_market?: "perp" | "spot";
           leg2_symbol?: string;
           alert_enabled?: boolean;
