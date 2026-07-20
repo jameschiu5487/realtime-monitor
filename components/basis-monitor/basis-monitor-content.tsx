@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { ArrowLeftRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -258,6 +259,12 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  // 整組對調兩隻腳（basis =(leg1−leg2)/leg2 方向隨之反轉）
+  const swapLegs = () => {
+    setLeg1(leg2);
+    setLeg2(leg1);
+  };
+
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
       <h1 className="text-2xl font-bold">Basis Monitor</h1>
@@ -266,6 +273,16 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
         <CardContent className="flex flex-col gap-4 pt-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:gap-8">
             <LegSelector label="Leg 1（分子）" value={leg1} onChange={setLeg1} />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={swapLegs}
+              title="對調 Leg 1／Leg 2"
+              aria-label="對調 Leg 1／Leg 2"
+              className="self-center lg:mb-0.5 lg:self-end"
+            >
+              <ArrowLeftRight className="h-4 w-4" />
+            </Button>
             <LegSelector label="Leg 2（分母）" value={leg2} onChange={setLeg2} />
             <Button onClick={savePair} disabled={!ready || saving}>
               {saving ? "儲存中…" : "加入 Monitor"}
