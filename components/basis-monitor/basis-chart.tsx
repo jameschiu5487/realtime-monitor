@@ -22,6 +22,8 @@ import type { BasisPoint } from "@/lib/basis";
 const BB_COLORS = ["#a855f7", "#c084fc", "#d8b4fe", "#e9d5ff"];
 const MA_COLOR = "#f59e0b";
 const FUNDING_COLORS = { leg1: "#ef4444", leg2: "#06b6d4" };
+// 價格線走右軸，避開 basis/band/MA/funding 用色
+const PRICE_COLORS = { leg1: "#16a34a", leg2: "#84cc16" };
 
 export interface BollingerConfig {
   window: number; // 根數（由分鐘依當前 K 線粒度換算而來）
@@ -68,6 +70,9 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
       // bp 模式：basisPct 是百分比，×100 換算 basis points
       basis: mode === "pct" ? p.basisPct * 100 : p.basisAbs,
       fresh: p.fresh,
+      // 兩腿原始成交價，走右軸
+      price1: p.leg1,
+      price2: p.leg2,
     }));
     if (bb) {
       // population std、window 內不足的點留 undefined（同 opportunity-spread-modal 慣例）
@@ -182,8 +187,10 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
       cfg.nf2Bp = { label: funding.leg2.label, color: FUNDING_COLORS.leg2 };
       cfg.cf2Bp = { label: funding.leg2.label, color: FUNDING_COLORS.leg2 };
     }
+    cfg.price1 = { label: `${legLabels.leg1} 價`, color: PRICE_COLORS.leg1 };
+    cfg.price2 = { label: `${legLabels.leg2} 價`, color: PRICE_COLORS.leg2 };
     return cfg;
-  }, [bb, mode, funding]);
+  }, [bb, mode, funding, legLabels]);
 
   // 混合市場（如美股腿）時，用底色標出兩腳皆有真實成交的時段（= 美股開盤）
   const freshRanges = useMemo(() => {
@@ -319,6 +326,18 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
               domain={["auto", "auto"]}
               tickFormatter={(value) => fmt(Number(value))}
             />
+            <YAxis
+              yAxisId="price"
+              orientation="right"
+              tickLine={false}
+              axisLine={false}
+              width={64}
+              domain={["auto", "auto"]}
+              tick={{ fill: PRICE_COLORS.leg1 }}
+              tickFormatter={(value) =>
+                Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })
+              }
+            />
             <ReferenceLine y={0} strokeDasharray="3 3" stroke="var(--muted-foreground)" />
             {fundingTimes1.map((t) => (
               <ReferenceLine
@@ -353,16 +372,21 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
                       </div>
                     );
                   }}
-                  formatter={(value, name) => (
-                    <div className="flex w-full items-center justify-between gap-4 leading-none">
-                      <span className="text-muted-foreground">
-                        {chartConfig[name as string]?.label ?? name}
-                      </span>
-                      <span className="font-mono font-medium tabular-nums">
-                        {fmt(Number(value))}
-                      </span>
-                    </div>
-                  )}
+                  formatter={(value, name) => {
+                    const isPrice = name === "price1" || name === "price2";
+                    return (
+                      <div className="flex w-full items-center justify-between gap-4 leading-none">
+                        <span className="text-muted-foreground">
+                          {chartConfig[name as string]?.label ?? name}
+                        </span>
+                        <span className="font-mono font-medium tabular-nums">
+                          {isPrice
+                            ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })
+                            : fmt(Number(value))}
+                        </span>
+                      </div>
+                    );
+                  }}
                 />
               }
             />
@@ -400,6 +424,28 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
               strokeWidth={2}
               dot={false}
               isAnimationActive={false}
+            />
+            <Line
+              yAxisId="price"
+              dataKey="price1"
+              type="monotone"
+              stroke={PRICE_COLORS.leg1}
+              strokeWidth={1.25}
+              strokeOpacity={0.7}
+              dot={false}
+              isAnimationActive={false}
+              connectNulls={false}
+            />
+            <Line
+              yAxisId="price"
+              dataKey="price2"
+              type="monotone"
+              stroke={PRICE_COLORS.leg2}
+              strokeWidth={1.25}
+              strokeOpacity={0.7}
+              dot={false}
+              isAnimationActive={false}
+              connectNulls={false}
             />
           </LineChart>
         </ChartContainer>
