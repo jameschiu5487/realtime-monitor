@@ -207,6 +207,27 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
   const hasFundingPanel = hasFunding1 || hasFunding2;
   const timeLabel = (value: unknown) => format(new Date(Number(value)), "MM/dd HH:mm");
 
+  // 預估年化：可見區間累計 funding（bp→%）依已經過時間線性外推到一年
+  const cumAnnualized = useMemo(() => {
+    if (data.length < 2) return null;
+    const first = Number(data[0].time);
+    const last = Number(data[data.length - 1].time);
+    const elapsedMs = last - first;
+    if (elapsedMs <= 0) return null;
+    const factor = (365 * 24 * 3600 * 1000) / elapsedMs;
+    const finalCum = (key: string): number | null => {
+      const v = data[data.length - 1][key];
+      return typeof v === "number" ? v : null;
+    };
+    const c1 = finalCum("cf1Bp");
+    const c2 = finalCum("cf2Bp");
+    return {
+      leg1: c1 === null ? null : (c1 / 100) * factor, // bp/100 = %，再年化
+      leg2: c2 === null ? null : (c2 / 100) * factor,
+    };
+  }, [data]);
+  const fmtPct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+
   // 賭收斂的交易方向：basis < 0 → leg1 便宜 → Long leg1 / Short leg2；反之相反
   const convergenceHint = (row: ChartRow | undefined) => {
     if (!row || typeof row.basis !== "number" || row.basis === 0) return null;
@@ -464,6 +485,24 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
 
             <div className="mb-1 mt-3 flex flex-wrap items-center gap-3 px-3 text-xs text-muted-foreground">
               <span>累計 Funding（bp，本區間左緣起算）</span>
+              {hasFunding1 && cumAnnualized?.leg1 != null && (
+                <span className="flex items-center gap-1">
+                  <span
+                    className="inline-block h-0.5 w-3"
+                    style={{ backgroundColor: FUNDING_COLORS.leg1 }}
+                  />
+                  預估年化 {fmtPct(cumAnnualized.leg1)}
+                </span>
+              )}
+              {hasFunding2 && cumAnnualized?.leg2 != null && (
+                <span className="flex items-center gap-1">
+                  <span
+                    className="inline-block h-0.5 w-3"
+                    style={{ backgroundColor: FUNDING_COLORS.leg2 }}
+                  />
+                  預估年化 {fmtPct(cumAnnualized.leg2)}
+                </span>
+              )}
             </div>
             <ChartContainer config={chartConfig} className="aspect-auto h-[100px] w-full">
               {/* 累計費率的階梯線；與上方每期圖同資料列數 + 同 YAxis 寬度 → 垂直對齊 */}
