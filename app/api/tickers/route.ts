@@ -72,19 +72,48 @@ async function fetchOKXTickers(market: Market): Promise<Record<string, number>> 
   return map;
 }
 
+// Hyperliquid 不在 Exchange 型別內，比照 Alpaca/OKX 用前置字串分流；僅 perp
+// allMids 回傳 key 有雜訊，@ 或 # 開頭的是 spot index / 內部市場，需濾掉
+async function fetchHyperliquidTickers(): Promise<Record<string, number>> {
+  const response = await fetch("https://api.hyperliquid.xyz/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "allMids" }),
+    cache: "no-store",
+  });
+  if (!response.ok) return {};
+  const data = (await response.json()) as Record<string, string>;
+  const map: Record<string, number> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (key.startsWith("@") || key.startsWith("#")) continue;
+    map[key] = parseFloat(value);
+  }
+  return map;
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const exchange = searchParams.get("exchange");
   const market = (searchParams.get("market") ?? "perp") as Market;
 
   if (
-    (exchange !== "Binance" && exchange !== "Bybit" && exchange !== "Alpaca" && exchange !== "OKX") ||
+    (exchange !== "Binance" &&
+      exchange !== "Bybit" &&
+      exchange !== "Alpaca" &&
+      exchange !== "OKX" &&
+      exchange !== "Hyperliquid") ||
     (market !== "perp" && market !== "spot")
   ) {
     return NextResponse.json({ error: "Invalid exchange/market" }, { status: 400 });
   }
 
   try {
+    if (exchange === "Hyperliquid") {
+      if (market !== "perp") {
+        return NextResponse.json({ error: "Hyperliquid only supports perp" }, { status: 400 });
+      }
+      return NextResponse.json(await fetchHyperliquidTickers());
+    }
     if (exchange === "OKX") {
       return NextResponse.json(await fetchOKXTickers(market));
     }

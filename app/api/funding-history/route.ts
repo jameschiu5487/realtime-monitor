@@ -7,15 +7,15 @@ export const preferredRegion = ["sin1", "hkg1", "kix1"];
 interface FundingRateEntry {
   timestamp: number; // ms
   rate: number;
-  exchange: Exchange | "OKX";
+  exchange: Exchange | "OKX" | "Hyperliquid";
 }
 
 const FETCH_TIMEOUT_MS = 5000;
 
-function fetchWithTimeout(url: string): Promise<Response> {
+function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  return fetch(url, { signal: controller.signal, cache: "no-store" }).finally(() => clearTimeout(timer));
+  return fetch(url, { ...init, signal: controller.signal, cache: "no-store" }).finally(() => clearTimeout(timer));
 }
 
 function formatExchangeSymbol(symbol: string, exchange: Exchange): string {
@@ -211,8 +211,41 @@ async function fetchOKXFundingHistory(symbol: string, startTime?: number): Promi
   }
 }
 
+// Hyperliquid 每小時結算、回應舊到新；time 有幾十 ms 偏移，落正到整點
+async function fetchHyperliquidFundingHistory(symbol: string, startTime?: number): Promise<FundingRateEntry[]> {
+  try {
+    // 無 startTime：取最近 ~30 筆（每小時一筆），與其他交易所的「最近一批」語意對齊
+    const from = startTime ?? Date.now() - 30 * 3600000;
+    const entries: FundingRateEntry[] = [];
+    let cursor = from;
+    for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+      const res = await fetchWithTimeout("https://api.hyperliquid.xyz/info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "fundingHistory", coin: symbol, startTime: cursor }),
+      });
+      if (!res.ok) { console.warn(`[funding-history] Hyperliquid ${symbol}: HTTP ${res.status}`); break; }
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) break;
+      const batch = (data as { fundingRate: string; time: number }[]).map((item) => ({
+        timestamp: Math.floor(item.time / 3600000) * 3600000,
+        rate: parseFloat(item.fundingRate),
+        exchange: "Hyperliquid" as const,
+      }));
+      entries.push(...batch);
+      // 單次上限 500 筆，回滿就從最後一筆之後向前續抓
+      if (data.length < 500) break;
+      cursor = data[data.length - 1].time + 1;
+    }
+    return entries.sort((a, b) => a.timestamp - b.timestamp);
+  } catch (e) {
+    console.warn(`[funding-history] Hyperliquid ${symbol} error:`, e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
 function getFundingHistoryFetcher(
-  exchange: Exchange | "OKX"
+  exchange: Exchange | "OKX" | "Hyperliquid"
 ): (symbol: string, startTime?: number) => Promise<FundingRateEntry[]> {
   switch (exchange) {
     case "Binance": return fetchBinanceFundingHistory;
@@ -223,21 +256,22 @@ function getFundingHistoryFetcher(
     case "BitMart": return fetchBitMartFundingHistory;
     case "Zoomex": return async () => [];
     case "OKX": return fetchOKXFundingHistory;
+    case "Hyperliquid": return fetchHyperliquidFundingHistory;
   }
 }
 
 const VALID_EXCHANGES: Exchange[] = ["Binance", "Bybit", "BingX", "Gate", "Bitget", "BitMart", "Zoomex"];
 
-function isValidExchangeParam(exchange: Exchange | "OKX"): boolean {
-  return exchange === "OKX" || VALID_EXCHANGES.includes(exchange);
+function isValidExchangeParam(exchange: Exchange | "OKX" | "Hyperliquid"): boolean {
+  return exchange === "OKX" || exchange === "Hyperliquid" || VALID_EXCHANGES.includes(exchange);
 }
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
-  const exchangeA = searchParams.get("exchangeA") as Exchange | "OKX" | null;
-  const exchangeB = searchParams.get("exchangeB") as Exchange | "OKX" | null;
+  const exchangeA = searchParams.get("exchangeA") as Exchange | "OKX" | "Hyperliquid" | null;
+  const exchangeB = searchParams.get("exchangeB") as Exchange | "OKX" | "Hyperliquid" | null;
   const symbol = searchParams.get("symbol");
-  // 可選 startTime(ms)：帶了就分頁抓滿 [startTime, now]（僅 Binance/Bybit/OKX 支援，其他交易所忽略）
+  // 可選 startTime(ms)：帶了就分頁抓滿 [startTime, now]（僅 Binance/Bybit/OKX/Hyperliquid 支援，其他交易所忽略）
   const startTimeParam = parseInt(searchParams.get("startTime") ?? "", 10);
   const startTime = Number.isFinite(startTimeParam) && startTimeParam > 0 ? startTimeParam : undefined;
 

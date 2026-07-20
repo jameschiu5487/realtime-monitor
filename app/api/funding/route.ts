@@ -43,6 +43,27 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    if (exchange.toLowerCase() === "hyperliquid") {
+      // symbol 為 HL 原生 coin 名（大小寫敏感，如 BTC、kPEPE），不做大小寫轉換
+      const res = await fetch("https://api.hyperliquid.xyz/info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "metaAndAssetCtxs" }),
+      });
+      if (!res.ok) return NextResponse.json(null);
+      const data = await res.json();
+      const universe = (data?.[0]?.universe ?? []) as { name: string }[];
+      const assetCtxs = (data?.[1] ?? []) as { funding: string }[];
+      const idx = universe.findIndex((u) => u.name === symbol);
+      if (idx < 0 || !assetCtxs[idx]) return NextResponse.json(null);
+      return NextResponse.json({
+        currentRate: parseFloat(assetCtxs[idx].funding),
+        // Hyperliquid 每小時整點結算
+        nextFundingTime: Math.ceil(Date.now() / 3600000) * 3600000,
+        intervalHours: 1,
+      });
+    }
+
     if (exchange.toLowerCase() === "bybit" || exchange.toLowerCase() === "zoomex") {
       const baseUrl = exchange.toLowerCase() === "zoomex"
         ? "https://api.zoomex.com"

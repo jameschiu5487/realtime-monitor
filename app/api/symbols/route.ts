@@ -125,13 +125,33 @@ async function fetchOKXSymbols(market: Market): Promise<string[]> {
     .sort();
 }
 
+// Hyperliquid 不在 Exchange 型別內，比照 Alpaca/OKX 用前置字串分流；僅 perp，symbol 為原生 coin 名
+async function fetchHyperliquidSymbols(): Promise<string[]> {
+  const response = await fetch("https://api.hyperliquid.xyz/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "meta" }),
+    ...CACHE_1H,
+  });
+  if (!response.ok) return [];
+  const data = await response.json();
+  return ((data.universe ?? []) as { name: string; isDelisted?: boolean }[])
+    .filter((u) => u.isDelisted !== true)
+    .map((u) => u.name)
+    .sort();
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const exchange = searchParams.get("exchange");
   const market = (searchParams.get("market") ?? "perp") as Market;
 
   if (
-    (exchange !== "Binance" && exchange !== "Bybit" && exchange !== "Alpaca" && exchange !== "OKX") ||
+    (exchange !== "Binance" &&
+      exchange !== "Bybit" &&
+      exchange !== "Alpaca" &&
+      exchange !== "OKX" &&
+      exchange !== "Hyperliquid") ||
     (market !== "perp" && market !== "spot")
   ) {
     return NextResponse.json({ error: "Invalid exchange/market" }, { status: 400 });
@@ -139,8 +159,14 @@ export async function GET(request: NextRequest) {
   if (exchange === "Alpaca" && market !== "spot") {
     return NextResponse.json({ error: "Alpaca only supports spot" }, { status: 400 });
   }
+  if (exchange === "Hyperliquid" && market !== "perp") {
+    return NextResponse.json({ error: "Hyperliquid only supports perp" }, { status: 400 });
+  }
 
   try {
+    if (exchange === "Hyperliquid") {
+      return NextResponse.json(await fetchHyperliquidSymbols());
+    }
     if (exchange === "OKX") {
       return NextResponse.json(await fetchOKXSymbols(market));
     }

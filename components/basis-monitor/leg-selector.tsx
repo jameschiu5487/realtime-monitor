@@ -63,8 +63,8 @@ export function LegSelector({ label, value, onChange }: LegSelectorProps) {
           onValueChange={(v) =>
             onChange({
               exchange: v as BasisExchange,
-              // Alpaca（美股）只有現貨
-              market: v === "Alpaca" ? "spot" : value.market,
+              // Alpaca（美股）只有現貨；Hyperliquid 只有永續
+              market: v === "Alpaca" ? "spot" : v === "Hyperliquid" ? "perp" : value.market,
               symbol: "",
             })
           }
@@ -82,7 +82,7 @@ export function LegSelector({ label, value, onChange }: LegSelectorProps) {
         </Select>
         <Select
           value={value.market}
-          disabled={value.exchange === "Alpaca"}
+          disabled={value.exchange === "Alpaca" || value.exchange === "Hyperliquid"}
           onValueChange={(v) => onChange({ ...value, market: v as Market, symbol: "" })}
         >
           <SelectTrigger className="w-[100px]">

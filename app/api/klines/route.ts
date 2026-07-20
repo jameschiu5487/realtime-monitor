@@ -277,6 +277,50 @@ async function fetchOKXKlines(instId: string, bar: string, maxKlines: number): P
   return allKlines.sort((a, b) => a[0] - b[0]).slice(-maxKlines);
 }
 
+// --- Hyperliquid（public API，免金鑰，僅 perp；symbol 為原生 coin 名，不加 USDT 後綴）---
+
+// HL K 線粒度：分鐘用小寫 m，小時用小寫 h，日線用 1d；沒對應到的回 null
+function hyperliquidInterval(intervalMinutes: number): string | null {
+  if ([1, 3, 5, 15, 30].includes(intervalMinutes)) return `${intervalMinutes}m`;
+  if (intervalMinutes === 60) return "1h";
+  if (intervalMinutes === 120) return "2h";
+  if (intervalMinutes === 240) return "4h";
+  if (intervalMinutes === 480) return "8h";
+  if (intervalMinutes === 720) return "12h";
+  if (intervalMinutes === 1440) return "1d";
+  return null;
+}
+
+async function fetchHyperliquidKlines(
+  coin: string,
+  interval: string,
+  intervalMinutes: number,
+  maxKlines: number
+): Promise<[number, number][]> {
+  const intervalMs = intervalMinutes * 60_000;
+  const now = Date.now();
+  const endTime = now;
+  let startTime = now - maxKlines * intervalMs;
+  const allKlines: [number, number][] = [];
+  const LIMIT = 5000;
+  const maxRequests = Math.ceil(maxKlines / LIMIT) + 1;
+  for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
+    const response = await fetch("https://api.hyperliquid.xyz/info", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "candleSnapshot", req: { coin, interval, startTime, endTime } }),
+    });
+    if (!response.ok) break;
+    const data = await response.json();
+    if (!Array.isArray(data) || data.length === 0) break;
+    const klines: [number, number][] = data.map((k: { t: number; c: string }) => [k.t, parseFloat(k.c)]);
+    allKlines.push(...klines);
+    if (klines.length < LIMIT) break;
+    startTime = klines[klines.length - 1][0] + intervalMs;
+  }
+  return allKlines.sort((a, b) => a[0] - b[0]).slice(-maxKlines);
+}
+
 const VALID_EXCHANGES: Exchange[] = ["Binance", "Bybit", "BingX", "Gate", "Bitget", "BitMart", "Zoomex"];
 
 export async function GET(request: NextRequest) {
@@ -331,6 +375,32 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(klines);
     } catch (e) {
       console.error(`[klines] OKX/${symbol} ${market} error:`, e);
+      return NextResponse.json([], { status: 200 });
+    }
+  }
+
+  // Hyperliquid 不在 Exchange 型別內，先於 VALID_EXCHANGES 檢查前分流；僅支援 perp
+  if (searchParams.get("exchange") === "Hyperliquid") {
+    if (!symbol) {
+      return NextResponse.json({ error: "Missing symbol" }, { status: 400 });
+    }
+    if (market !== "perp") {
+      return NextResponse.json({ error: "Hyperliquid only supports perp" }, { status: 400 });
+    }
+    const config = getKlineConfig(days);
+    const interval = hyperliquidInterval(config.intervalMinutes);
+    if (!interval) {
+      return NextResponse.json({ error: "Unsupported interval for Hyperliquid" }, { status: 400 });
+    }
+    const limitParam = parseInt(searchParams.get("limit") ?? "", 10);
+    const maxKlines =
+      Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 15000) : config.fetchKlines;
+    try {
+      const klines = await fetchHyperliquidKlines(symbol, interval, config.intervalMinutes, maxKlines);
+      console.log(`[klines] Hyperliquid/${symbol} perp ${config.label} (${interval}): ${klines.length} candles`);
+      return NextResponse.json(klines);
+    } catch (e) {
+      console.error(`[klines] Hyperliquid/${symbol} perp error:`, e);
       return NextResponse.json([], { status: 200 });
     }
   }
