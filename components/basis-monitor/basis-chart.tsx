@@ -132,6 +132,28 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
     };
     const times1 = attach(funding?.leg1 ?? null, 1);
     const times2 = attach(funding?.leg2 ?? null, 2);
+
+    // 累計 funding：可見窗左緣起算為 0，每經過一次結算就把該期費率加進 running，
+    // forward-fill 到每根蠟燭 → 單調階梯線（與上方「每期」圖同資料列數，垂直對齊）
+    const cumulate = (legFunding: LegFunding | null, n: 1 | 2) => {
+      if (!legFunding || legFunding.events.length === 0 || visible.length === 0) return;
+      const events = [...legFunding.events].sort((a, b) => a.timestamp - b.timestamp);
+      const first = Number(visible[0].time);
+      let running = 0;
+      let idx = 0;
+      while (idx < events.length && events[idx].timestamp < first) idx++; // 窗前結算不計入
+      for (const row of visible) {
+        const t = Number(row.time);
+        while (idx < events.length && events[idx].timestamp <= t) {
+          running += events[idx].rateBp;
+          idx++;
+        }
+        row[`cf${n}Bp`] = running;
+      }
+    };
+    cumulate(funding?.leg1 ?? null, 1);
+    cumulate(funding?.leg2 ?? null, 2);
+
     return { data: visible, fundingTimes1: times1, fundingTimes2: times2 };
   }, [points, mode, bb, displayCount, funding]);
 
@@ -152,8 +174,14 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
         cfg[`lower${k}`] = { label: `-${m}${unit}`, color };
       });
     }
-    if (funding?.leg1) cfg.nf1Bp = { label: funding.leg1.label, color: FUNDING_COLORS.leg1 };
-    if (funding?.leg2) cfg.nf2Bp = { label: funding.leg2.label, color: FUNDING_COLORS.leg2 };
+    if (funding?.leg1) {
+      cfg.nf1Bp = { label: funding.leg1.label, color: FUNDING_COLORS.leg1 };
+      cfg.cf1Bp = { label: funding.leg1.label, color: FUNDING_COLORS.leg1 };
+    }
+    if (funding?.leg2) {
+      cfg.nf2Bp = { label: funding.leg2.label, color: FUNDING_COLORS.leg2 };
+      cfg.cf2Bp = { label: funding.leg2.label, color: FUNDING_COLORS.leg2 };
+    }
     return cfg;
   }, [bb, mode, funding]);
 
@@ -423,6 +451,65 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
                 {hasFunding2 && (
                   <Line
                     dataKey="nf2Bp"
+                    type="stepAfter"
+                    stroke={FUNDING_COLORS.leg2}
+                    strokeWidth={1.5}
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls={false}
+                  />
+                )}
+              </LineChart>
+            </ChartContainer>
+
+            <div className="mb-1 mt-3 flex flex-wrap items-center gap-3 px-3 text-xs text-muted-foreground">
+              <span>累計 Funding（bp，本區間左緣起算）</span>
+            </div>
+            <ChartContainer config={chartConfig} className="aspect-auto h-[100px] w-full">
+              {/* 累計費率的階梯線；與上方每期圖同資料列數 + 同 YAxis 寬度 → 垂直對齊 */}
+              <LineChart accessibilityLayer data={data} margin={{ left: 12, right: 12 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="time" hide />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  width={76}
+                  domain={["auto", "auto"]}
+                  tickCount={3}
+                  tickFormatter={(value) => `${Number(value).toFixed(1)}`}
+                />
+                <ReferenceLine y={0} strokeDasharray="3 3" stroke="var(--muted-foreground)" />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent
+                      labelFormatter={timeLabel}
+                      formatter={(value, name) => (
+                        <div className="flex w-full items-center justify-between gap-4 leading-none">
+                          <span className="text-muted-foreground">
+                            {chartConfig[name as string]?.label ?? name}
+                          </span>
+                          <span className="font-mono font-medium tabular-nums">
+                            {`${Number(value).toFixed(2)} bp`}
+                          </span>
+                        </div>
+                      )}
+                    />
+                  }
+                />
+                {hasFunding1 && (
+                  <Line
+                    dataKey="cf1Bp"
+                    type="stepAfter"
+                    stroke={FUNDING_COLORS.leg1}
+                    strokeWidth={1.5}
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls={false}
+                  />
+                )}
+                {hasFunding2 && (
+                  <Line
+                    dataKey="cf2Bp"
                     type="stepAfter"
                     stroke={FUNDING_COLORS.leg2}
                     strokeWidth={1.5}
