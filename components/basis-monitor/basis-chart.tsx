@@ -25,6 +25,18 @@ const FUNDING_COLORS = { leg1: "#ef4444", leg2: "#06b6d4" };
 // 價格線走右軸，避開 basis/band/MA/funding 用色
 const PRICE_COLORS = { leg1: "#16a34a", leg2: "#84cc16" };
 
+// 依幣價量級決定小數位：高價少位、低價多位（目標約 4~5 位有效數字）
+function priceDecimals(v: number): number {
+  const a = Math.abs(v);
+  if (a === 0 || !Number.isFinite(a)) return 2;
+  if (a >= 1000) return 2;
+  if (a >= 100) return 3;
+  if (a >= 1) return 4;
+  return Math.floor(-Math.log10(a)) + 4; // 0.0013 → 6 位
+}
+const fmtPrice = (v: number) =>
+  v.toLocaleString(undefined, { maximumFractionDigits: priceDecimals(v) });
+
 export interface BollingerConfig {
   window: number; // 根數（由分鐘依當前 K 線粒度換算而來）
   windowLabel: string; // 顯示用，例如 "240m"
@@ -334,9 +346,7 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
               width={64}
               domain={["auto", "auto"]}
               tick={{ fill: PRICE_COLORS.leg1 }}
-              tickFormatter={(value) =>
-                Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })
-              }
+              tickFormatter={(value) => fmtPrice(Number(value))}
             />
             <ReferenceLine y={0} strokeDasharray="3 3" stroke="var(--muted-foreground)" />
             {fundingTimes1.map((t) => (
@@ -373,16 +383,25 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
                     );
                   }}
                   formatter={(value, name) => {
-                    const isPrice = name === "price1" || name === "price2";
+                    const priceColor =
+                      name === "price1"
+                        ? PRICE_COLORS.leg1
+                        : name === "price2"
+                          ? PRICE_COLORS.leg2
+                          : undefined;
                     return (
                       <div className="flex w-full items-center justify-between gap-4 leading-none">
-                        <span className="text-muted-foreground">
+                        <span
+                          className="text-muted-foreground"
+                          style={priceColor ? { color: priceColor } : undefined}
+                        >
                           {chartConfig[name as string]?.label ?? name}
                         </span>
-                        <span className="font-mono font-medium tabular-nums">
-                          {isPrice
-                            ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 })
-                            : fmt(Number(value))}
+                        <span
+                          className="font-mono font-medium tabular-nums"
+                          style={priceColor ? { color: priceColor } : undefined}
+                        >
+                          {priceColor ? fmtPrice(Number(value)) : fmt(Number(value))}
                         </span>
                       </div>
                     );
