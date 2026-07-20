@@ -73,20 +73,42 @@ async function fetchOKXTickers(market: Market): Promise<Record<string, number>> 
 }
 
 // Hyperliquid 不在 Exchange 型別內，比照 Alpaca/OKX 用前置字串分流；僅 perp
-// allMids 回傳 key 有雜訊，@ 或 # 開頭的是 spot index / 內部市場，需濾掉
-async function fetchHyperliquidTickers(): Promise<Record<string, number>> {
+// allMids 主市場 key 有雜訊（@/# 開頭為 spot index / 內部市場，濾掉）；
+// builder-deployed perp DEX（HIP-3）的標的（如 mkts:TSLA）要帶 dex 參數分別抓
+async function fetchHyperliquidMids(dex?: string): Promise<Record<string, string>> {
   const response = await fetch("https://api.hyperliquid.xyz/info", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "allMids" }),
+    body: JSON.stringify(dex ? { type: "allMids", dex } : { type: "allMids" }),
     cache: "no-store",
   });
   if (!response.ok) return {};
-  const data = (await response.json()) as Record<string, string>;
+  return (await response.json()) as Record<string, string>;
+}
+
+async function fetchHyperliquidTickers(): Promise<Record<string, number>> {
+  const dexRes = await fetch("https://api.hyperliquid.xyz/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "perpDexs" }),
+    cache: "no-store",
+  });
+  const builderDexes: string[] = dexRes.ok
+    ? ((await dexRes.json()) as ({ name: string } | null)[])
+        .filter((d): d is { name: string } => !!d?.name)
+        .map((d) => d.name)
+    : [];
+  const midsList = await Promise.all([
+    fetchHyperliquidMids(),
+    ...builderDexes.map((dex) => fetchHyperliquidMids(dex)),
+  ]);
   const map: Record<string, number> = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (key.startsWith("@") || key.startsWith("#")) continue;
-    map[key] = parseFloat(value);
+  for (const mids of midsList) {
+    for (const [key, value] of Object.entries(mids)) {
+      // 主市場的 @/# 雜訊 key 濾掉；builder 標的 key 含冒號（dex:TICKER），保留
+      if (key.startsWith("@") || key.startsWith("#")) continue;
+      map[key] = parseFloat(value);
+    }
   }
   return map;
 }

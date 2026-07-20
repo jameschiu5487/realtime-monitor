@@ -125,20 +125,43 @@ async function fetchOKXSymbols(market: Market): Promise<string[]> {
     .sort();
 }
 
-// Hyperliquid 不在 Exchange 型別內，比照 Alpaca/OKX 用前置字串分流；僅 perp，symbol 為原生 coin 名
-async function fetchHyperliquidSymbols(): Promise<string[]> {
+// Hyperliquid 不在 Exchange 型別內，比照 Alpaca/OKX 用前置字串分流；僅 perp
+// 主永續市場的 symbol 為原生 coin 名（BTC）；builder-deployed perp DEX（HIP-3）的
+// 標的（含美股/商品/pre-IPO）名為 `dex:TICKER`（如 mkts:TSLA），需帶 dex 參數才查得到。
+// 用 allMids（而非 meta）取清單：回應小、並發 10 個 dex 不會被 HL 限流截斷，
+// 且只回有報價的 active 標的（下架的自然不含），其 key 即為 symbol。
+async function fetchHyperliquidMidsKeys(dex?: string): Promise<string[]> {
   const response = await fetch("https://api.hyperliquid.xyz/info", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "meta" }),
+    body: JSON.stringify(dex ? { type: "allMids", dex } : { type: "allMids" }),
     ...CACHE_1H,
   });
   if (!response.ok) return [];
-  const data = await response.json();
-  return ((data.universe ?? []) as { name: string; isDelisted?: boolean }[])
-    .filter((u) => u.isDelisted !== true)
-    .map((u) => u.name)
-    .sort();
+  const data = (await response.json()) as Record<string, string>;
+  // 主市場 allMids 的 @/# 開頭 key 為 spot index / 內部市場，濾掉
+  return Object.keys(data).filter((k) => !k.startsWith("@") && !k.startsWith("#"));
+}
+
+async function fetchHyperliquidSymbols(): Promise<string[]> {
+  // 先取 builder DEX 名單（perpDexs 首項為 null＝主市場，過濾掉）
+  const dexRes = await fetch("https://api.hyperliquid.xyz/info", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "perpDexs" }),
+    ...CACHE_1H,
+  });
+  const builderDexes: string[] = dexRes.ok
+    ? ((await dexRes.json()) as ({ name: string } | null)[])
+        .filter((d): d is { name: string } => !!d?.name)
+        .map((d) => d.name)
+    : [];
+  // 主市場 + 各 builder DEX 並行抓後合併
+  const lists = await Promise.all([
+    fetchHyperliquidMidsKeys(),
+    ...builderDexes.map((dex) => fetchHyperliquidMidsKeys(dex)),
+  ]);
+  return [...new Set(lists.flat())].sort();
 }
 
 export async function GET(request: NextRequest) {

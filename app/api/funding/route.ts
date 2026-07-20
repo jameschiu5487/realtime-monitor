@@ -45,10 +45,12 @@ export async function GET(request: NextRequest) {
 
     if (exchange.toLowerCase() === "hyperliquid") {
       // symbol 為 HL 原生 coin 名（大小寫敏感，如 BTC、kPEPE），不做大小寫轉換
+      // builder-deployed perp DEX 標的名為 `dex:TICKER`（如 mkts:TSLA），要帶對應 dex 參數
+      const dex = symbol.includes(":") ? symbol.split(":")[0] : undefined;
       const res = await fetch("https://api.hyperliquid.xyz/info", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "metaAndAssetCtxs" }),
+        body: JSON.stringify(dex ? { type: "metaAndAssetCtxs", dex } : { type: "metaAndAssetCtxs" }),
       });
       if (!res.ok) return NextResponse.json(null);
       const data = await res.json();
