@@ -480,6 +480,26 @@ export type Database = {
           created_at?: string;
         };
       };
+      fund_account_equity: {
+        Row: {
+          account_id: string;
+          exchange: string;
+          ts: string;
+          total_equity: number;
+        };
+        Insert: {
+          account_id: string;
+          exchange: string;
+          ts: string;
+          total_equity: number;
+        };
+        Update: {
+          account_id?: string;
+          exchange?: string;
+          ts?: string;
+          total_equity?: number;
+        };
+      };
     };
     Views: {
       [_ in never]: never;
@@ -526,6 +546,8 @@ export type PolymarketEquity = Database["public"]["Tables"]["polymarket_equity"]
 export type PolymarketPosition = Database["public"]["Tables"]["polymarket_positions"]["Row"];
 export type PolymarketSymbolPnl = Database["public"]["Tables"]["polymarket_symbol_pnl"]["Row"];
 export type BasisPair = Database["public"]["Tables"]["basis_pairs"]["Row"];
+export type FundAccountEquity =
+  Database["public"]["Tables"]["fund_account_equity"]["Row"];
 
 // Run mode and status types
 export type RunMode = StrategyRun["mode"];
