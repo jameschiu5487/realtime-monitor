@@ -6,6 +6,7 @@ import type {
   StrategyRun,
   EquityCurve,
   CombinedTrade,
+  FundAccountEquity,
 } from "@/lib/types/database";
 
 export const revalidate = 60;
@@ -51,6 +52,40 @@ async function fetchEquityDataWithLimit(
   }
 
   return allData;
+}
+
+async function fetchFundAccountEquity(
+  supabase: SupabaseClient,
+  since: string
+): Promise<{ data: FundAccountEquity[]; error: string | null }> {
+  const PAGE_SIZE = 1000;
+  const allData: FundAccountEquity[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("fund_account_equity")
+      .select("account_id, exchange, ts, total_equity")
+      .gte("ts", since)
+      .order("ts", { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error("Error fetching fund_account_equity:", error);
+      return { data: allData, error: error.message };
+    }
+
+    if (data && data.length > 0) {
+      allData.push(...(data as FundAccountEquity[]));
+      offset += PAGE_SIZE;
+      hasMore = data.length === PAGE_SIZE;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return { data: allData, error: null };
 }
 
 // Fetch combined trades for specific runs with optional time filter
@@ -171,8 +206,16 @@ export default async function DashboardPage() {
   }
 
   const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [latestEquitiesRaw, equities24hAgoRaw, tradesResult, equityData, combinedTradesData] =
+  const [
+    latestEquitiesRaw,
+    equities24hAgoRaw,
+    tradesResult,
+    equityData,
+    combinedTradesData,
+    fundEquityResult,
+  ] =
     await Promise.all([
       // Latest equity per running run
       Promise.all(
@@ -211,6 +254,8 @@ export default async function DashboardPage() {
       fetchEquityDataWithLimit(supabase, allActiveRunIds, since7d),
       // Combined trades
       fetchCombinedTradesWithLimit(supabase, allActiveRunIds),
+      // Fund account equity (30 days)
+      fetchFundAccountEquity(supabase, since30d),
     ]);
 
   const latestEquities = latestEquitiesRaw.filter(Boolean) as EquityCurve[];
@@ -234,6 +279,8 @@ export default async function DashboardPage() {
       equityData={equityData}
       combinedTradesData={combinedTradesData}
       strategyRunIds={strategyRunIds}
+      fundEquityData={fundEquityResult.data}
+      fundEquityError={fundEquityResult.error}
     />
   );
 }

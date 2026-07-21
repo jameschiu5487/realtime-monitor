@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { FundEquityDashboard } from "@/components/overview/fund-equity-dashboard";
 import { OverviewPerformanceChart } from "@/components/overview/overview-performance-chart";
 import { cn } from "@/lib/utils";
 import type {
@@ -11,6 +12,7 @@ import type {
   StrategyRun,
   EquityCurve,
   CombinedTrade,
+  FundAccountEquity,
 } from "@/lib/types/database";
 
 const STORAGE_KEY = "overview-selected-strategies";
@@ -42,6 +44,8 @@ interface OverviewContentProps {
   equityData: EquityCurve[];
   combinedTradesData: CombinedTrade[];
   strategyRunIds: Record<string, string[]>;
+  fundEquityData: FundAccountEquity[];
+  fundEquityError: string | null;
 }
 
 function useSelectedStrategies(activeStrategies: ActiveStrategy[]) {
@@ -103,6 +107,8 @@ export function OverviewContent({
   equityData,
   combinedTradesData,
   strategyRunIds,
+  fundEquityData,
+  fundEquityError,
 }: OverviewContentProps) {
   const { selectedIds, toggle } = useSelectedStrategies(activeStrategies);
 
@@ -239,6 +245,11 @@ export function OverviewContent({
           </div>
         )}
       </div>
+
+      <FundEquityDashboard
+        initialData={fundEquityData}
+        fetchError={fundEquityError}
+      />
 
       {/* Metrics Strip */}
       <Card className="overflow-hidden">
