@@ -38,6 +38,8 @@ import {
 } from "@/lib/utils/fund-equity";
 
 const ranges: FundEquityRange[] = ["24h", "7d", "30d"];
+const ROW_RETENTION_MS = rangeToMs("30d") + 60 * 60 * 1000;
+const NOW_REFRESH_MS = 60 * 1000;
 
 const chartConfig = {
   equity: {
@@ -59,6 +61,14 @@ function formatExchangeName(exchange: string): string {
     : exchange;
 }
 
+function pruneOldRows(
+  rows: FundAccountEquity[],
+  nowMs: number
+): FundAccountEquity[] {
+  const cutoffMs = nowMs - ROW_RETENTION_MS;
+  return rows.filter((row) => new Date(row.ts).getTime() >= cutoffMs);
+}
+
 export function FundEquityDashboard({
   initialData,
   fetchError,
@@ -72,6 +82,7 @@ export function FundEquityDashboard({
     new Set()
   );
   const [live, setLive] = useState(true);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     const supabase = createClient();
@@ -86,7 +97,9 @@ export function FundEquityDashboard({
         },
         (payload) => {
           const row = payload.new as FundAccountEquity;
-          setRows((prev) => upsertFundEquityRow(prev, row));
+          setRows((prev) =>
+            pruneOldRows(upsertFundEquityRow(prev, row), Date.now())
+          );
         }
       )
       .subscribe((status) => {
@@ -105,10 +118,22 @@ export function FundEquityDashboard({
     };
   }, []);
 
+  useEffect(() => {
+    const refreshNow = () => {
+      const currentNowMs = Date.now();
+      setNowMs(currentNowMs);
+      setRows((prev) => pruneOldRows(prev, currentNowMs));
+    };
+
+    refreshNow();
+    const intervalId = window.setInterval(refreshNow, NOW_REFRESH_MS);
+    return () => window.clearInterval(intervalId);
+  }, [range]);
+
   const latest = useMemo(() => latestByAccount(rows), [rows]);
   const total = useMemo(() => totalEquityFromLatest(latest), [latest]);
   const exchanges = useMemo(() => summarizeByExchange(latest), [latest]);
-  const sinceMs = useMemo(() => Date.now() - rangeToMs(range), [range]);
+  const sinceMs = useMemo(() => nowMs - rangeToMs(range), [nowMs, range]);
   const curve = useMemo(
     () => downsample(buildFundEquityCurve(rows, sinceMs)),
     [rows, sinceMs]
@@ -159,7 +184,7 @@ export function FundEquityDashboard({
   }
 
   const deltaColor = delta >= 0 ? "text-emerald-600" : "text-red-600";
-  const deltaSign = delta >= 0 ? "+" : "";
+  const deltaSign = delta >= 0 ? "+" : "-";
 
   return (
     <section className="space-y-4">
@@ -189,10 +214,10 @@ export function FundEquityDashboard({
           </div>
           <div className="mt-2 flex items-center gap-2 text-sm">
             <span className={deltaColor}>
-              {deltaSign}${formatMoney(delta)}
+              {deltaSign}${formatMoney(Math.abs(delta))}
               {deltaPct === null
                 ? ""
-                : ` (${deltaSign}${deltaPct.toFixed(2)}%)`}
+                : ` (${deltaSign}${Math.abs(deltaPct).toFixed(2)}%)`}
             </span>
             <span className="text-muted-foreground">{range}</span>
           </div>
