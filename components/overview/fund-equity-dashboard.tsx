@@ -26,6 +26,8 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import type { FundAccountEquity } from "@/lib/types/database";
 import { downsample } from "@/lib/utils/equity";
+import { exchangeCardClass } from "@/lib/utils/fund-account-strategy";
+import { cn } from "@/lib/utils";
 import {
   buildFundEquityCurve,
   type FundEquityRange,
@@ -73,19 +75,38 @@ export function FundEquityDashboard({
   initialData,
   fetchError,
   shareRatio = 1,
+  accountStrategies = {},
   onSummaryChange,
 }: {
   initialData: FundAccountEquity[];
   fetchError?: string | null;
   /** From user_strategy_access via deriveFundShareRatio; scales all displayed amounts. */
   shareRatio?: number;
+  /** account_id → strategy names for running realtime / test-realtime runs. */
+  accountStrategies?: Record<string, string[]>;
   onSummaryChange?: (summary: { total: number; accountCount: number }) => void;
 }) {
   const [rows, setRows] = useState(initialData);
   const [range, setRange] = useState<FundEquityRange>("24h");
+  const exchangesWithStrategies = useMemo(() => {
+    const set = new Set<string>();
+    for (const [accountId, names] of Object.entries(accountStrategies)) {
+      if (names.length === 0) continue;
+      const exchange = accountId.split("_")[0];
+      if (exchange) set.add(exchange);
+    }
+    return set;
+  }, [accountStrategies]);
   const [expandedExchanges, setExpandedExchanges] = useState<Set<string>>(
-    new Set()
+    () => new Set(exchangesWithStrategies)
   );
+  useEffect(() => {
+    setExpandedExchanges((prev) => {
+      const next = new Set(prev);
+      for (const exchange of exchangesWithStrategies) next.add(exchange);
+      return next;
+    });
+  }, [exchangesWithStrategies]);
   const [live, setLive] = useState(true);
   // 0 = use data-derived clock (SSR/client first paint match); set after mount.
   const [nowMs, setNowMs] = useState(0);
@@ -245,10 +266,13 @@ export function FundEquityDashboard({
           const expanded = expandedExchanges.has(exchange);
 
           return (
-            <Card key={exchange} className="gap-0 py-0">
+            <Card
+              key={exchange}
+              className={cn("gap-0 py-0", exchangeCardClass(exchange))}
+            >
               <button
                 type="button"
-                className="w-full rounded-xl text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-xl text-left outline-none transition-colors hover:bg-background/40 focus-visible:ring-2 focus-visible:ring-ring"
                 aria-expanded={expanded}
                 onClick={() => toggleExchange(exchange)}
               >
@@ -268,21 +292,35 @@ export function FundEquityDashboard({
               </button>
 
               {expanded && (
-                <CardContent className="border-t py-4">
+                <CardContent className="border-t border-inherit py-4">
                   <div className="space-y-3">
-                    {accounts.map((account) => (
-                      <div
-                        key={account.account_id}
-                        className="flex items-center justify-between gap-3 text-sm"
-                      >
-                        <span className="truncate font-mono text-muted-foreground">
-                          {account.account_id}
-                        </span>
-                        <span className="shrink-0 font-mono font-medium">
-                          ${formatMoney(account.total_equity)}
-                        </span>
-                      </div>
-                    ))}
+                    {accounts.map((account) => {
+                      const strategies =
+                        accountStrategies[account.account_id] ?? [];
+                      return (
+                        <div
+                          key={account.account_id}
+                          className="flex items-center justify-between gap-3 text-sm"
+                        >
+                          <div className="min-w-0 flex flex-1 items-center gap-2">
+                            <span className="truncate font-mono text-muted-foreground">
+                              {account.account_id}
+                            </span>
+                            {strategies.length > 0 && (
+                              <span
+                                className="truncate rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground"
+                                title={strategies.join(", ")}
+                              >
+                                {strategies.join(", ")}
+                              </span>
+                            )}
+                          </div>
+                          <span className="shrink-0 font-mono font-medium">
+                            ${formatMoney(account.total_equity)}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </CardContent>
               )}

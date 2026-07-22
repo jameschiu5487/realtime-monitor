@@ -8,6 +8,11 @@ import { FundEquityDashboard } from "@/components/overview/fund-equity-dashboard
 import { OverviewPerformanceChart } from "@/components/overview/overview-performance-chart";
 import { cn } from "@/lib/utils";
 import {
+  buildAccountStrategyMap,
+  buildStrategyAccountMap,
+  exchangeBadgeClass,
+} from "@/lib/utils/fund-account-strategy";
+import {
   deriveFundShareRatio,
   latestByAccount,
   totalEquityFromLatest,
@@ -119,6 +124,18 @@ export function OverviewContent({
   const fundShareRatio = useMemo(
     () => deriveFundShareRatio(shareRatioMap),
     [shareRatioMap]
+  );
+  const isLiveMode = useCallback(
+    (mode: string) => mode === "realtime" || mode === "test-realtime",
+    []
+  );
+  const accountStrategies = useMemo(
+    () => buildAccountStrategyMap(allRuns, strategyNameMap, isLiveMode),
+    [allRuns, strategyNameMap, isLiveMode]
+  );
+  const strategyAccounts = useMemo(
+    () => buildStrategyAccountMap(allRuns, isLiveMode),
+    [allRuns, isLiveMode]
   );
   const initialFundSummary = useMemo(() => {
     const latest = latestByAccount(fundEquityData);
@@ -331,29 +348,9 @@ export function OverviewContent({
         initialData={fundEquityData}
         fetchError={fundEquityError}
         shareRatio={fundShareRatio}
+        accountStrategies={accountStrategies}
         onSummaryChange={handleFundSummaryChange}
       />
-
-      {/* Performance Chart */}
-      {selectedIds.size > 0 && (
-        <Card>
-          <CardHeader className="px-3 sm:px-6 pb-2">
-            <CardTitle className="text-sm sm:text-base font-medium">Active Equity Curve</CardTitle>
-          </CardHeader>
-          <CardContent className="px-1 sm:px-2">
-            <OverviewPerformanceChart
-              key={selectionKey}
-              initialEquityData={filtered.equityData}
-              initialCombinedTrades={filtered.combinedTradesData}
-              runningRunIds={filtered.runningRunIds}
-              strategyRunIds={filtered.strategyRunIds}
-              runToStrategyMap={runToStrategyMap}
-              shareRatioMap={shareRatioMap}
-              strategyNameMap={filtered.strategyNameMap}
-            />
-          </CardContent>
-        </Card>
-      )}
 
       {/* Active Strategies */}
       {activeStrategies.length > 0 ? (
@@ -372,6 +369,7 @@ export function OverviewContent({
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {activeStrategies.map((strategy) => {
               const isSelected = selectedIds.has(strategy.strategyId);
+              const accounts = strategyAccounts[strategy.strategyId] ?? [];
               return (
                 <Card
                   key={strategy.strategyId}
@@ -409,6 +407,21 @@ export function OverviewContent({
                       {strategy.runCount}{" "}
                       {strategy.runCount === 1 ? "run" : "runs"} combined
                     </p>
+                    {accounts.length > 0 && (
+                      <div className="mt-2 ml-10 flex flex-wrap gap-1.5">
+                        {accounts.map((accountId) => (
+                          <span
+                            key={accountId}
+                            className={cn(
+                              "rounded-md px-1.5 py-0.5 text-xs font-mono font-medium",
+                              exchangeBadgeClass(accountId)
+                            )}
+                          >
+                            {accountId}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -419,6 +432,27 @@ export function OverviewContent({
         <Card>
           <CardContent className="flex h-[80px] sm:h-[120px] items-center justify-center text-sm text-muted-foreground">
             No strategies running
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Performance Chart */}
+      {selectedIds.size > 0 && (
+        <Card>
+          <CardHeader className="px-3 sm:px-6 pb-2">
+            <CardTitle className="text-sm sm:text-base font-medium">Active Equity Curve</CardTitle>
+          </CardHeader>
+          <CardContent className="px-1 sm:px-2">
+            <OverviewPerformanceChart
+              key={selectionKey}
+              initialEquityData={filtered.equityData}
+              initialCombinedTrades={filtered.combinedTradesData}
+              runningRunIds={filtered.runningRunIds}
+              strategyRunIds={filtered.strategyRunIds}
+              runToStrategyMap={runToStrategyMap}
+              shareRatioMap={shareRatioMap}
+              strategyNameMap={filtered.strategyNameMap}
+            />
           </CardContent>
         </Card>
       )}
