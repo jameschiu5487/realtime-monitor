@@ -29,6 +29,28 @@ const RANGES = [
   { days: 30, label: "30D" },
 ] as const;
 
+// 即時輪詢間隔（ms）：每秒抓一次 ticker 現價
+const LIVE_INTERVAL_MS = 1000;
+
+// 抓某個 exchange+market 的即時價格 map（symbol -> price）。
+// Alpaca 無全量端點，需帶該組合用到的 symbols；其餘交易所回全量 map。
+async function fetchComboTickers(
+  exchange: string,
+  market: string,
+  symbols: string[]
+): Promise<Record<string, number> | null> {
+  const url =
+    exchange === "Alpaca"
+      ? `/api/tickers?exchange=Alpaca&market=${market}&symbols=${encodeURIComponent(symbols.join(","))}`
+      : `/api/tickers?exchange=${exchange}&market=${market}`;
+  try {
+    const res = await fetch(url);
+    return res.ok ? ((await res.json()) as Record<string, number>) : null;
+  } catch {
+    return null;
+  }
+}
+
 interface BasisMonitorContentProps {
   initialPairs: BasisPair[];
 }
@@ -45,6 +67,8 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   const [pairs, setPairs] = useState<BasisPair[]>(initialPairs);
   const [tickers, setTickers] = useState<Record<string, Record<string, number>>>({});
   const [funding, setFunding] = useState<PairFunding | null>(null);
+  // 每秒用 ticker 現價算出的即時 basis 點（不進 K 線序列）
+  const [livePoint, setLivePoint] = useState<BasisPoint | null>(null);
   const [bbEnabled, setBbEnabled] = useState(false);
   // 輸入框用字串 state，避免 controlled number input 把空字串/中間態強制正規化成 0
   const [bbWindowInput, setBbWindowInput] = useState("240");
@@ -162,9 +186,69 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
     };
   }, [ready, leg1, leg2, days]);
 
-  // 清單快照：對清單涉及的每個 exchange+market 組合各拉一次 tickers。
-  // 交易所回全量 map；Alpaca 沒有全量端點，要帶該組合實際用到的 symbols。
+  // 即時 basis：每秒對兩腳用到的 exchange+market 各抓一次 ticker 現價，算出當下 basis。
+  // 分頁在背景 / 上一輪還沒回來就跳過（省流量、避免限流）；換 pair / 離開時清 interval。
   useEffect(() => {
+    if (!ready) {
+      setLivePoint(null);
+      return;
+    }
+    // 換 pair 先清掉舊即時值，避免顯示上一組的殘留
+    setLivePoint(null);
+    let cancelled = false;
+    let inFlight = false;
+    const legs = [leg1, leg2];
+    const tick = async () => {
+      if (cancelled || inFlight || document.hidden) return;
+      inFlight = true;
+      try {
+        // 兩腳可能共用同一 exchange+market，去重後各抓一次
+        const combos = new Map<string, { exchange: string; market: string; symbols: Set<string> }>();
+        for (const leg of legs) {
+          const key = `${leg.exchange}|${leg.market}`;
+          if (!combos.has(key)) {
+            combos.set(key, { exchange: leg.exchange, market: leg.market, symbols: new Set() });
+          }
+          combos.get(key)!.symbols.add(leg.symbol);
+        }
+        const entries = await Promise.all(
+          [...combos.entries()].map(async ([key, c]) => {
+            const map = await fetchComboTickers(c.exchange, c.market, [...c.symbols]);
+            return [key, map] as const;
+          })
+        );
+        if (cancelled) return;
+        const byCombo = new Map(entries);
+        const priceOf = (leg: BasisLeg) => byCombo.get(`${leg.exchange}|${leg.market}`)?.[leg.symbol];
+        const p1 = priceOf(leg1);
+        const p2 = priceOf(leg2);
+        // 任一腳缺價或分母為 0 就跳過這輪，保留上一個有效值
+        if (p1 === undefined || p2 === undefined || p2 === 0) return;
+        setLivePoint({
+          time: Date.now(),
+          leg1: p1,
+          leg2: p2,
+          basisPct: ((p1 - p2) / p2) * 100,
+          basisAbs: p1 - p2,
+          fresh: true,
+        });
+      } finally {
+        inFlight = false;
+      }
+    };
+    tick(); // 立即抓一次，不等第一個 interval
+    const id = setInterval(tick, LIVE_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [ready, leg1, leg2]);
+
+  // 清單即時報價：每秒對清單涉及的每個 exchange+market 組合各拉一次 tickers。
+  // 交易所回全量 map；Alpaca 沒有全量端點，要帶該組合實際用到的 symbols。
+  // 分頁在背景 / 上一輪未回就跳過；pairs 變動時重建 interval。
+  useEffect(() => {
+    if (pairs.length === 0) return;
     const comboSymbols = new Map<string, Set<string>>();
     const add = (exchange: string, market: string, symbol: string) => {
       const combo = `${exchange}|${market}`;
@@ -175,26 +259,32 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
       add(p.leg1_exchange, p.leg1_market, p.leg1_symbol);
       add(p.leg2_exchange, p.leg2_market, p.leg2_symbol);
     }
-    for (const [combo, symbols] of comboSymbols) {
-      const cached = tickers[combo];
-      // 新增 pair 帶進新 symbol 時（Alpaca 逐檔查價）也要補抓
-      const missing = !cached || [...symbols].some((s) => cached[s] === undefined);
-      if (!missing) continue;
-      const [exchange, market] = combo.split("|");
-      const url =
-        exchange === "Alpaca"
-          ? `/api/tickers?exchange=Alpaca&market=${market}&symbols=${encodeURIComponent([...symbols].join(","))}`
-          : `/api/tickers?exchange=${exchange}&market=${market}`;
-      fetch(url)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((map: Record<string, number> | null) => {
-          // 失敗不落 cache，pairs 下次變動時會重試；成功則與既有 map 合併
-          if (map) setTickers((prev) => ({ ...prev, [combo]: { ...(prev[combo] ?? {}), ...map } }));
-        })
-        .catch(() => {});
-    }
-    // tickers 故意不進依賴：只在 pairs 變動時補抓缺的組合
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    let inFlight = false;
+    const refresh = async () => {
+      if (cancelled || inFlight || document.hidden) return;
+      inFlight = true;
+      try {
+        await Promise.all(
+          [...comboSymbols.entries()].map(async ([combo, symbols]) => {
+            const [exchange, market] = combo.split("|");
+            const map = await fetchComboTickers(exchange, market, [...symbols]);
+            // 失敗不落 cache，下一輪會重試；成功則與既有 map 合併
+            if (map && !cancelled) {
+              setTickers((prev) => ({ ...prev, [combo]: { ...(prev[combo] ?? {}), ...map } }));
+            }
+          })
+        );
+      } finally {
+        inFlight = false;
+      }
+    };
+    refresh(); // 立即抓一次
+    const id = setInterval(refresh, LIVE_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [pairs]);
 
   const savePair = async () => {
@@ -373,6 +463,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
           displayCount={getKlineConfig(days).displayKlines}
           funding={funding}
           legLabels={{ leg1: legLabel(leg1), leg2: legLabel(leg2) }}
+          livePoint={livePoint}
         />
       )}
 

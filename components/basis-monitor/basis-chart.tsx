@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceDot, ReferenceLine, XAxis, YAxis } from "recharts";
 import { format } from "date-fns";
 import {
   Card,
@@ -63,6 +63,8 @@ interface BasisChartProps {
   displayCount: number;
   funding: PairFunding | null;
   legLabels: { leg1: string; leg2: string };
+  // 每秒用 ticker 現價算出的即時 basis 點；K 線與 BB 不受其影響，僅覆蓋頭部讀值與加即時線
+  livePoint: BasisPoint | null;
 }
 
 type ChartRow = { time: string; basis: number; fresh: boolean } & Record<
@@ -70,7 +72,7 @@ type ChartRow = { time: string; basis: number; fresh: boolean } & Record<
   string | number | boolean | undefined
 >;
 
-export function BasisChart({ points, mode, title, bb, displayCount, funding, legLabels }: BasisChartProps) {
+export function BasisChart({ points, mode, title, bb, displayCount, funding, legLabels, livePoint }: BasisChartProps) {
   const fmt = (v: number) => (mode === "pct" ? `${v.toFixed(1)} bp` : v.toFixed(4));
 
   const { data, fundingTimes1, fundingTimes2 } = useMemo(() => {
@@ -221,6 +223,12 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
   }, [data]);
 
   const current = data.length > 0 ? data[data.length - 1].basis : null;
+  // 即時 basis 換算成當前顯示單位（bp / USDT），與 K 線的 basis 同軸
+  const liveBasis =
+    livePoint !== null ? (mode === "pct" ? livePoint.basisPct * 100 : livePoint.basisAbs) : null;
+  // 頭部大字優先顯示即時值，退回最後一根 K 線
+  const displayBasis = liveBasis ?? current;
+  const lastTime = data.length > 0 ? data[data.length - 1].time : null;
   const hasFunding1 = fundingTimes1.length > 0;
   const hasFunding2 = fundingTimes2.length > 0;
   const hasFundingPanel = hasFunding1 || hasFunding2;
@@ -295,16 +303,24 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
         </div>
         <div className="flex">
           <div className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">
-            <span className="text-xs text-muted-foreground">目前 Basis</span>
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              {liveBasis !== null ? "即時 Basis" : "目前 Basis"}
+              {liveBasis !== null && (
+                <span className="relative flex h-2 w-2" title="每秒即時更新">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+              )}
+            </span>
             <span
               className={
                 "text-lg font-bold leading-none sm:text-2xl " +
-                (current !== null && current >= 0
+                (displayBasis !== null && displayBasis >= 0
                   ? "text-emerald-600 dark:text-emerald-400"
                   : "text-red-600 dark:text-red-400")
               }
             >
-              {current !== null ? fmt(current) : "—"}
+              {displayBasis !== null ? fmt(displayBasis) : "—"}
             </span>
           </div>
         </div>
@@ -349,6 +365,26 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
               tickFormatter={(value) => fmtPrice(Number(value))}
             />
             <ReferenceLine y={0} strokeDasharray="3 3" stroke="var(--muted-foreground)" />
+            {/* 即時 basis：跨圖水平線 + 右緣跳動點（每秒更新，不進 K 線/BB 資料） */}
+            {liveBasis !== null && (
+              <ReferenceLine
+                y={liveBasis}
+                stroke="var(--color-basis)"
+                strokeDasharray="2 2"
+                strokeOpacity={0.5}
+              />
+            )}
+            {liveBasis !== null && lastTime !== null && (
+              <ReferenceDot
+                x={lastTime}
+                y={liveBasis}
+                r={4}
+                fill="var(--color-basis)"
+                stroke="var(--background)"
+                strokeWidth={1.5}
+                isFront
+              />
+            )}
             {fundingTimes1.map((t) => (
               <ReferenceLine
                 key={`f1-${t}`}
