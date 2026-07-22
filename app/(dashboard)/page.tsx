@@ -11,6 +11,11 @@ import type {
 
 export const revalidate = 60;
 
+/** Overview treats these modes as live/active (excludes paper/backtest/etc.). */
+function isOverviewLiveMode(mode: string): boolean {
+  return mode === "realtime" || mode === "test-realtime";
+}
+
 // Fetch equity data for specific runs with optional time filter
 async function fetchEquityDataWithLimit(
   supabase: SupabaseClient,
@@ -155,7 +160,7 @@ export default async function DashboardPage() {
   }
 
   const runningRunIds = allRuns
-    .filter((r) => r.status === "running" && (r.mode as string) === "realtime")
+    .filter((r) => r.status === "running" && isOverviewLiveMode(r.mode as string))
     .map((r) => r.run_id);
 
   const runToStrategyMap: Record<string, string> = {};
@@ -168,14 +173,16 @@ export default async function DashboardPage() {
     strategyNameMap.set(s.strategy_id, s.name);
   }
 
-  // Group by strategy for combined display — only show "realtime" mode strategies
+  // Group by strategy for combined display — realtime + test-realtime
   const activeStrategyIds = new Set(
     allRuns
-      .filter((r) => r.status === "running" && (r.mode as string) === "realtime")
+      .filter((r) => r.status === "running" && isOverviewLiveMode(r.mode as string))
       .map((r) => r.strategy_id)
   );
   const activeStrategies = Array.from(activeStrategyIds).map((strategyId) => {
-    const strategyRuns = allRuns.filter((r) => r.strategy_id === strategyId && (r.mode as string) === "realtime");
+    const strategyRuns = allRuns.filter(
+      (r) => r.strategy_id === strategyId && isOverviewLiveMode(r.mode as string)
+    );
     const runningRun = strategyRuns.find((r) => r.status === "running");
     return {
       strategyId,
@@ -194,12 +201,14 @@ export default async function DashboardPage() {
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
 
-  // Pre-fetch chart data: only "realtime" mode runs for active strategies
+  // Pre-fetch chart data: realtime + test-realtime runs for active strategies
   const strategyRunIds: Record<string, string[]> = {};
   const allActiveRunIds: string[] = [];
   for (const strategyId of activeStrategyIds) {
     const runIds = allRuns
-      .filter((r) => r.strategy_id === strategyId && (r.mode as string) === "realtime")
+      .filter(
+        (r) => r.strategy_id === strategyId && isOverviewLiveMode(r.mode as string)
+      )
       .map((r) => r.run_id);
     strategyRunIds[strategyId] = runIds;
     allActiveRunIds.push(...runIds);
