@@ -28,7 +28,6 @@ import type { FundAccountEquity } from "@/lib/types/database";
 import { downsample } from "@/lib/utils/equity";
 import {
   buildFundEquityCurve,
-  computeRangeDelta,
   type FundEquityRange,
   latestByAccount,
   rangeToMs,
@@ -49,7 +48,8 @@ const chartConfig = {
 } satisfies ChartConfig;
 
 function formatMoney(value: number): string {
-  return value.toLocaleString(undefined, {
+  // Fixed locale avoids SSR/client hydration mismatches.
+  return value.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -72,9 +72,14 @@ function pruneOldRows(
 export function FundEquityDashboard({
   initialData,
   fetchError,
+  shareRatio = 1,
+  onSummaryChange,
 }: {
   initialData: FundAccountEquity[];
   fetchError?: string | null;
+  /** From user_strategy_access via deriveFundShareRatio; scales all displayed amounts. */
+  shareRatio?: number;
+  onSummaryChange?: (summary: { total: number; accountCount: number }) => void;
 }) {
   const [rows, setRows] = useState(initialData);
   const [range, setRange] = useState<FundEquityRange>("24h");
@@ -82,7 +87,17 @@ export function FundEquityDashboard({
     new Set()
   );
   const [live, setLive] = useState(true);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  // 0 = use data-derived clock (SSR/client first paint match); set after mount.
+  const [nowMs, setNowMs] = useState(0);
+
+  const latestDataMs = useMemo(() => {
+    let max = 0;
+    for (const row of rows) {
+      max = Math.max(max, new Date(row.ts).getTime());
+    }
+    return max;
+  }, [rows]);
+  const effectiveNowMs = nowMs > 0 ? nowMs : latestDataMs;
 
   useEffect(() => {
     const supabase = createClient();
@@ -131,17 +146,39 @@ export function FundEquityDashboard({
   }, [range]);
 
   const latest = useMemo(() => latestByAccount(rows), [rows]);
-  const total = useMemo(() => totalEquityFromLatest(latest), [latest]);
-  const exchanges = useMemo(() => summarizeByExchange(latest), [latest]);
-  const sinceMs = useMemo(() => nowMs - rangeToMs(range), [nowMs, range]);
+  const total = useMemo(
+    () => totalEquityFromLatest(latest) * shareRatio,
+    [latest, shareRatio]
+  );
+  const exchanges = useMemo(
+    () =>
+      summarizeByExchange(latest).map((group) => ({
+        ...group,
+        total: group.total * shareRatio,
+        accounts: group.accounts.map((account) => ({
+          ...account,
+          total_equity: account.total_equity * shareRatio,
+        })),
+      })),
+    [latest, shareRatio]
+  );
+  const sinceMs = useMemo(
+    () => (effectiveNowMs > 0 ? effectiveNowMs - rangeToMs(range) : 0),
+    [effectiveNowMs, range]
+  );
   const curve = useMemo(
-    () => downsample(buildFundEquityCurve(rows, sinceMs)),
-    [rows, sinceMs]
+    () =>
+      downsample(buildFundEquityCurve(rows, sinceMs)).map((point) => ({
+        ...point,
+        equity: point.equity * shareRatio,
+      })),
+    [rows, sinceMs, shareRatio]
   );
-  const { delta, deltaPct } = useMemo(
-    () => computeRangeDelta(curve, total),
-    [curve, total]
-  );
+
+  useEffect(() => {
+    onSummaryChange?.({ total, accountCount: latest.size });
+  }, [total, latest, onSummaryChange]);
+
   const yDomain = useMemo<[number, number]>(() => {
     if (curve.length === 0) return [0, 1];
     const values = curve.map((point) => point.equity);
@@ -165,26 +202,27 @@ export function FundEquityDashboard({
 
   if (fetchError) {
     return (
-      <Card>
-        <CardContent className="text-sm text-destructive">
-          {fetchError}
-        </CardContent>
-      </Card>
+      <section className="space-y-4">
+        <Card>
+          <CardContent className="text-sm text-destructive">
+            {fetchError}
+          </CardContent>
+        </Card>
+      </section>
     );
   }
 
   if (rows.length === 0) {
     return (
-      <Card>
-        <CardContent className="text-sm text-muted-foreground">
-          尚無帳戶權益資料
-        </CardContent>
-      </Card>
+      <section className="space-y-4">
+        <Card>
+          <CardContent className="text-sm text-muted-foreground">
+            尚無帳戶權益資料
+          </CardContent>
+        </Card>
+      </section>
     );
   }
-
-  const deltaColor = delta >= 0 ? "text-emerald-600" : "text-red-600";
-  const deltaSign = delta >= 0 ? "+" : "-";
 
   return (
     <section className="space-y-4">
@@ -201,28 +239,6 @@ export function FundEquityDashboard({
           </div>
         )}
       </div>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            Total Balance
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="font-mono text-3xl font-semibold tracking-tight">
-            ${formatMoney(total)}
-          </div>
-          <div className="mt-2 flex items-center gap-2 text-sm">
-            <span className={deltaColor}>
-              {deltaSign}${formatMoney(Math.abs(delta))}
-              {deltaPct === null
-                ? ""
-                : ` (${deltaSign}${Math.abs(deltaPct).toFixed(2)}%)`}
-            </span>
-            <span className="text-muted-foreground">{range}</span>
-          </div>
-        </CardContent>
-      </Card>
 
       <div className="grid gap-4 sm:grid-cols-3">
         {exchanges.map(({ exchange, total: exchangeTotal, accounts }) => {
@@ -333,7 +349,7 @@ export function FundEquityDashboard({
                 tickMargin={6}
                 minTickGap={48}
                 tickFormatter={(value) =>
-                  new Date(Number(value)).toLocaleString(undefined, {
+                  new Date(Number(value)).toLocaleString("en-US", {
                     month: range === "24h" ? undefined : "short",
                     day: range === "24h" ? undefined : "numeric",
                     hour: "2-digit",
@@ -366,7 +382,13 @@ export function FundEquityDashboard({
                     labelFormatter={(_value, payload) => {
                       const time = payload?.[0]?.payload?.time;
                       return time
-                        ? new Date(time).toLocaleString()
+                        ? new Date(time).toLocaleString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: false,
+                          })
                         : "Invalid Date";
                     }}
                     formatter={(value) => (

@@ -7,6 +7,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { FundEquityDashboard } from "@/components/overview/fund-equity-dashboard";
 import { OverviewPerformanceChart } from "@/components/overview/overview-performance-chart";
 import { cn } from "@/lib/utils";
+import {
+  deriveFundShareRatio,
+  latestByAccount,
+  totalEquityFromLatest,
+} from "@/lib/utils/fund-equity";
 import type {
   Strategy,
   StrategyRun,
@@ -111,6 +116,27 @@ export function OverviewContent({
   fundEquityError,
 }: OverviewContentProps) {
   const { selectedIds, toggle } = useSelectedStrategies(activeStrategies);
+  const fundShareRatio = useMemo(
+    () => deriveFundShareRatio(shareRatioMap),
+    [shareRatioMap]
+  );
+  const initialFundSummary = useMemo(() => {
+    const latest = latestByAccount(fundEquityData);
+    return {
+      total: totalEquityFromLatest(latest) * fundShareRatio,
+      accountCount: latest.size,
+    };
+  }, [fundEquityData, fundShareRatio]);
+  const [fundSummary, setFundSummary] = useState(initialFundSummary);
+  useEffect(() => {
+    setFundSummary(initialFundSummary);
+  }, [initialFundSummary]);
+  const handleFundSummaryChange = useCallback(
+    (summary: { total: number; accountCount: number }) => {
+      setFundSummary(summary);
+    },
+    []
+  );
 
   // Stable key for chart remount when selection changes
   const selectionKey = useMemo(
@@ -246,30 +272,25 @@ export function OverviewContent({
         )}
       </div>
 
-      <FundEquityDashboard
-        initialData={fundEquityData}
-        fetchError={fundEquityError}
-      />
-
       {/* Metrics Strip */}
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           <div className="grid grid-cols-3 gap-px bg-border">
-            {/* Total Equity */}
+            {/* Total Balance (fund accounts) */}
             <div className="p-3 sm:p-4 lg:p-5 bg-card">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Total Equity
+                Total Balance
               </p>
               <p className="text-lg sm:text-2xl lg:text-3xl font-bold font-mono tabular-nums mt-1">
                 $
-                {metrics.totalEquity.toLocaleString(undefined, {
+                {fundSummary.total.toLocaleString("en-US", {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 })}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
-                {metrics.strategyCount}{" "}
-                {metrics.strategyCount === 1 ? "strategy" : "strategies"}
+                {fundSummary.accountCount}{" "}
+                {fundSummary.accountCount === 1 ? "account" : "accounts"}
               </p>
             </div>
 
@@ -298,6 +319,7 @@ export function OverviewContent({
                 {new Date().toLocaleDateString("en-US", {
                   month: "short",
                   day: "numeric",
+                  timeZone: "UTC",
                 })}
               </p>
             </div>
@@ -305,11 +327,18 @@ export function OverviewContent({
         </CardContent>
       </Card>
 
+      <FundEquityDashboard
+        initialData={fundEquityData}
+        fetchError={fundEquityError}
+        shareRatio={fundShareRatio}
+        onSummaryChange={handleFundSummaryChange}
+      />
+
       {/* Performance Chart */}
       {selectedIds.size > 0 && (
         <Card>
           <CardHeader className="px-3 sm:px-6 pb-2">
-            <CardTitle className="text-sm sm:text-base font-medium">Equity Curve</CardTitle>
+            <CardTitle className="text-sm sm:text-base font-medium">Active Equity Curve</CardTitle>
           </CardHeader>
           <CardContent className="px-1 sm:px-2">
             <OverviewPerformanceChart

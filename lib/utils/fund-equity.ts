@@ -3,6 +3,20 @@ import type { ChartDataPoint } from "@/lib/utils/equity";
 
 export type FundEquityRange = "24h" | "7d" | "30d";
 
+/**
+ * Single fund-level share ratio from user_strategy_access.
+ * No rows → 1; otherwise min(ratios) (uniform ratios stay that value; mixed → conservative).
+ */
+export function deriveFundShareRatio(
+  shareRatioMap: Record<string, number>
+): number {
+  const ratios = Object.values(shareRatioMap).filter(
+    (r) => Number.isFinite(r) && r > 0
+  );
+  if (ratios.length === 0) return 1;
+  return Math.min(...ratios);
+}
+
 export function rangeToMs(range: FundEquityRange): number {
   switch (range) {
     case "24h":
