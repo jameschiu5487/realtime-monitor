@@ -15,7 +15,6 @@ import { createClient } from "@/lib/supabase/client";
 import type { EquityCurveDataPoint } from "@/components/charts/equity-curve-chart";
 import type { ExposureDataPoint } from "@/components/charts/exposure-chart";
 import type { PnLBreakdownDataPoint } from "@/components/charts/pnl-breakdown-chart";
-import type { CumulativePnLDataPoint } from "@/components/charts/cumulative-trade-pnl-chart";
 import type {
   EquityCurve,
   PnlSeries,
@@ -257,13 +256,6 @@ function transformPnlBreakdownData(data: PnlSeries[], shareRatio: number): PnLBr
   }));
 }
 
-function transformCumulativePnLData(data: PnlSeries[], shareRatio: number): CumulativePnLDataPoint[] {
-  return data.map((point) => ({
-    time: point.ts,
-    cumulative: point.total_pnl * shareRatio,
-  }));
-}
-
 export function CombinedStrategyContent({
   strategyId,
   initialEquityCurve,
@@ -475,7 +467,6 @@ export function CombinedStrategyContent({
   const equityCurveData = useMemo(() => transformEquityCurveData(mergedEquityCurve, shareRatio), [mergedEquityCurve, shareRatio]);
   const exposureData = useMemo(() => transformExposureData(mergedEquityCurve), [mergedEquityCurve]);
   const pnlBreakdownData = useMemo(() => transformPnlBreakdownData(mergedPnlSeries, shareRatio), [mergedPnlSeries, shareRatio]);
-  const cumulativePnLData = useMemo(() => transformCumulativePnLData(mergedPnlSeries, shareRatio), [mergedPnlSeries, shareRatio]);
 
   // Calculate data time range
   const { dataStartTime, dataEndTime } = useMemo(() => {
@@ -559,16 +550,6 @@ export function CombinedStrategyContent({
     [equityCurveData]
   );
 
-  // P&L version of the (filtered) equity curve: current − run-start equity.
-  const filteredEquityPnLData = useMemo(
-    () =>
-      filteredEquityCurveData.map((d) => ({
-        time: d.time,
-        equity: d.equity - baselineEquity,
-      })),
-    [filteredEquityCurveData, baselineEquity]
-  );
-
   const filteredExposureData = useMemo(() => {
     return exposureData.filter((d) => {
       const time = new Date(d.time);
@@ -583,12 +564,16 @@ export function CombinedStrategyContent({
     });
   }, [pnlBreakdownData, timeRange]);
 
-  const filteredCumulativePnLData = useMemo(() => {
-    return cumulativePnLData.filter((d) => {
-      const time = new Date(d.time);
-      return time >= timeRange.start && time <= timeRange.end;
-    });
-  }, [cumulativePnLData, timeRange]);
+  // Cumulative Trade PnL = equity-based P&L (current − run-start equity), filtered
+  // to the selected time range. Baseline is the run-start equity, not the window start.
+  const filteredCumulativePnLData = useMemo(
+    () =>
+      filteredEquityCurveData.map((d) => ({
+        time: d.time,
+        cumulative: d.equity - baselineEquity,
+      })),
+    [filteredEquityCurveData, baselineEquity]
+  );
 
   const filteredCombinedTrades = useMemo(() => {
     return combinedTrades.filter((d) => {
@@ -690,11 +675,11 @@ export function CombinedStrategyContent({
           allDataLoaded={allDataLoaded}
         />
 
-        {/* Row 1: Equity Curve (shown as P&L: current − run-start equity) */}
+        {/* Row 1: Equity Curve */}
         <EquityCurveWithBrush
-          data={filteredEquityPnLData}
+          data={filteredEquityCurveData}
           onRangeChange={handleChartRangeChange}
-          showPnL
+          initEquity={baselineEquity}
         />
 
         {/* Row 2: Exposure */}

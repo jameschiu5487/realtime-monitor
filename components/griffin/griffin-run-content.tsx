@@ -75,15 +75,6 @@ export function GriffinRunContent({
     }));
   }, [equityCurve]);
 
-  // P&L version of the equity curve: current − run-start equity (first data point).
-  const equityPnLData = useMemo((): EquityCurveDataPoint[] => {
-    const base = equityCurveData.length > 0 ? equityCurveData[0].equity : 0;
-    return equityCurveData.map((d) => ({
-      time: d.time,
-      equity: d.equity - base,
-    }));
-  }, [equityCurveData]);
-
   // === Exposure Data (position_value / effective_capital as %) ===
   const effectiveCapital = initialCapital > 0 ? initialCapital : 1;
   const exposureData = useMemo(() => {
@@ -128,8 +119,8 @@ export function GriffinRunContent({
       {/* Griffin Performance Stats */}
       <GriffinStats equityCurve={equityCurve} positions={positions} initialCapital={initialCapital} pnlSeries={pnlSeries} trades={trades} />
 
-      {/* Equity Curve (shown as P&L: current − run-start equity) */}
-      <EquityCurveWithBrush data={equityPnLData} showPnL />
+      {/* Equity Curve */}
+      <EquityCurveWithBrush data={equityCurveData} initEquity={firstEquity} />
 
       {/* Exposure (single chart, % with positive/negative) */}
       <Card>

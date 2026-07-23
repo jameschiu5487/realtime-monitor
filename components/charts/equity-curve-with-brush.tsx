@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis, ReferenceArea, ReferenceLine } from "recharts";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis, ReferenceArea } from "recharts";
 import {
   Card,
   CardContent,
@@ -26,35 +26,34 @@ export interface EquityCurveDataPoint {
 interface EquityCurveWithBrushProps {
   data: EquityCurveDataPoint[];
   onRangeChange?: (startTime: Date, endTime: Date) => void;
-  // When true, the `equity` field is treated as P&L (current − run-start equity):
-  // the header shows "Current P&L" with sign/colour and a zero baseline line is drawn.
-  showPnL?: boolean;
+  // Equity at the start of the run. When provided, the header also shows
+  // Init Equity and PnL (current − init).
+  initEquity?: number;
 }
+
+const chartConfig = {
+  equity: {
+    label: "Equity ($)",
+    color: "hsl(var(--chart-1))",
+  },
+} satisfies ChartConfig;
+
+const formatUsd = (value: number) =>
+  value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function EquityCurveWithBrush({
   data,
   onRangeChange,
-  showPnL = false,
+  initEquity,
 }: EquityCurveWithBrushProps) {
   const [refAreaLeft, setRefAreaLeft] = useState<string | null>(null);
   const [refAreaRight, setRefAreaRight] = useState<string | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
 
-  const chartConfig = {
-    equity: {
-      label: showPnL ? "P&L ($)" : "Equity ($)",
-      color: "hsl(var(--chart-1))",
-    },
-  } satisfies ChartConfig;
-
-  const currentValue = data.length > 0 ? data[data.length - 1].equity : 0;
-  const isNegative = currentValue < 0;
-  const currentValueLabel = showPnL
-    ? `${isNegative ? "-" : "+"}$${Math.abs(currentValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : `$${currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const valueColorClass = showPnL && isNegative
-    ? "text-red-600 dark:text-red-400"
-    : "text-emerald-600 dark:text-emerald-400";
+  const currentEquity = data.length > 0 ? data[data.length - 1].equity : 0;
+  const hasInit = initEquity !== undefined;
+  const pnl = hasInit ? currentEquity - initEquity : 0;
+  const pnlNegative = pnl < 0;
 
   // Calculate Y-axis domain based on actual data range
   let minValue = data.length > 0 ? data[0].equity : 0;
@@ -127,12 +126,34 @@ export function EquityCurveWithBrush({
           <CardDescription className="text-xs sm:text-sm">Drag on chart to zoom</CardDescription>
         </div>
         <div className="flex">
-          <div className="flex flex-1 flex-col justify-center gap-1 border-t px-3 py-2 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-5">
-            <span className="text-xs text-muted-foreground">{showPnL ? "Current P&L" : "Current Equity"}</span>
-            <span className={`text-base font-bold leading-none sm:text-2xl ${valueColorClass}`}>
-              {currentValueLabel}
+          {hasInit && (
+            <div className="flex flex-col justify-center gap-1 border-t px-3 py-2 text-left sm:border-t-0 sm:border-l sm:px-6 sm:py-5">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Init Equity</span>
+              <span className="text-sm font-bold leading-none sm:text-lg whitespace-nowrap">
+                ${formatUsd(initEquity)}
+              </span>
+            </div>
+          )}
+          <div className="flex flex-col justify-center gap-1 border-t px-3 py-2 text-left sm:border-t-0 sm:border-l sm:px-6 sm:py-5">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">Current Equity</span>
+            <span className="text-sm font-bold leading-none sm:text-lg text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+              ${formatUsd(currentEquity)}
             </span>
           </div>
+          {hasInit && (
+            <div className="flex flex-col justify-center gap-1 border-t px-3 py-2 text-left sm:border-t-0 sm:border-l sm:px-6 sm:py-5">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">PnL</span>
+              <span
+                className={`text-sm font-bold leading-none sm:text-lg whitespace-nowrap ${
+                  pnlNegative
+                    ? "text-red-600 dark:text-red-400"
+                    : "text-emerald-600 dark:text-emerald-400"
+                }`}
+              >
+                {pnlNegative ? "-" : "+"}${formatUsd(Math.abs(pnl))}
+              </span>
+            </div>
+          )}
         </div>
       </CardHeader>
       <CardContent className="px-2 sm:p-6">
@@ -155,9 +176,6 @@ export function EquityCurveWithBrush({
               </linearGradient>
             </defs>
             <CartesianGrid vertical={false} />
-            {showPnL && (
-              <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
-            )}
             <XAxis
               dataKey="time"
               tickLine={false}

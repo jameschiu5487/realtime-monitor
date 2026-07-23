@@ -27,7 +27,6 @@ import type { ExchangeEquityDataPoint } from "@/components/charts/exchange-equit
 import type { ExposureDataPoint } from "@/components/charts/exposure-chart";
 import type { RealtimePositionDataPoint } from "@/components/charts/realtime-position-chart";
 import type { PnLBreakdownDataPoint } from "@/components/charts/pnl-breakdown-chart";
-import type { CumulativePnLDataPoint } from "@/components/charts/cumulative-trade-pnl-chart";
 import type {
   EquityCurve,
   PnlSeries,
@@ -188,14 +187,6 @@ function transformPnlBreakdownData(data: PnlSeries[], shareRatio: number): PnLBr
   }));
 }
 
-// Transform PnL series to cumulative data points
-function transformCumulativePnLData(data: PnlSeries[], shareRatio: number): CumulativePnLDataPoint[] {
-  return data.map((point) => ({
-    time: point.ts,
-    cumulative: point.total_pnl * shareRatio,
-  }));
-}
-
 // Transform positions to realtime position data points
 function transformRealtimePositionData(data: Position[], shareRatio: number): RealtimePositionDataPoint[] {
   return data.map((pos) => ({
@@ -302,7 +293,6 @@ export function RunDetailsContent({
   const exchangeEquityData = useMemo(() => transformExchangeEquityData(equityCurve, shareRatio), [equityCurve, shareRatio]);
   const exposureData = useMemo(() => transformExposureData(equityCurve), [equityCurve]);
   const pnlBreakdownData = useMemo(() => transformPnlBreakdownData(pnlSeries, shareRatio), [pnlSeries, shareRatio]);
-  const cumulativePnLData = useMemo(() => transformCumulativePnLData(pnlSeries, shareRatio), [pnlSeries, shareRatio]);
   const realtimePositionData = useMemo(() => transformRealtimePositionData(positions, shareRatio), [positions, shareRatio]);
 
   // Calculate data time range from all time-based data
@@ -311,7 +301,6 @@ export function RunDetailsContent({
 
     equityCurveData.forEach((d) => allTimes.push(new Date(d.time)));
     pnlBreakdownData.forEach((d) => allTimes.push(new Date(d.time)));
-    cumulativePnLData.forEach((d) => allTimes.push(new Date(d.time)));
     exposureData.forEach((d) => allTimes.push(new Date(d.time)));
     combinedTrades.forEach((d) => allTimes.push(new Date(d.ts)));
 
@@ -325,7 +314,7 @@ export function RunDetailsContent({
       dataStartTime: sortedTimes[0],
       dataEndTime: sortedTimes[sortedTimes.length - 1],
     };
-  }, [equityCurveData, pnlBreakdownData, cumulativePnLData, exposureData, combinedTrades]);
+  }, [equityCurveData, pnlBreakdownData, exposureData, combinedTrades]);
 
   // Initialize with full range
   const [timeRange, setTimeRange] = useState<TimeRange>({
@@ -421,16 +410,6 @@ export function RunDetailsContent({
     [equityCurveData]
   );
 
-  // P&L version of the (filtered) equity curve: current − run-start equity.
-  const filteredEquityPnLData = useMemo(
-    () =>
-      filteredEquityCurveData.map((d) => ({
-        time: d.time,
-        equity: d.equity - baselineEquity,
-      })),
-    [filteredEquityCurveData, baselineEquity]
-  );
-
   const filteredExchangeEquityData = useMemo(() => {
     return exchangeEquityData.filter((d) => {
       const time = new Date(d.time);
@@ -452,12 +431,16 @@ export function RunDetailsContent({
     });
   }, [pnlBreakdownData, timeRange]);
 
-  const filteredCumulativePnLData = useMemo(() => {
-    return cumulativePnLData.filter((d) => {
-      const time = new Date(d.time);
-      return time >= timeRange.start && time <= timeRange.end;
-    });
-  }, [cumulativePnLData, timeRange]);
+  // Cumulative Trade PnL = equity-based P&L (current − run-start equity), filtered
+  // to the selected time range. Baseline is the run-start equity, not the window start.
+  const filteredCumulativePnLData = useMemo(
+    () =>
+      filteredEquityCurveData.map((d) => ({
+        time: d.time,
+        cumulative: d.equity - baselineEquity,
+      })),
+    [filteredEquityCurveData, baselineEquity]
+  );
 
   // Filter combined trades based on time range
   const filteredCombinedTrades = useMemo(() => {
@@ -564,9 +547,9 @@ export function RunDetailsContent({
         {/* Row 1: Total Equity with drag-to-zoom (left) + Exchange Equity (right) */}
         <div className="grid gap-3 sm:gap-6 md:grid-cols-2">
           <EquityCurveWithBrush
-            data={filteredEquityPnLData}
+            data={filteredEquityCurveData}
             onRangeChange={handleChartRangeChange}
-            showPnL
+            initEquity={baselineEquity}
           />
           <ExchangeEquityChart data={filteredExchangeEquityData} />
         </div>
