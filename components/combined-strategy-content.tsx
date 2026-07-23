@@ -552,6 +552,23 @@ export function CombinedStrategyContent({
     });
   }, [equityCurveData, timeRange]);
 
+  // Baseline = equity at the start of the earliest run (first point of the full,
+  // unfiltered series so zooming/time-range doesn't shift the reference).
+  const baselineEquity = useMemo(
+    () => (equityCurveData.length > 0 ? equityCurveData[0].equity : 0),
+    [equityCurveData]
+  );
+
+  // P&L version of the (filtered) equity curve: current − run-start equity.
+  const filteredEquityPnLData = useMemo(
+    () =>
+      filteredEquityCurveData.map((d) => ({
+        time: d.time,
+        equity: d.equity - baselineEquity,
+      })),
+    [filteredEquityCurveData, baselineEquity]
+  );
+
   const filteredExposureData = useMemo(() => {
     return exposureData.filter((d) => {
       const time = new Date(d.time);
@@ -673,10 +690,11 @@ export function CombinedStrategyContent({
           allDataLoaded={allDataLoaded}
         />
 
-        {/* Row 1: Equity Curve */}
+        {/* Row 1: Equity Curve (shown as P&L: current − run-start equity) */}
         <EquityCurveWithBrush
-          data={filteredEquityCurveData}
+          data={filteredEquityPnLData}
           onRangeChange={handleChartRangeChange}
+          showPnL
         />
 
         {/* Row 2: Exposure */}

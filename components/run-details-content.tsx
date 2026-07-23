@@ -414,6 +414,23 @@ export function RunDetailsContent({
     });
   }, [equityCurveData, timeRange]);
 
+  // Baseline = equity at run start (first point of the full, unfiltered series so
+  // zooming/time-range doesn't shift the reference).
+  const baselineEquity = useMemo(
+    () => (equityCurveData.length > 0 ? equityCurveData[0].equity : 0),
+    [equityCurveData]
+  );
+
+  // P&L version of the (filtered) equity curve: current − run-start equity.
+  const filteredEquityPnLData = useMemo(
+    () =>
+      filteredEquityCurveData.map((d) => ({
+        time: d.time,
+        equity: d.equity - baselineEquity,
+      })),
+    [filteredEquityCurveData, baselineEquity]
+  );
+
   const filteredExchangeEquityData = useMemo(() => {
     return exchangeEquityData.filter((d) => {
       const time = new Date(d.time);
@@ -547,8 +564,9 @@ export function RunDetailsContent({
         {/* Row 1: Total Equity with drag-to-zoom (left) + Exchange Equity (right) */}
         <div className="grid gap-3 sm:gap-6 md:grid-cols-2">
           <EquityCurveWithBrush
-            data={filteredEquityCurveData}
+            data={filteredEquityPnLData}
             onRangeChange={handleChartRangeChange}
+            showPnL
           />
           <ExchangeEquityChart data={filteredExchangeEquityData} />
         </div>

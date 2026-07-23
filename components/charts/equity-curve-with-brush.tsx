@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis, ReferenceArea } from "recharts";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis, ReferenceArea, ReferenceLine } from "recharts";
 import {
   Card,
   CardContent,
@@ -26,24 +26,35 @@ export interface EquityCurveDataPoint {
 interface EquityCurveWithBrushProps {
   data: EquityCurveDataPoint[];
   onRangeChange?: (startTime: Date, endTime: Date) => void;
+  // When true, the `equity` field is treated as P&L (current − run-start equity):
+  // the header shows "Current P&L" with sign/colour and a zero baseline line is drawn.
+  showPnL?: boolean;
 }
-
-const chartConfig = {
-  equity: {
-    label: "Equity ($)",
-    color: "hsl(var(--chart-1))",
-  },
-} satisfies ChartConfig;
 
 export function EquityCurveWithBrush({
   data,
   onRangeChange,
+  showPnL = false,
 }: EquityCurveWithBrushProps) {
   const [refAreaLeft, setRefAreaLeft] = useState<string | null>(null);
   const [refAreaRight, setRefAreaRight] = useState<string | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
 
-  const currentEquity = data.length > 0 ? data[data.length - 1].equity : 0;
+  const chartConfig = {
+    equity: {
+      label: showPnL ? "P&L ($)" : "Equity ($)",
+      color: "hsl(var(--chart-1))",
+    },
+  } satisfies ChartConfig;
+
+  const currentValue = data.length > 0 ? data[data.length - 1].equity : 0;
+  const isNegative = currentValue < 0;
+  const currentValueLabel = showPnL
+    ? `${isNegative ? "-" : "+"}$${Math.abs(currentValue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `$${currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const valueColorClass = showPnL && isNegative
+    ? "text-red-600 dark:text-red-400"
+    : "text-emerald-600 dark:text-emerald-400";
 
   // Calculate Y-axis domain based on actual data range
   let minValue = data.length > 0 ? data[0].equity : 0;
@@ -117,9 +128,9 @@ export function EquityCurveWithBrush({
         </div>
         <div className="flex">
           <div className="flex flex-1 flex-col justify-center gap-1 border-t px-3 py-2 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-5">
-            <span className="text-xs text-muted-foreground">Current Equity</span>
-            <span className="text-base font-bold leading-none sm:text-2xl text-emerald-600 dark:text-emerald-400">
-              ${currentEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            <span className="text-xs text-muted-foreground">{showPnL ? "Current P&L" : "Current Equity"}</span>
+            <span className={`text-base font-bold leading-none sm:text-2xl ${valueColorClass}`}>
+              {currentValueLabel}
             </span>
           </div>
         </div>
@@ -144,6 +155,9 @@ export function EquityCurveWithBrush({
               </linearGradient>
             </defs>
             <CartesianGrid vertical={false} />
+            {showPnL && (
+              <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+            )}
             <XAxis
               dataKey="time"
               tickLine={false}
