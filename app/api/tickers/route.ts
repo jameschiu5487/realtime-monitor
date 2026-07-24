@@ -172,8 +172,8 @@ async function fetchHyperliquidTickers(symbols: string[] = []): Promise<Record<s
     }
   }
   // 補盤口：對清單指定的 symbols 逐一打 l2Book（無全量盤口端點）。
-  // builder dex 標的（key 含 ":"）的 l2Book coin 對映不確定，先略過只保留 last。
-  const bookSymbols = symbols.filter((s) => map[s] && !s.includes(":"));
+  // coin 直接用 symbol：主市場如 "BTC"、builder dex 如 "xyz:AAPL" 皆可（已實測）。
+  const bookSymbols = symbols.filter((s) => map[s]);
   const books = await Promise.all(
     bookSymbols.map((s) => fetchHyperliquidL2(s).then((b) => [s, b] as const))
   );
