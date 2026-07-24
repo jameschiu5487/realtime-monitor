@@ -291,6 +291,34 @@ function hyperliquidInterval(intervalMinutes: number): string | null {
   return null;
 }
 
+// Hyperliquid /info POST，含暫時性失敗（429 限流 / 5xx / 網路例外）退避重試。
+// 這條端點被 basis 頁高頻共用（allMids、l2Book、candleSnapshot），單擊常撞限流，
+// 重試可避免把「暫時被限流」誤判成「symbol 不存在」。null = 重試後仍失敗。
+async function hyperliquidPost(body: object, retries = 2): Promise<Response | null> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const response = await fetch("https://api.hyperliquid.xyz/info", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (response.ok) return response;
+      // 429 / 5xx 才重試；其餘狀態（如 4xx 參數錯）直接回、不浪費重試
+      if ((response.status === 429 || response.status >= 500) && attempt < retries) {
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        continue;
+      }
+      return response;
+    } catch {
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        continue;
+      }
+      return null;
+    }
+  }
+}
+
 async function fetchHyperliquidKlines(
   coin: string,
   interval: string,
@@ -305,12 +333,11 @@ async function fetchHyperliquidKlines(
   const LIMIT = 5000;
   const maxRequests = Math.ceil(maxKlines / LIMIT) + 1;
   for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
-    const response = await fetch("https://api.hyperliquid.xyz/info", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "candleSnapshot", req: { coin, interval, startTime, endTime } }),
+    const response = await hyperliquidPost({
+      type: "candleSnapshot",
+      req: { coin, interval, startTime, endTime },
     });
-    if (!response.ok) break;
+    if (!response || !response.ok) break;
     const data = await response.json();
     if (!Array.isArray(data) || data.length === 0) break;
     const klines: [number, number][] = data.map((k: { t: number; c: string }) => [k.t, parseFloat(k.c)]);
