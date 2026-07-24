@@ -11,6 +11,14 @@ export interface BasisLeg {
   symbol: string;
 }
 
+// 即時報價：last = 最後成交價（basis 計算用），bid/ask = 盤口最佳買賣一檔（a1 = ask1, b1 = bid1）。
+// 部分來源（如 Hyperliquid 只有 mid）拿不到盤口，bid/ask 會是 undefined。
+export interface TickerQuote {
+  last: number;
+  bid?: number;
+  ask?: number;
+}
+
 export interface BasisPoint {
   time: number; // ms timestamp（K 線 open time）
   leg1: number;

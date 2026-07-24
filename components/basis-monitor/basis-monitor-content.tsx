@@ -19,6 +19,7 @@ import {
   pairLabel,
   type BasisLeg,
   type BasisPoint,
+  type TickerQuote,
 } from "@/lib/basis";
 import { getKlineConfig } from "@/lib/kline-config";
 import type { BasisPair } from "@/lib/types/database";
@@ -38,14 +39,14 @@ async function fetchComboTickers(
   exchange: string,
   market: string,
   symbols: string[]
-): Promise<Record<string, number> | null> {
+): Promise<Record<string, TickerQuote> | null> {
   const url =
     exchange === "Alpaca"
       ? `/api/tickers?exchange=Alpaca&market=${market}&symbols=${encodeURIComponent(symbols.join(","))}`
       : `/api/tickers?exchange=${exchange}&market=${market}`;
   try {
     const res = await fetch(url);
-    return res.ok ? ((await res.json()) as Record<string, number>) : null;
+    return res.ok ? ((await res.json()) as Record<string, TickerQuote>) : null;
   } catch {
     return null;
   }
@@ -65,7 +66,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   const [chartError, setChartError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [pairs, setPairs] = useState<BasisPair[]>(initialPairs);
-  const [tickers, setTickers] = useState<Record<string, Record<string, number>>>({});
+  const [tickers, setTickers] = useState<Record<string, Record<string, TickerQuote>>>({});
   const [funding, setFunding] = useState<PairFunding | null>(null);
   // 每秒用 ticker 現價算出的即時 basis 點（不進 K 線序列）
   const [livePoint, setLivePoint] = useState<BasisPoint | null>(null);
@@ -219,7 +220,8 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
         );
         if (cancelled) return;
         const byCombo = new Map(entries);
-        const priceOf = (leg: BasisLeg) => byCombo.get(`${leg.exchange}|${leg.market}`)?.[leg.symbol];
+        const priceOf = (leg: BasisLeg) =>
+          byCombo.get(`${leg.exchange}|${leg.market}`)?.[leg.symbol]?.last;
         const p1 = priceOf(leg1);
         const p2 = priceOf(leg2);
         // 任一腳缺價或分母為 0 就跳過這輪，保留上一個有效值

@@ -1,52 +1,98 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { TickerQuote } from "@/lib/basis";
 
 export const runtime = "edge";
 export const preferredRegion = ["sin1", "hkg1", "kix1"];
 
 type Market = "perp" | "spot";
 
-async function fetchBinanceTickers(market: Market): Promise<Record<string, number>> {
-  const url =
-    market === "perp"
-      ? "https://fapi.binance.com/fapi/v1/ticker/price"
-      : "https://api.binance.com/api/v3/ticker/price";
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) return {};
-  const data = (await response.json()) as { symbol: string; price: string }[];
-  const map: Record<string, number> = {};
-  for (const t of data) map[t.symbol] = parseFloat(t.price);
+// 回傳 symbol -> { last, bid?, ask? }。last = 最後成交價（basis 用）；bid/ask = 盤口一檔（a1/b1）。
+async function fetchBinanceTickers(market: Market): Promise<Record<string, TickerQuote>> {
+  const base =
+    market === "perp" ? "https://fapi.binance.com/fapi/v1" : "https://api.binance.com/api/v3";
+  // bookTicker 只有盤口沒有 last，ticker/price 只有 last 沒有盤口，兩者合併
+  const [priceRes, bookRes] = await Promise.all([
+    fetch(`${base}/ticker/price`, { cache: "no-store" }),
+    fetch(`${base}/ticker/bookTicker`, { cache: "no-store" }),
+  ]);
+  const map: Record<string, TickerQuote> = {};
+  if (priceRes.ok) {
+    const data = (await priceRes.json()) as { symbol: string; price: string }[];
+    for (const t of data) map[t.symbol] = { last: parseFloat(t.price) };
+  }
+  if (bookRes.ok) {
+    const data = (await bookRes.json()) as {
+      symbol: string;
+      bidPrice: string;
+      askPrice: string;
+    }[];
+    for (const t of data) {
+      const q = map[t.symbol] ?? { last: parseFloat(t.bidPrice) };
+      q.bid = parseFloat(t.bidPrice);
+      q.ask = parseFloat(t.askPrice);
+      map[t.symbol] = q;
+    }
+  }
   return map;
 }
 
-async function fetchBybitTickers(market: Market): Promise<Record<string, number>> {
+async function fetchBybitTickers(market: Market): Promise<Record<string, TickerQuote>> {
   const category = market === "perp" ? "linear" : "spot";
   const url = `https://api.bybit.com/v5/market/tickers?category=${category}`;
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) return {};
   const data = await response.json();
   if (data.retCode !== 0) return {};
-  const map: Record<string, number> = {};
-  for (const t of (data.result?.list ?? []) as { symbol: string; lastPrice: string }[]) {
-    map[t.symbol] = parseFloat(t.lastPrice);
+  const map: Record<string, TickerQuote> = {};
+  for (const t of (data.result?.list ?? []) as {
+    symbol: string;
+    lastPrice: string;
+    bid1Price?: string;
+    ask1Price?: string;
+  }[]) {
+    map[t.symbol] = {
+      last: parseFloat(t.lastPrice),
+      bid: t.bid1Price ? parseFloat(t.bid1Price) : undefined,
+      ask: t.ask1Price ? parseFloat(t.ask1Price) : undefined,
+    };
   }
   return map;
 }
 
-// Alpaca 沒有全量 ticker 端點，需帶 symbols（逗號分隔，上限 100）查最新成交價
-async function fetchAlpacaTickers(symbols: string[]): Promise<Record<string, number>> {
+// Alpaca 沒有全量端點，需帶 symbols。trades/latest 給最後成交價、quotes/latest 給盤口，合併
+async function fetchAlpacaTickers(symbols: string[]): Promise<Record<string, TickerQuote>> {
   const key = process.env.ALPACA_API_KEY;
   const secret = process.env.ALPACA_API_SECRET;
   if (!key || !secret || symbols.length === 0) return {};
-  const url = `https://data.alpaca.markets/v2/stocks/trades/latest?symbols=${encodeURIComponent(symbols.join(","))}&feed=iex`;
-  const response = await fetch(url, {
-    headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret },
-    cache: "no-store",
-  });
-  if (!response.ok) return {};
-  const data = await response.json();
-  const map: Record<string, number> = {};
-  for (const [sym, trade] of Object.entries((data.trades ?? {}) as Record<string, { p: number }>)) {
-    map[sym] = trade.p;
+  const headers = { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret };
+  const list = encodeURIComponent(symbols.join(","));
+  const [tradesRes, quotesRes] = await Promise.all([
+    fetch(`https://data.alpaca.markets/v2/stocks/trades/latest?symbols=${list}&feed=iex`, {
+      headers,
+      cache: "no-store",
+    }),
+    fetch(`https://data.alpaca.markets/v2/stocks/quotes/latest?symbols=${list}&feed=iex`, {
+      headers,
+      cache: "no-store",
+    }),
+  ]);
+  const map: Record<string, TickerQuote> = {};
+  if (tradesRes.ok) {
+    const data = await tradesRes.json();
+    for (const [sym, trade] of Object.entries((data.trades ?? {}) as Record<string, { p: number }>)) {
+      map[sym] = { last: trade.p };
+    }
+  }
+  if (quotesRes.ok) {
+    const data = await quotesRes.json();
+    for (const [sym, quote] of Object.entries(
+      (data.quotes ?? {}) as Record<string, { bp: number; ap: number }>
+    )) {
+      const q = map[sym] ?? { last: quote.bp };
+      q.bid = quote.bp;
+      q.ask = quote.ap;
+      map[sym] = q;
+    }
   }
   return map;
 }
@@ -56,7 +102,7 @@ function okxInstIdToSymbol(instId: string): string {
   return instId.replace(/-SWAP$/, "").replace(/-/g, "");
 }
 
-async function fetchOKXTickers(market: Market): Promise<Record<string, number>> {
+async function fetchOKXTickers(market: Market): Promise<Record<string, TickerQuote>> {
   const instType = market === "perp" ? "SWAP" : "SPOT";
   const suffix = market === "perp" ? "-USDT-SWAP" : "-USDT";
   const url = `https://www.okx.com/api/v5/market/tickers?instType=${instType}`;
@@ -64,10 +110,19 @@ async function fetchOKXTickers(market: Market): Promise<Record<string, number>> 
   if (!response.ok) return {};
   const data = await response.json();
   if (data.code !== "0") return {};
-  const map: Record<string, number> = {};
-  for (const t of (data.data ?? []) as { instId: string; last: string }[]) {
+  const map: Record<string, TickerQuote> = {};
+  for (const t of (data.data ?? []) as {
+    instId: string;
+    last: string;
+    bidPx?: string;
+    askPx?: string;
+  }[]) {
     if (!t.instId.endsWith(suffix)) continue;
-    map[okxInstIdToSymbol(t.instId)] = parseFloat(t.last);
+    map[okxInstIdToSymbol(t.instId)] = {
+      last: parseFloat(t.last),
+      bid: t.bidPx ? parseFloat(t.bidPx) : undefined,
+      ask: t.askPx ? parseFloat(t.askPx) : undefined,
+    };
   }
   return map;
 }
@@ -75,6 +130,7 @@ async function fetchOKXTickers(market: Market): Promise<Record<string, number>> 
 // Hyperliquid 不在 Exchange 型別內，比照 Alpaca/OKX 用前置字串分流；僅 perp
 // allMids 主市場 key 有雜訊（@/# 開頭為 spot index / 內部市場，濾掉）；
 // builder-deployed perp DEX（HIP-3）的標的（如 mkts:TSLA）要帶 dex 參數分別抓
+// allMids 只給 mid 價，拿不到盤口，故只有 last、無 bid/ask
 async function fetchHyperliquidMids(dex?: string): Promise<Record<string, string>> {
   const response = await fetch("https://api.hyperliquid.xyz/info", {
     method: "POST",
@@ -86,7 +142,7 @@ async function fetchHyperliquidMids(dex?: string): Promise<Record<string, string
   return (await response.json()) as Record<string, string>;
 }
 
-async function fetchHyperliquidTickers(): Promise<Record<string, number>> {
+async function fetchHyperliquidTickers(): Promise<Record<string, TickerQuote>> {
   const dexRes = await fetch("https://api.hyperliquid.xyz/info", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -102,12 +158,12 @@ async function fetchHyperliquidTickers(): Promise<Record<string, number>> {
     fetchHyperliquidMids(),
     ...builderDexes.map((dex) => fetchHyperliquidMids(dex)),
   ]);
-  const map: Record<string, number> = {};
+  const map: Record<string, TickerQuote> = {};
   for (const mids of midsList) {
     for (const [key, value] of Object.entries(mids)) {
       // 主市場的 @/# 雜訊 key 濾掉；builder 標的 key 含冒號（dex:TICKER），保留
       if (key.startsWith("@") || key.startsWith("#")) continue;
-      map[key] = parseFloat(value);
+      map[key] = { last: parseFloat(value) };
     }
   }
   return map;

@@ -13,23 +13,44 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { BasisPair } from "@/lib/types/database";
+import type { TickerQuote } from "@/lib/basis";
 import { cn } from "@/lib/utils";
+
+// key: `${exchange}|${market}` → { symbol: TickerQuote }
+type TickerMap = Record<string, Record<string, TickerQuote>>;
 
 interface SavedPairsListProps {
   pairs: BasisPair[];
-  // key: `${exchange}|${market}` → { symbol: lastPrice }
-  tickers: Record<string, Record<string, number>>;
+  tickers: TickerMap;
   onSelect: (pair: BasisPair) => void;
   onDelete: (id: string) => void;
 }
 
-function snapshot(
-  pair: BasisPair,
-  tickers: SavedPairsListProps["tickers"]
-): { pct: number; abs: number } | null {
-  const p1 = tickers[`${pair.leg1_exchange}|${pair.leg1_market}`]?.[pair.leg1_symbol];
-  const p2 = tickers[`${pair.leg2_exchange}|${pair.leg2_market}`]?.[pair.leg2_symbol];
-  if (p1 === undefined || p2 === undefined || !Number.isFinite(p1) || !Number.isFinite(p2) || p2 === 0) return null;
+function quoteOf(
+  exchange: string,
+  market: string,
+  symbol: string,
+  tickers: TickerMap
+): TickerQuote | undefined {
+  return tickers[`${exchange}|${market}`]?.[symbol];
+}
+
+// 依價位大小決定小數位（BTC 級用 2 位、個位數用 4 位、更小用 6 位）
+function formatPrice(v: number | undefined): string {
+  if (v === undefined || !Number.isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  const decimals = abs >= 100 ? 2 : abs >= 1 ? 4 : 6;
+  return v.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+function snapshot(pair: BasisPair, tickers: TickerMap): { pct: number; abs: number } | null {
+  const p1 = quoteOf(pair.leg1_exchange, pair.leg1_market, pair.leg1_symbol, tickers)?.last;
+  const p2 = quoteOf(pair.leg2_exchange, pair.leg2_market, pair.leg2_symbol, tickers)?.last;
+  if (p1 === undefined || p2 === undefined || !Number.isFinite(p1) || !Number.isFinite(p2) || p2 === 0)
+    return null;
   return { pct: ((p1 - p2) / p2) * 100, abs: p1 - p2 };
 }
 
@@ -68,74 +89,98 @@ export function SavedPairsList({ pairs, tickers, onSelect, onDelete }: SavedPair
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Leg 1</TableHead>
-                <TableHead>Leg 2</TableHead>
+                <TableHead>標的</TableHead>
+                <TableHead className="text-right">a1 (ask)</TableHead>
+                <TableHead className="text-right">b1 (bid)</TableHead>
                 <TableHead className="text-right">Basis (bp)</TableHead>
                 <TableHead className="text-right">價差 (USDT)</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {groups.map((group) => (
-                <Fragment key={group.key}>
-                  <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <TableCell colSpan={5} className="font-mono text-sm font-medium">
-                      {group.symbol}
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        {group.exchange} {group.market}
-                      </span>
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        · {group.pairs.length} 組
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                  {group.pairs.map((pair) => {
-                    const snap = snapshot(pair, tickers);
-                    return (
-                      <TableRow
-                        key={pair.id}
-                        className="cursor-pointer"
-                        onClick={() => onSelect(pair)}
-                      >
-                        <TableCell className="pl-8 text-xs text-muted-foreground">↳</TableCell>
-                        <TableCell className="font-mono">
-                          {pair.leg2_symbol}
-                          <span className="ml-2 text-xs text-muted-foreground">
-                            {pair.leg2_exchange} {pair.leg2_market}
-                          </span>
-                        </TableCell>
-                        <TableCell
-                          className={cn(
-                            "text-right font-mono",
-                            snap !== null &&
-                              (snap.pct >= 0
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : "text-red-600 dark:text-red-400")
-                          )}
+              {groups.map((group) => {
+                const legQuote = quoteOf(group.exchange, group.market, group.symbol, tickers);
+                return (
+                  <Fragment key={group.key}>
+                    <TableRow className="bg-muted/50 hover:bg-muted/50">
+                      <TableCell className="font-mono text-sm font-medium">
+                        {group.symbol}
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          {group.exchange} {group.market}
+                        </span>
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          · {group.pairs.length} 組
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {formatPrice(legQuote?.ask)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {formatPrice(legQuote?.bid)}
+                      </TableCell>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell />
+                    </TableRow>
+                    {group.pairs.map((pair) => {
+                      const snap = snapshot(pair, tickers);
+                      const leg2Quote = quoteOf(
+                        pair.leg2_exchange,
+                        pair.leg2_market,
+                        pair.leg2_symbol,
+                        tickers
+                      );
+                      return (
+                        <TableRow
+                          key={pair.id}
+                          className="cursor-pointer"
+                          onClick={() => onSelect(pair)}
                         >
-                          {snap !== null ? `${(snap.pct * 100).toFixed(1)} bp` : "—"}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {snap !== null ? snap.abs.toFixed(4) : "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-red-500"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDelete(pair.id);
-                            }}
+                          <TableCell className="pl-8 font-mono">
+                            <span className="text-xs text-muted-foreground">↳</span> {pair.leg2_symbol}
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {pair.leg2_exchange} {pair.leg2_market}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs">
+                            {formatPrice(leg2Quote?.ask)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs">
+                            {formatPrice(leg2Quote?.bid)}
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "text-right font-mono",
+                              snap !== null &&
+                                (snap.pct >= 0
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-red-600 dark:text-red-400")
+                            )}
                           >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </Fragment>
-              ))}
+                            {snap !== null ? `${(snap.pct * 100).toFixed(1)} bp` : "—"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono">
+                            {snap !== null ? snap.abs.toFixed(4) : "—"}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-red-500"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDelete(pair.id);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </Fragment>
+                );
+              })}
             </TableBody>
           </Table>
         )}
