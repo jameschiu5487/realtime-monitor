@@ -40,10 +40,12 @@ async function fetchComboTickers(
   market: string,
   symbols: string[]
 ): Promise<Record<string, TickerQuote> | null> {
-  const url =
-    exchange === "Alpaca"
-      ? `/api/tickers?exchange=Alpaca&market=${market}&symbols=${encodeURIComponent(symbols.join(","))}`
-      : `/api/tickers?exchange=${exchange}&market=${market}`;
+  // Alpaca（最新成交價）與 Hyperliquid（l2Book 補盤口）都需要帶該組合用到的 symbols；
+  // 其餘交易所回全量 map，不需 symbols
+  const needsSymbols = exchange === "Alpaca" || exchange === "Hyperliquid";
+  const url = needsSymbols
+    ? `/api/tickers?exchange=${exchange}&market=${market}&symbols=${encodeURIComponent(symbols.join(","))}`
+    : `/api/tickers?exchange=${exchange}&market=${market}`;
   try {
     const res = await fetch(url);
     return res.ok ? ((await res.json()) as Record<string, TickerQuote>) : null;

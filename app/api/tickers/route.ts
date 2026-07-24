@@ -59,40 +59,21 @@ async function fetchBybitTickers(market: Market): Promise<Record<string, TickerQ
   return map;
 }
 
-// Alpaca 沒有全量端點，需帶 symbols。trades/latest 給最後成交價、quotes/latest 給盤口，合併
+// Alpaca 沒有全量端點，需帶 symbols 查最新成交價。盤口先不抓（不需要 a1/b1）
 async function fetchAlpacaTickers(symbols: string[]): Promise<Record<string, TickerQuote>> {
   const key = process.env.ALPACA_API_KEY;
   const secret = process.env.ALPACA_API_SECRET;
   if (!key || !secret || symbols.length === 0) return {};
-  const headers = { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret };
-  const list = encodeURIComponent(symbols.join(","));
-  const [tradesRes, quotesRes] = await Promise.all([
-    fetch(`https://data.alpaca.markets/v2/stocks/trades/latest?symbols=${list}&feed=iex`, {
-      headers,
-      cache: "no-store",
-    }),
-    fetch(`https://data.alpaca.markets/v2/stocks/quotes/latest?symbols=${list}&feed=iex`, {
-      headers,
-      cache: "no-store",
-    }),
-  ]);
+  const url = `https://data.alpaca.markets/v2/stocks/trades/latest?symbols=${encodeURIComponent(symbols.join(","))}&feed=iex`;
+  const response = await fetch(url, {
+    headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret },
+    cache: "no-store",
+  });
+  if (!response.ok) return {};
+  const data = await response.json();
   const map: Record<string, TickerQuote> = {};
-  if (tradesRes.ok) {
-    const data = await tradesRes.json();
-    for (const [sym, trade] of Object.entries((data.trades ?? {}) as Record<string, { p: number }>)) {
-      map[sym] = { last: trade.p };
-    }
-  }
-  if (quotesRes.ok) {
-    const data = await quotesRes.json();
-    for (const [sym, quote] of Object.entries(
-      (data.quotes ?? {}) as Record<string, { bp: number; ap: number }>
-    )) {
-      const q = map[sym] ?? { last: quote.bp };
-      q.bid = quote.bp;
-      q.ask = quote.ap;
-      map[sym] = q;
-    }
+  for (const [sym, trade] of Object.entries((data.trades ?? {}) as Record<string, { p: number }>)) {
+    map[sym] = { last: trade.p };
   }
   return map;
 }
@@ -130,7 +111,7 @@ async function fetchOKXTickers(market: Market): Promise<Record<string, TickerQuo
 // Hyperliquid 不在 Exchange 型別內，比照 Alpaca/OKX 用前置字串分流；僅 perp
 // allMids 主市場 key 有雜訊（@/# 開頭為 spot index / 內部市場，濾掉）；
 // builder-deployed perp DEX（HIP-3）的標的（如 mkts:TSLA）要帶 dex 參數分別抓
-// allMids 只給 mid 價，拿不到盤口，故只有 last、無 bid/ask
+// allMids 只給 mid 價（last）；盤口（a1/b1）要另外用 l2Book 逐一標的抓
 async function fetchHyperliquidMids(dex?: string): Promise<Record<string, string>> {
   const response = await fetch("https://api.hyperliquid.xyz/info", {
     method: "POST",
@@ -142,7 +123,31 @@ async function fetchHyperliquidMids(dex?: string): Promise<Record<string, string
   return (await response.json()) as Record<string, string>;
 }
 
-async function fetchHyperliquidTickers(): Promise<Record<string, TickerQuote>> {
+// l2Book 回傳單一標的訂單簿：levels[0] = bids（最佳在前）、levels[1] = asks（最佳在前）
+async function fetchHyperliquidL2(coin: string): Promise<{ bid?: number; ask?: number }> {
+  try {
+    const response = await fetch("https://api.hyperliquid.xyz/info", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "l2Book", coin }),
+      cache: "no-store",
+    });
+    if (!response.ok) return {};
+    const data = (await response.json()) as {
+      levels?: [{ px: string }[], { px: string }[]];
+    };
+    const bids = data.levels?.[0];
+    const asks = data.levels?.[1];
+    return {
+      bid: bids?.[0] ? parseFloat(bids[0].px) : undefined,
+      ask: asks?.[0] ? parseFloat(asks[0].px) : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function fetchHyperliquidTickers(symbols: string[] = []): Promise<Record<string, TickerQuote>> {
   const dexRes = await fetch("https://api.hyperliquid.xyz/info", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -165,6 +170,16 @@ async function fetchHyperliquidTickers(): Promise<Record<string, TickerQuote>> {
       if (key.startsWith("@") || key.startsWith("#")) continue;
       map[key] = { last: parseFloat(value) };
     }
+  }
+  // 補盤口：對清單指定的 symbols 逐一打 l2Book（無全量盤口端點）。
+  // builder dex 標的（key 含 ":"）的 l2Book coin 對映不確定，先略過只保留 last。
+  const bookSymbols = symbols.filter((s) => map[s] && !s.includes(":"));
+  const books = await Promise.all(
+    bookSymbols.map((s) => fetchHyperliquidL2(s).then((b) => [s, b] as const))
+  );
+  for (const [s, b] of books) {
+    if (b.bid !== undefined) map[s].bid = b.bid;
+    if (b.ask !== undefined) map[s].ask = b.ask;
   }
   return map;
 }
@@ -190,7 +205,12 @@ export async function GET(request: NextRequest) {
       if (market !== "perp") {
         return NextResponse.json({ error: "Hyperliquid only supports perp" }, { status: 400 });
       }
-      return NextResponse.json(await fetchHyperliquidTickers());
+      // symbols 用於補盤口（l2Book 逐一標的）；大小寫敏感，不做正規化
+      const hlSymbols = (searchParams.get("symbols") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return NextResponse.json(await fetchHyperliquidTickers(hlSymbols));
     }
     if (exchange === "OKX") {
       return NextResponse.json(await fetchOKXTickers(market));
