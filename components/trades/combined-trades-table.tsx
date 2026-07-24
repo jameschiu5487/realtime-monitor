@@ -207,7 +207,7 @@ function HedgePairSummaryRow({ pair, shareRatio = 1 }: { pair: HedgePair; shareR
   return (
     <TableRow className="bg-primary/5 hover:bg-primary/10 border-t-2 border-primary/20">
       <TableCell></TableCell>
-      <TableCell colSpan={4} className="font-medium text-primary">
+      <TableCell colSpan={5} className="font-medium text-primary">
         Hedge Pair Summary
       </TableCell>
       <TableCell className="text-right font-mono font-medium">
@@ -273,6 +273,9 @@ function PositionRow({
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           )
         )}
+      </TableCell>
+      <TableCell className="font-mono text-xs">
+        {position.entry_time ? formatDateTime(position.entry_time) : "-"}
       </TableCell>
       <TableCell className="font-mono text-xs">
         {formatDateTime(position.ts)}
@@ -421,13 +424,14 @@ export function CombinedTradesTable({ combinedTrades, enableHedge, shareRatio = 
   }
 
   return (
-    <div className="min-w-[800px]">
+    <div className="min-w-[900px]">
       <Table>
         <TableHeader>
           <TableRow className="text-xs">
             <TableHead className="w-8 sm:w-10"></TableHead>
+            <TableHead>Entry Time</TableHead>
             <SortableHeader field="ts" currentSort={sortConfig} onSort={handleSort}>
-              Entry Time
+              Exit Time
             </SortableHeader>
             <TableHead>Symbol</TableHead>
             <TableHead>Exchange</TableHead>
@@ -484,6 +488,9 @@ export function CombinedTradesTable({ combinedTrades, enableHedge, shareRatio = 
           sortedTrades.map((position) => (
             <TableRow key={position.combined_trade_id}>
               <TableCell className="w-10"></TableCell>
+              <TableCell className="font-mono text-xs">
+                {position.entry_time ? formatDateTime(position.entry_time) : "-"}
+              </TableCell>
               <TableCell className="font-mono text-xs">
                 {formatDateTime(position.ts)}
               </TableCell>
