@@ -40,12 +40,11 @@ async function fetchComboTickers(
   market: string,
   symbols: string[]
 ): Promise<Record<string, TickerQuote> | null> {
-  // Alpaca（最新成交價）與 Hyperliquid（l2Book 補盤口）都需要帶該組合用到的 symbols；
-  // 其餘交易所回全量 map，不需 symbols
-  const needsSymbols = exchange === "Alpaca" || exchange === "Hyperliquid";
-  const url = needsSymbols
-    ? `/api/tickers?exchange=${exchange}&market=${market}&symbols=${encodeURIComponent(symbols.join(","))}`
-    : `/api/tickers?exchange=${exchange}&market=${market}`;
+  // Alpaca 無全量端點，需帶該組合用到的 symbols；其餘交易所回全量 map，不需 symbols
+  const url =
+    exchange === "Alpaca"
+      ? `/api/tickers?exchange=Alpaca&market=${market}&symbols=${encodeURIComponent(symbols.join(","))}`
+      : `/api/tickers?exchange=${exchange}&market=${market}`;
   try {
     const res = await fetch(url);
     return res.ok ? ((await res.json()) as Record<string, TickerQuote>) : null;
@@ -255,6 +254,8 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
     if (pairs.length === 0) return;
     const comboSymbols = new Map<string, Set<string>>();
     const add = (exchange: string, market: string, symbol: string) => {
+      // Hyperliquid 清單報價改走 websocket（見下方 effect），不進 REST 輪詢，省 /info 限流
+      if (exchange === "Hyperliquid") return;
       const combo = `${exchange}|${market}`;
       if (!comboSymbols.has(combo)) comboSymbols.set(combo, new Set());
       comboSymbols.get(combo)!.add(symbol);
@@ -290,6 +291,81 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
       clearInterval(id);
     };
   }, [pairs]);
+
+  // 清單裡的 Hyperliquid coins（排序後 join，作為 ws effect 的穩定依賴；
+  // 只在 HL 標的集合真的變動時才重連，加減其他交易所的 pair 不會重連）
+  const hlCoinsKey = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of pairs) {
+      if (p.leg1_exchange === "Hyperliquid") set.add(p.leg1_symbol);
+      if (p.leg2_exchange === "Hyperliquid") set.add(p.leg2_symbol);
+    }
+    return [...set].sort().join(",");
+  }, [pairs]);
+
+  // Hyperliquid 清單報價走 websocket（public，免金鑰）：對每個 HL coin 訂閱 l2Book，
+  // 推送最佳買賣一檔（a1/b1），並以中價 (b1+a1)/2 當 last。取代每秒 REST 輪詢，
+  // 徹底避免 /info 限流（也讓點 pair 的 candleSnapshot 不再跟輪詢搶額度）。
+  useEffect(() => {
+    if (!hlCoinsKey) return;
+    const coins = hlCoinsKey.split(",");
+    const HL_COMBO = "Hyperliquid|perp";
+    let ws: WebSocket | null = null;
+    let closed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let pingTimer: ReturnType<typeof setInterval> | null = null;
+
+    const connect = () => {
+      if (closed) return;
+      ws = new WebSocket("wss://api.hyperliquid.xyz/ws");
+      ws.onopen = () => {
+        for (const coin of coins) {
+          ws!.send(JSON.stringify({ method: "subscribe", subscription: { type: "l2Book", coin } }));
+        }
+        // 心跳，避免閒置被斷線
+        pingTimer = setInterval(() => {
+          if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ method: "ping" }));
+        }, 30_000);
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data as string);
+          if (msg.channel !== "l2Book" || !msg.data) return;
+          const { coin, levels } = msg.data as {
+            coin: string;
+            levels: [{ px: string }[], { px: string }[]];
+          };
+          const bid = levels?.[0]?.[0] ? parseFloat(levels[0][0].px) : undefined;
+          const ask = levels?.[1]?.[0] ? parseFloat(levels[1][0].px) : undefined;
+          const last =
+            bid !== undefined && ask !== undefined ? (bid + ask) / 2 : bid ?? ask;
+          if (last === undefined) return;
+          setTickers((prev) => ({
+            ...prev,
+            [HL_COMBO]: { ...(prev[HL_COMBO] ?? {}), [coin]: { last, bid, ask } },
+          }));
+        } catch {
+          /* 忽略非 JSON / 未預期訊息 */
+        }
+      };
+      ws.onclose = () => {
+        if (pingTimer) {
+          clearInterval(pingTimer);
+          pingTimer = null;
+        }
+        if (!closed) reconnectTimer = setTimeout(connect, 2000); // 斷線退避重連
+      };
+      ws.onerror = () => ws?.close();
+    };
+    connect();
+
+    return () => {
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (pingTimer) clearInterval(pingTimer);
+      ws?.close();
+    };
+  }, [hlCoinsKey]);
 
   const savePair = async () => {
     if (!ready) return;
