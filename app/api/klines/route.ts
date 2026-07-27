@@ -158,11 +158,12 @@ async function fetchBitgetKlines(symbol: string, interval: string, maxKlines: nu
 }
 
 // Gate 現貨 K 線：陣列格式 [t(sec), quoteVol, close, high, low, open, baseVol, windowClosed]
+// Gate 現貨若同時帶 from/to，範圍達 1000 根就會被拒（"range too broad"）；改用
+// to + limit（不帶 from）回傳到 to 為止的最新 limit 根，再往回翻頁
 async function fetchGateSpotKlines(
   symbol: string,
   interval: string,
-  maxKlines: number,
-  intervalMinutes: number
+  maxKlines: number
 ): Promise<[number, number][]> {
   const fmtSymbol = formatExchangeSymbol(symbol, "Gate"); // BTC_USDT
   const LIMIT = 1000;
@@ -170,15 +171,15 @@ async function fetchGateSpotKlines(
   const allKlines: [number, number][] = [];
   let to = Math.floor(Date.now() / 1000);
   for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
-    const from = to - LIMIT * intervalMinutes * 60;
-    const url = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${encodeURIComponent(fmtSymbol)}&interval=${interval}&from=${from}&to=${to}`;
+    const url = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${encodeURIComponent(fmtSymbol)}&interval=${interval}&limit=${LIMIT}&to=${to}`;
     const response = await fetch(url);
     if (!response.ok) break;
     const data = await response.json();
     if (!Array.isArray(data) || data.length === 0) break;
+    // 回傳為時間升序，data[0] 最舊
     const klines: [number, number][] = data.map((k: string[]) => [parseInt(k[0]) * 1000, parseFloat(k[2])]);
     allKlines.unshift(...klines);
-    to = from - 1;
+    to = parseInt(data[0][0]) - 1;
     if (data.length < LIMIT) break;
   }
   return allKlines.sort((a, b) => a[0] - b[0]);
@@ -531,7 +532,7 @@ export async function GET(request: NextRequest) {
       case "Gate":
         klines =
           market === "spot"
-            ? await fetchGateSpotKlines(symbol, interval, maxKlines, config.intervalMinutes)
+            ? await fetchGateSpotKlines(symbol, interval, maxKlines)
             : await fetchGateKlines(symbol, interval, maxKlines, config.intervalMinutes);
         break;
       case "Bitget":
