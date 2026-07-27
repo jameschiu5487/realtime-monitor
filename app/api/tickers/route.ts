@@ -59,6 +59,61 @@ async function fetchBybitTickers(market: Market): Promise<Record<string, TickerQ
   return map;
 }
 
+// Gate.io：canonical symbol = 去底線（BTC_USDT -> BTCUSDT）。perp/spot ticker 皆含 bid/ask
+async function fetchGateTickers(market: Market): Promise<Record<string, TickerQuote>> {
+  const url =
+    market === "perp"
+      ? "https://api.gateio.ws/api/v4/futures/usdt/tickers"
+      : "https://api.gateio.ws/api/v4/spot/tickers";
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) return {};
+  const data = await response.json();
+  if (!Array.isArray(data)) return {};
+  const map: Record<string, TickerQuote> = {};
+  for (const t of data as {
+    contract?: string;
+    currency_pair?: string;
+    last: string;
+    highest_bid?: string;
+    lowest_ask?: string;
+  }[]) {
+    const native = market === "perp" ? t.contract : t.currency_pair;
+    if (!native) continue;
+    map[native.replace(/_/g, "")] = {
+      last: parseFloat(t.last),
+      bid: t.highest_bid ? parseFloat(t.highest_bid) : undefined,
+      ask: t.lowest_ask ? parseFloat(t.lowest_ask) : undefined,
+    };
+  }
+  return map;
+}
+
+// Bitget：symbol 原生即 BTCUSDT。mix/spot ticker 皆含 bidPr/askPr
+async function fetchBitgetTickers(market: Market): Promise<Record<string, TickerQuote>> {
+  const url =
+    market === "perp"
+      ? "https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES"
+      : "https://api.bitget.com/api/v2/spot/market/tickers";
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) return {};
+  const data = await response.json();
+  if (data.code !== "00000") return {};
+  const map: Record<string, TickerQuote> = {};
+  for (const t of (data.data ?? []) as {
+    symbol: string;
+    lastPr: string;
+    bidPr?: string;
+    askPr?: string;
+  }[]) {
+    map[t.symbol] = {
+      last: parseFloat(t.lastPr),
+      bid: t.bidPr ? parseFloat(t.bidPr) : undefined,
+      ask: t.askPr ? parseFloat(t.askPr) : undefined,
+    };
+  }
+  return map;
+}
+
 // Alpaca 沒有全量端點，需帶 symbols 查最新成交價。盤口先不抓（不需要 a1/b1）
 async function fetchAlpacaTickers(symbols: string[]): Promise<Record<string, TickerQuote>> {
   const key = process.env.ALPACA_API_KEY;
@@ -161,7 +216,9 @@ export async function GET(request: NextRequest) {
       exchange !== "Bybit" &&
       exchange !== "Alpaca" &&
       exchange !== "OKX" &&
-      exchange !== "Hyperliquid") ||
+      exchange !== "Hyperliquid" &&
+      exchange !== "Gate" &&
+      exchange !== "Bitget") ||
     (market !== "perp" && market !== "spot")
   ) {
     return NextResponse.json({ error: "Invalid exchange/market" }, { status: 400 });
@@ -176,6 +233,12 @@ export async function GET(request: NextRequest) {
     }
     if (exchange === "OKX") {
       return NextResponse.json(await fetchOKXTickers(market));
+    }
+    if (exchange === "Gate") {
+      return NextResponse.json(await fetchGateTickers(market));
+    }
+    if (exchange === "Bitget") {
+      return NextResponse.json(await fetchBitgetTickers(market));
     }
     if (exchange === "Alpaca") {
       if (market !== "spot") {

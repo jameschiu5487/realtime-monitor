@@ -62,6 +62,51 @@ async function fetchBybitSymbols(market: Market): Promise<string[]> {
   return symbols.sort();
 }
 
+// Gate.io（api.gateio.ws）：canonical symbol 用去底線的 BTCUSDT（與 klines/tickers 一致）
+async function fetchGateSymbols(market: Market): Promise<string[]> {
+  if (market === "perp") {
+    const res = await fetch("https://api.gateio.ws/api/v4/futures/usdt/contracts", CACHE_1H);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { name: string; in_delisting?: boolean }[];
+    return data
+      .filter((c) => !c.in_delisting)
+      .map((c) => c.name.replace(/_/g, ""))
+      .sort();
+  }
+  const res = await fetch("https://api.gateio.ws/api/v4/spot/currency_pairs", CACHE_1H);
+  if (!res.ok) return [];
+  const data = (await res.json()) as { id: string; quote: string; trade_status: string }[];
+  return data
+    .filter((c) => c.quote === "USDT" && c.trade_status === "tradable")
+    .map((c) => c.id.replace(/_/g, ""))
+    .sort();
+}
+
+// Bitget（api.bitget.com）：symbol 原生即 BTCUSDT，直接沿用
+async function fetchBitgetSymbols(market: Market): Promise<string[]> {
+  const url =
+    market === "perp"
+      ? "https://api.bitget.com/api/v2/mix/market/contracts?productType=USDT-FUTURES"
+      : "https://api.bitget.com/api/v2/spot/public/symbols";
+  const res = await fetch(url, CACHE_1H);
+  if (!res.ok) return [];
+  const data = await res.json();
+  if (data.code !== "00000") return [];
+  return ((data.data ?? []) as {
+    symbol: string;
+    quoteCoin?: string;
+    status?: string;
+    symbolStatus?: string;
+  }[])
+    .filter((s) =>
+      market === "perp"
+        ? !s.symbolStatus || s.symbolStatus === "normal"
+        : s.quoteCoin === "USDT" && (!s.status || s.status === "online")
+    )
+    .map((s) => s.symbol)
+    .sort();
+}
+
 // Binance 美股 perp（TRADIFI_PERPETUAL）專用清單，供 Alpaca 交集過濾
 async function fetchBinanceEquityPerpSymbols(): Promise<string[]> {
   const response = await fetch("https://fapi.binance.com/fapi/v1/exchangeInfo", CACHE_1H);
@@ -174,7 +219,9 @@ export async function GET(request: NextRequest) {
       exchange !== "Bybit" &&
       exchange !== "Alpaca" &&
       exchange !== "OKX" &&
-      exchange !== "Hyperliquid") ||
+      exchange !== "Hyperliquid" &&
+      exchange !== "Gate" &&
+      exchange !== "Bitget") ||
     (market !== "perp" && market !== "spot")
   ) {
     return NextResponse.json({ error: "Invalid exchange/market" }, { status: 400 });
@@ -192,6 +239,12 @@ export async function GET(request: NextRequest) {
     }
     if (exchange === "OKX") {
       return NextResponse.json(await fetchOKXSymbols(market));
+    }
+    if (exchange === "Gate") {
+      return NextResponse.json(await fetchGateSymbols(market));
+    }
+    if (exchange === "Bitget") {
+      return NextResponse.json(await fetchBitgetSymbols(market));
     }
     if (exchange === "Alpaca") {
       // 只留在 Binance/Bybit 有對應「美股」標的的 ticker：

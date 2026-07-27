@@ -157,6 +157,63 @@ async function fetchBitgetKlines(symbol: string, interval: string, maxKlines: nu
   return allKlines.sort((a, b) => a[0] - b[0]);
 }
 
+// Gate 現貨 K 線：陣列格式 [t(sec), quoteVol, close, high, low, open, baseVol, windowClosed]
+async function fetchGateSpotKlines(
+  symbol: string,
+  interval: string,
+  maxKlines: number,
+  intervalMinutes: number
+): Promise<[number, number][]> {
+  const fmtSymbol = formatExchangeSymbol(symbol, "Gate"); // BTC_USDT
+  const LIMIT = 1000;
+  const maxRequests = Math.ceil(maxKlines / LIMIT);
+  const allKlines: [number, number][] = [];
+  let to = Math.floor(Date.now() / 1000);
+  for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
+    const from = to - LIMIT * intervalMinutes * 60;
+    const url = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${encodeURIComponent(fmtSymbol)}&interval=${interval}&from=${from}&to=${to}`;
+    const response = await fetch(url);
+    if (!response.ok) break;
+    const data = await response.json();
+    if (!Array.isArray(data) || data.length === 0) break;
+    const klines: [number, number][] = data.map((k: string[]) => [parseInt(k[0]) * 1000, parseFloat(k[2])]);
+    allKlines.unshift(...klines);
+    to = from - 1;
+    if (data.length < LIMIT) break;
+  }
+  return allKlines.sort((a, b) => a[0] - b[0]);
+}
+
+// Bitget 現貨 K 線：陣列格式 [ts(ms), open, high, low, close, baseVol, quoteVol, usdtVol]
+async function fetchBitgetSpotKlines(
+  symbol: string,
+  granularity: string,
+  maxKlines: number
+): Promise<[number, number][]> {
+  const LIMIT = 1000;
+  const maxRequests = Math.ceil(maxKlines / LIMIT);
+  const allKlines: [number, number][] = [];
+  let endTime = String(Date.now());
+  for (let i = 0; i < maxRequests && allKlines.length < maxKlines; i++) {
+    const url = `https://api.bitget.com/api/v2/spot/market/candles?symbol=${symbol.toUpperCase()}&granularity=${granularity}&limit=${LIMIT}&endTime=${endTime}`;
+    const response = await fetch(url);
+    if (!response.ok) break;
+    const data = await response.json();
+    if (data.code !== "00000" || !data.data?.length) break;
+    const klines: [number, number][] = data.data.map((k: string[]) => [parseInt(k[0]), parseFloat(k[4])]);
+    allKlines.push(...klines);
+    const oldest = Math.min(...klines.map((k) => k[0]));
+    endTime = String(oldest - 1);
+    if (klines.length < LIMIT) break;
+  }
+  return allKlines.sort((a, b) => a[0] - b[0]);
+}
+
+// Bitget 現貨 K 線粒度與合約不同：分鐘用 "1min"、小時用 "1h"
+function bitgetSpotGranularity(intervalMinutes: number): string {
+  return intervalMinutes < 60 ? `${intervalMinutes}min` : `${intervalMinutes / 60}h`;
+}
+
 async function fetchBitMartKlines(symbol: string, intervalMinutes: number, maxKlines: number): Promise<[number, number][]> {
   const now = Math.floor(Date.now() / 1000);
   const start = now - maxKlines * intervalMinutes * 60;
@@ -438,8 +495,17 @@ export async function GET(request: NextRequest) {
   if (market !== "perp" && market !== "spot") {
     return NextResponse.json({ error: "Invalid market" }, { status: 400 });
   }
-  if (market === "spot" && exchange !== "Binance" && exchange !== "Bybit") {
-    return NextResponse.json({ error: "spot only supported for Binance/Bybit" }, { status: 400 });
+  if (
+    market === "spot" &&
+    exchange !== "Binance" &&
+    exchange !== "Bybit" &&
+    exchange !== "Gate" &&
+    exchange !== "Bitget"
+  ) {
+    return NextResponse.json(
+      { error: "spot only supported for Binance/Bybit/Gate/Bitget" },
+      { status: 400 }
+    );
   }
 
   const config = getKlineConfig(days);
@@ -463,10 +529,16 @@ export async function GET(request: NextRequest) {
         klines = await fetchBingXKlines(symbol, interval, maxKlines);
         break;
       case "Gate":
-        klines = await fetchGateKlines(symbol, interval, maxKlines, config.intervalMinutes);
+        klines =
+          market === "spot"
+            ? await fetchGateSpotKlines(symbol, interval, maxKlines, config.intervalMinutes)
+            : await fetchGateKlines(symbol, interval, maxKlines, config.intervalMinutes);
         break;
       case "Bitget":
-        klines = await fetchBitgetKlines(symbol, interval, maxKlines);
+        klines =
+          market === "spot"
+            ? await fetchBitgetSpotKlines(symbol, bitgetSpotGranularity(config.intervalMinutes), maxKlines)
+            : await fetchBitgetKlines(symbol, interval, maxKlines);
         break;
       case "BitMart":
         klines = await fetchBitMartKlines(symbol, config.intervalMinutes, maxKlines);
