@@ -105,37 +105,60 @@ async function fetchBybitFundingHistory(symbol: string, startTime?: number): Pro
   }
 }
 
-async function fetchGateFundingHistory(symbol: string): Promise<FundingRateEntry[]> {
+async function fetchGateFundingHistory(symbol: string, startTime?: number): Promise<FundingRateEntry[]> {
   try {
     const fmtSymbol = formatExchangeSymbol(symbol, "Gate");
-    const url = `https://api.gateio.ws/api/v4/futures/usdt/funding_rate?contract=${encodeURIComponent(fmtSymbol)}&limit=30`;
+    // 帶 startTime 才把 limit 拉大抓滿範圍（單次上限 1000，8h 間隔逾 300 天足夠，不需分頁）；
+    // 否則維持原本最近 30 期行為（供 opportunity modal）
+    const limit = startTime !== undefined ? 1000 : 30;
+    const url = `https://api.gateio.ws/api/v4/futures/usdt/funding_rate?contract=${encodeURIComponent(fmtSymbol)}&limit=${limit}`;
     const res = await fetchWithTimeout(url);
     if (!res.ok) { console.warn(`[funding-history] Gate ${symbol}: HTTP ${res.status}`); return []; }
     const data = await res.json();
     if (!Array.isArray(data)) return [];
-    return data.map((item: { t: number; r: string }) => ({
+    const entries: FundingRateEntry[] = data.map((item: { t: number; r: string }) => ({
       timestamp: item.t * 1000,
       rate: parseFloat(item.r),
       exchange: "Gate" as Exchange,
     }));
+    if (startTime === undefined) return entries;
+    return entries.filter((e) => e.timestamp >= startTime).sort((a, b) => a.timestamp - b.timestamp);
   } catch (e) {
     console.warn(`[funding-history] Gate ${symbol} error:`, e instanceof Error ? e.message : e);
     return [];
   }
 }
 
-async function fetchBitgetFundingHistory(symbol: string): Promise<FundingRateEntry[]> {
+async function fetchBitgetFundingHistory(symbol: string, startTime?: number): Promise<FundingRateEntry[]> {
   try {
-    const url = `https://api.bitget.com/api/v2/mix/market/history-fund-rate?symbol=${symbol.toUpperCase()}&productType=USDT-FUTURES&pageSize=30`;
-    const res = await fetchWithTimeout(url);
-    if (!res.ok) { console.warn(`[funding-history] Bitget ${symbol}: HTTP ${res.status}`); return []; }
-    const data = await res.json();
-    if (data.code !== "00000" || !data.data?.length) return [];
-    return data.data.map((item: { fundingTime: string; fundingRate: string }) => ({
-      timestamp: parseInt(item.fundingTime),
-      rate: parseFloat(item.fundingRate),
-      exchange: "Bitget" as Exchange,
-    }));
+    const mapEntries = (list: { fundingTime: string; fundingRate: string }[]) =>
+      list.map((item) => ({
+        timestamp: parseInt(item.fundingTime),
+        rate: parseFloat(item.fundingRate),
+        exchange: "Bitget" as Exchange,
+      }));
+    const base = `https://api.bitget.com/api/v2/mix/market/history-fund-rate?symbol=${symbol.toUpperCase()}&productType=USDT-FUTURES`;
+    // 無 startTime：維持原本最近 30 期行為（供 opportunity modal）
+    if (startTime === undefined) {
+      const res = await fetchWithTimeout(`${base}&pageSize=30`);
+      if (!res.ok) { console.warn(`[funding-history] Bitget ${symbol}: HTTP ${res.status}`); return []; }
+      const data = await res.json();
+      if (data.code !== "00000" || !data.data?.length) return [];
+      return mapEntries(data.data);
+    }
+    // 帶 startTime：pageNo 往回翻頁（pageSize=100，每頁更舊），直到最舊 <= startTime
+    const entries: FundingRateEntry[] = [];
+    for (let page = 1; page <= MAX_HISTORY_PAGES; page++) {
+      const res = await fetchWithTimeout(`${base}&pageSize=100&pageNo=${page}`);
+      if (!res.ok) { console.warn(`[funding-history] Bitget ${symbol}: HTTP ${res.status}`); break; }
+      const data = await res.json();
+      if (data.code !== "00000" || !data.data?.length) break;
+      const batch = mapEntries(data.data);
+      entries.push(...batch);
+      const oldest = Math.min(...batch.map((e) => e.timestamp));
+      if (batch.length < 100 || oldest <= startTime) break;
+    }
+    return entries.filter((e) => e.timestamp >= startTime).sort((a, b) => a.timestamp - b.timestamp);
   } catch (e) {
     console.warn(`[funding-history] Bitget ${symbol} error:`, e instanceof Error ? e.message : e);
     return [];
@@ -271,7 +294,7 @@ export async function GET(request: NextRequest) {
   const exchangeA = searchParams.get("exchangeA") as Exchange | "OKX" | "Hyperliquid" | null;
   const exchangeB = searchParams.get("exchangeB") as Exchange | "OKX" | "Hyperliquid" | null;
   const symbol = searchParams.get("symbol");
-  // 可選 startTime(ms)：帶了就分頁抓滿 [startTime, now]（僅 Binance/Bybit/OKX/Hyperliquid 支援，其他交易所忽略）
+  // 可選 startTime(ms)：帶了就抓滿 [startTime, now]（Binance/Bybit/OKX/Hyperliquid/Gate/Bitget 支援，其餘忽略）
   const startTimeParam = parseInt(searchParams.get("startTime") ?? "", 10);
   const startTime = Number.isFinite(startTimeParam) && startTimeParam > 0 ? startTimeParam : undefined;
 
