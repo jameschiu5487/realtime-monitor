@@ -133,7 +133,18 @@ export function buildFundEquityCurve(
       curve.push({ time: ts, equity: sum });
     }
   }
-  return curve;
+
+  // 補平線：正常每分鐘一點，若相鄰兩點時間差過大（採集中斷），在後點前插入一個帶
+  // 前值的 bridge 點，讓缺漏區間維持前值持平（forward-fill），而非兩端斜線內插
+  const GAP_THRESHOLD_MS = 3 * 60 * 1000;
+  const filled: ChartDataPoint[] = [];
+  for (let i = 0; i < curve.length; i++) {
+    if (i > 0 && curve[i].time - curve[i - 1].time > GAP_THRESHOLD_MS) {
+      filled.push({ time: curve[i].time - 1, equity: curve[i - 1].equity });
+    }
+    filled.push(curve[i]);
+  }
+  return filled;
 }
 
 export function computeRangeDelta(
