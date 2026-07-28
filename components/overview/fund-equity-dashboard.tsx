@@ -205,7 +205,10 @@ export function FundEquityDashboard({
     const values = curve.map((point) => point.equity);
     const min = Math.min(...values);
     const max = Math.max(...values);
-    const padding = Math.max((max - min) * 0.08, Math.abs(max) * 0.01, 1);
+    const spread = max - min;
+    // padding 只跟實際 min-max 變動幅度掛勾，讓 Y 軸緊貼資料範圍；
+    // 完全平坦時（spread=0）才用絕對值的小比例當後備，避免線貼在邊緣
+    const padding = spread > 0 ? spread * 0.08 : Math.max(Math.abs(max) * 0.001, 1);
     return [min - padding, max + padding];
   }, [curve]);
 
