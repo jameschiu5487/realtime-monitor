@@ -115,7 +115,8 @@ export default async function DashboardPage() {
 
   // Deliberately not awaited — handed to the client and streamed in behind a
   // Suspense boundary so the heaviest query stops gating the whole page.
-  const fundEquityPromise = getFundAccountEquity(supabase, since30d);
+  // 30d window, but only the last 24h is kept at full per-minute resolution.
+  const fundEquityPromise = getFundAccountEquity(supabase, since30d, since24h);
 
   const [
     { latest: latestEquities, dayAgo: equities24hAgo },
@@ -125,7 +126,7 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     getEquityEndpoints(supabase, runningRunIds, since24h),
     getTodayTradeRunIds(supabase, runningRunIds, todayStart.toISOString()),
-    getEquityCurve(supabase, allActiveRunIds, since7d),
+    getEquityCurve(supabase, allActiveRunIds, since7d, since24h),
     getCombinedTrades(supabase, allActiveRunIds, since30d),
   ]);
 
