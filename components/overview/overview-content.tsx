@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, Suspense, use } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,11 +12,7 @@ import {
   buildStrategyAccountMap,
   exchangeBadgeClass,
 } from "@/lib/utils/fund-account-strategy";
-import {
-  deriveFundShareRatio,
-  latestByAccount,
-  totalEquityFromLatest,
-} from "@/lib/utils/fund-equity";
+import { deriveFundShareRatio } from "@/lib/utils/fund-equity";
 import type {
   Strategy,
   StrategyRun,
@@ -54,8 +50,53 @@ interface OverviewContentProps {
   equityData: EquityCurve[];
   combinedTradesData: CombinedTrade[];
   strategyRunIds: Record<string, string[]>;
-  fundEquityData: FundAccountEquity[];
-  fundEquityError: string | null;
+  /**
+   * Streamed in rather than awaited: 30 days of per-account equity is the
+   * slowest query on the page, and blocking on it delayed everything else.
+   */
+  fundEquityPromise: Promise<{
+    data: FundAccountEquity[];
+    error: string | null;
+  }>;
+}
+
+type FundSummary = { total: number; accountCount: number };
+
+/** Suspends on the streamed fund equity payload without blocking the page. */
+function FundEquitySection({
+  promise,
+  shareRatio,
+  accountStrategies,
+  onSummaryChange,
+}: {
+  promise: Promise<{ data: FundAccountEquity[]; error: string | null }>;
+  shareRatio: number;
+  accountStrategies: ReturnType<typeof buildAccountStrategyMap>;
+  onSummaryChange: (summary: FundSummary) => void;
+}) {
+  const { data, error } = use(promise);
+  return (
+    <FundEquityDashboard
+      initialData={data}
+      fetchError={error}
+      shareRatio={shareRatio}
+      accountStrategies={accountStrategies}
+      onSummaryChange={onSummaryChange}
+    />
+  );
+}
+
+function FundEquitySkeleton() {
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="p-4 sm:p-5">
+        <div className="animate-pulse space-y-3">
+          <div className="h-4 w-32 rounded bg-muted" />
+          <div className="h-48 rounded bg-muted" />
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function useSelectedStrategies(activeStrategies: ActiveStrategy[]) {
@@ -117,8 +158,7 @@ export function OverviewContent({
   equityData,
   combinedTradesData,
   strategyRunIds,
-  fundEquityData,
-  fundEquityError,
+  fundEquityPromise,
 }: OverviewContentProps) {
   const { selectedIds, toggle } = useSelectedStrategies(activeStrategies);
   const fundShareRatio = useMemo(
@@ -137,23 +177,11 @@ export function OverviewContent({
     () => buildStrategyAccountMap(allRuns, isLiveMode),
     [allRuns, isLiveMode]
   );
-  const initialFundSummary = useMemo(() => {
-    const latest = latestByAccount(fundEquityData);
-    return {
-      total: totalEquityFromLatest(latest) * fundShareRatio,
-      accountCount: latest.size,
-    };
-  }, [fundEquityData, fundShareRatio]);
-  const [fundSummary, setFundSummary] = useState(initialFundSummary);
-  useEffect(() => {
-    setFundSummary(initialFundSummary);
-  }, [initialFundSummary]);
-  const handleFundSummaryChange = useCallback(
-    (summary: { total: number; accountCount: number }) => {
-      setFundSummary(summary);
-    },
-    []
-  );
+  // Populated by FundEquityDashboard once the streamed payload arrives.
+  const [fundSummary, setFundSummary] = useState<FundSummary | null>(null);
+  const handleFundSummaryChange = useCallback((summary: FundSummary) => {
+    setFundSummary(summary);
+  }, []);
 
   // Stable key for chart remount when selection changes
   const selectionKey = useMemo(
@@ -299,15 +327,21 @@ export function OverviewContent({
                 Total Balance
               </p>
               <p className="text-lg sm:text-2xl lg:text-3xl font-bold font-mono tabular-nums mt-1">
-                $
-                {fundSummary.total.toLocaleString("en-US", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                {fundSummary ? (
+                  `$${fundSummary.total.toLocaleString("en-US", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}`
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
-                {fundSummary.accountCount}{" "}
-                {fundSummary.accountCount === 1 ? "account" : "accounts"}
+                {fundSummary
+                  ? `${fundSummary.accountCount} ${
+                      fundSummary.accountCount === 1 ? "account" : "accounts"
+                    }`
+                  : "loading"}
               </p>
             </div>
 
@@ -344,13 +378,14 @@ export function OverviewContent({
         </CardContent>
       </Card>
 
-      <FundEquityDashboard
-        initialData={fundEquityData}
-        fetchError={fundEquityError}
-        shareRatio={fundShareRatio}
-        accountStrategies={accountStrategies}
-        onSummaryChange={handleFundSummaryChange}
-      />
+      <Suspense fallback={<FundEquitySkeleton />}>
+        <FundEquitySection
+          promise={fundEquityPromise}
+          shareRatio={fundShareRatio}
+          accountStrategies={accountStrategies}
+          onSummaryChange={handleFundSummaryChange}
+        />
+      </Suspense>
 
       {/* Active Strategies */}
       {activeStrategies.length > 0 ? (
