@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,10 @@ const presetRanges = [
   { label: "1Y", minutes: 525600 },
 ] as const;
 
+/**
+ * Renders in the viewer's own timezone, so it can only be produced on the
+ * client — see the mount gate below.
+ */
 function formatDateTime(date: Date) {
   return date.toLocaleString("en-US", {
     year: "numeric",
@@ -59,6 +63,13 @@ export function TimeRangeSelector({
   allDataLoaded = false,
 }: TimeRangeSelectorProps) {
   const displayRange = currentRange || { start: dataStartTime, end: dataEndTime };
+
+  // The label below is formatted in the viewer's local timezone against a clock
+  // that keeps moving, so the server cannot produce the same string the browser
+  // will: rendering it during SSR fails hydration, and on Vercel (UTC) it would
+  // briefly show a time hours off from the user's. Hold it back until mounted.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Calculate which preset is currently active (if any)
   const activePreset = useMemo(() => {
@@ -158,7 +169,9 @@ export function TimeRangeSelector({
 
       <div className="sm:ml-auto flex items-center gap-2">
         <div className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground sm:px-3 sm:py-1.5 overflow-x-auto whitespace-nowrap">
-          {formatDateTime(displayRange.start)} - {formatDateTime(displayRange.end)}
+          {mounted
+            ? `${formatDateTime(displayRange.start)} - ${formatDateTime(displayRange.end)}`
+            : " "}
         </div>
       </div>
     </div>
