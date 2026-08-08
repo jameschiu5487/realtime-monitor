@@ -22,6 +22,51 @@ import type {
 } from "@/lib/types/database";
 
 const STORAGE_KEY = "overview-selected-strategies";
+const RUN_MODE_STORAGE_KEY = "overview-run-mode";
+
+/** Which runs feed the Active Equity Curve. `all` matches the historic behaviour. */
+type RunModeFilter = "all" | "realtime" | "test-realtime";
+
+const RUN_MODE_OPTIONS: { value: RunModeFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "realtime", label: "Realtime" },
+  { value: "test-realtime", label: "Test" },
+];
+
+function isRunModeFilter(value: unknown): value is RunModeFilter {
+  return RUN_MODE_OPTIONS.some((option) => option.value === value);
+}
+
+/**
+ * Run mode used by the equity curve, remembered across visits.
+ *
+ * realtime is real money and test-realtime is not, so a combined curve can't be
+ * read as actual performance. Scoped to the chart only — the metrics strip
+ * deliberately keeps counting every live run.
+ */
+function useRunModeFilter() {
+  const [runMode, setRunMode] = useState<RunModeFilter>("all");
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(RUN_MODE_STORAGE_KEY);
+      if (isRunModeFilter(stored)) setRunMode(stored);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const selectRunMode = useCallback((mode: RunModeFilter) => {
+    setRunMode(mode);
+    try {
+      localStorage.setItem(RUN_MODE_STORAGE_KEY, mode);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  return { runMode, selectRunMode };
+}
 
 interface ActiveStrategy {
   strategyId: string;
@@ -161,6 +206,7 @@ export function OverviewContent({
   fundEquityPromise,
 }: OverviewContentProps) {
   const { selectedIds, toggle } = useSelectedStrategies(activeStrategies);
+  const { runMode, selectRunMode } = useRunModeFilter();
   const fundShareRatio = useMemo(
     () => deriveFundShareRatio(shareRatioMap),
     [shareRatioMap]
@@ -183,11 +229,19 @@ export function OverviewContent({
     setFundSummary(summary);
   }, []);
 
-  // Stable key for chart remount when selection changes
+  // Stable key for chart remount when selection changes. The run mode is part
+  // of it so switching modes resets the chart's own time range and any history
+  // it loaded for the previous mode.
   const selectionKey = useMemo(
-    () => [...selectedIds].sort().join(","),
-    [selectedIds]
+    () => `${runMode}:${[...selectedIds].sort().join(",")}`,
+    [selectedIds, runMode]
   );
+
+  const runToModeMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const run of allRuns) map[run.run_id] = run.mode as string;
+    return map;
+  }, [allRuns]);
 
   // Filter everything by selected strategies
   const filtered = useMemo(() => {
@@ -247,6 +301,35 @@ export function OverviewContent({
     metricsData,
     strategyNameMap,
   ]);
+
+  /**
+   * Chart-only view of `filtered`, narrowed to the selected run mode.
+   *
+   * The metrics strip keeps using `filtered` — this second layer exists so the
+   * equity curve can show real money on its own without changing what the
+   * numbers above it count.
+   */
+  const chartFiltered = useMemo(() => {
+    if (runMode === "all") return filtered;
+
+    const keep = (runId: string) => runToModeMap[runId] === runMode;
+
+    const strategyRunIdsForMode: Record<string, string[]> = {};
+    for (const [strategyId, runIds] of Object.entries(filtered.strategyRunIds)) {
+      const kept = runIds.filter(keep);
+      if (kept.length > 0) strategyRunIdsForMode[strategyId] = kept;
+    }
+
+    return {
+      ...filtered,
+      runningRunIds: filtered.runningRunIds.filter(keep),
+      strategyRunIds: strategyRunIdsForMode,
+      equityData: filtered.equityData.filter((e) => keep(e.run_id)),
+      combinedTradesData: filtered.combinedTradesData.filter((t) =>
+        keep(t.run_id)
+      ),
+    };
+  }, [filtered, runMode, runToModeMap]);
 
   // Compute metrics from filtered data
   const metrics = useMemo(() => {
@@ -475,18 +558,38 @@ export function OverviewContent({
       {selectedIds.size > 0 && (
         <Card>
           <CardHeader className="px-3 sm:px-6 pb-2">
-            <CardTitle className="text-sm sm:text-base font-medium">Active Equity Curve</CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-sm sm:text-base font-medium">Active Equity Curve</CardTitle>
+              <div className="flex items-center rounded-md border border-border p-0.5">
+                {RUN_MODE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => selectRunMode(option.value)}
+                    aria-pressed={runMode === option.value}
+                    className={cn(
+                      "px-2 py-0.5 text-xs font-mono rounded-sm transition-colors",
+                      runMode === option.value
+                        ? "bg-muted text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="px-1 sm:px-2">
             <OverviewPerformanceChart
               key={selectionKey}
-              initialEquityData={filtered.equityData}
-              initialCombinedTrades={filtered.combinedTradesData}
-              runningRunIds={filtered.runningRunIds}
-              strategyRunIds={filtered.strategyRunIds}
+              initialEquityData={chartFiltered.equityData}
+              initialCombinedTrades={chartFiltered.combinedTradesData}
+              runningRunIds={chartFiltered.runningRunIds}
+              strategyRunIds={chartFiltered.strategyRunIds}
               runToStrategyMap={runToStrategyMap}
               shareRatioMap={shareRatioMap}
-              strategyNameMap={filtered.strategyNameMap}
+              strategyNameMap={chartFiltered.strategyNameMap}
             />
           </CardContent>
         </Card>
