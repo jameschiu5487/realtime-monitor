@@ -93,6 +93,8 @@ export type Database = {
           funding_rate: number;
           interval_hours: string | null;
           status: string;
+          /** Execution slippage in basis points. Written by the strategy engine. */
+          exec_slippage_bps: number | null;
         };
         Insert: {
           trade_id?: number;
@@ -110,6 +112,7 @@ export type Database = {
           funding_rate?: number;
           interval_hours?: string | null;
           status?: string;
+          exec_slippage_bps?: number | null;
         };
         Update: {
           trade_id?: number;
@@ -127,6 +130,7 @@ export type Database = {
           funding_rate?: number;
           interval_hours?: string | null;
           status?: string;
+          exec_slippage_bps?: number | null;
         };
       };
       combined_trades: {

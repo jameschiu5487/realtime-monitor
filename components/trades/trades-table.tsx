@@ -35,6 +35,19 @@ function formatNumber(value: number, decimals: number = 2) {
   }).format(value);
 }
 
+/**
+ * Execution slippage, in basis points.
+ *
+ * Nullable: the strategy engine only started recording it recently, so older
+ * trades have nothing to show. Positive means the fill came in worse than the
+ * reference price.
+ */
+function formatSlippage(value: number | null | undefined) {
+  if (value === null || value === undefined) return null;
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatNumber(value, 1)}`;
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -65,6 +78,7 @@ export function TradesTable({ trades }: TradesTableProps) {
           <TableHead className="text-right">Quantity</TableHead>
           <TableHead className="text-right">Price</TableHead>
           <TableHead className="text-right">Fees</TableHead>
+          <TableHead className="text-right">Slippage (bps)</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -89,6 +103,11 @@ export function TradesTable({ trades }: TradesTableProps) {
             </TableCell>
             <TableCell className="text-right font-mono">
               {formatCurrency(trade.fee_amount_usdt)}
+            </TableCell>
+            <TableCell className="text-right font-mono">
+              {formatSlippage(trade.exec_slippage_bps) ?? (
+                <span className="text-muted-foreground">—</span>
+              )}
             </TableCell>
           </TableRow>
         ))}
