@@ -52,6 +52,8 @@ interface Trade {
   fee_amount_usdt: number;
   fee_rate_bps: number;
   status: string;
+  /** Execution slippage in bps; null on trades predating the engine reporting it. */
+  exec_slippage_bps: number | null;
 }
 
 interface RealtimePositionChartProps {
@@ -115,7 +117,7 @@ export function RealtimePositionChart({ data, lastInsertTime, runId }: RealtimeP
       const supabase = createClient();
       const { data: tradesData } = await supabase
         .from("trades")
-        .select("trade_id, ts, action, side, symbol, exchange, quantity_actual, price, fee_amount_usdt, fee_rate_bps, status")
+        .select("trade_id, ts, action, side, symbol, exchange, quantity_actual, price, fee_amount_usdt, fee_rate_bps, status, exec_slippage_bps")
         .eq("run_id", runId)
         .order("ts", { ascending: false })
         .limit(100);
@@ -280,7 +282,7 @@ export function RealtimePositionChart({ data, lastInsertTime, runId }: RealtimeP
               </div>
             ) : (
               <div className="max-h-[300px] sm:max-h-[400px] overflow-auto">
-                <Table className="min-w-[600px]">
+                <Table className="min-w-[680px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Time</TableHead>
@@ -292,6 +294,7 @@ export function RealtimePositionChart({ data, lastInsertTime, runId }: RealtimeP
                       <TableHead className="text-right">Price</TableHead>
                       <TableHead className="text-right">Fee Rate</TableHead>
                       <TableHead className="text-right">Fee</TableHead>
+                      <TableHead className="text-right">Slippage</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -328,6 +331,15 @@ export function RealtimePositionChart({ data, lastInsertTime, runId }: RealtimeP
                           getPnLColor(-trade.fee_amount_usdt)
                         )}>
                           {formatCurrency(-trade.fee_amount_usdt)}
+                        </TableCell>
+                        {/* Signed: positive means the fill was worse than the
+                            reference price. Null on trades recorded before the
+                            engine started reporting it. */}
+                        <TableCell className="text-right font-mono text-muted-foreground">
+                          {trade.exec_slippage_bps === null ||
+                          trade.exec_slippage_bps === undefined
+                            ? "—"
+                            : `${trade.exec_slippage_bps > 0 ? "+" : ""}${trade.exec_slippage_bps.toFixed(2)} bp`}
                         </TableCell>
                       </TableRow>
                     ))}
