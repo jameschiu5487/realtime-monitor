@@ -98,6 +98,10 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
 ## 子系統文件
 
 - 推播通知全系統（trigger、hedge 配對、share_ratio、驗證方法）：`docs/notifications.md`
+- **跨交易所行情解析前先讀 `lib/services/volume-fetcher.ts` 的檔頭**：七家的 K 線
+  欄位順序、排序方向、成交量單位都不一樣（BingX 只給 base、BitMart 給合約張數），
+  解析錯不會噴錯、只會讓數字差 1000 倍。那裡記了每一家已實測驗證的對照與交叉驗算法。
+  canonical↔native 符號轉換一律用 `lib/exchange-symbols.ts`，不要各自重寫。
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
