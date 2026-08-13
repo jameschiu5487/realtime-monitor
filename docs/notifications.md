@@ -24,7 +24,7 @@ NAV 劇變 ───────────────────────
 | `hooks/use-push-notification.ts` | 前端訂閱/取消訂閱 |
 | `components/settings/notification-settings.tsx` | 設定 UI |
 | `app/api/notifications/send/route.ts` | 通用發送端點（trade_every / nav_change / report）|
-| `app/api/notifications/trade-delayed/route.ts` | combined trade 的 hedge 配對邏輯 |
+| `app/api/notifications/trade-delayed/route.ts` | combined trade 的 hedge 配對；先回 202，配對走 `after()` |
 | `app/api/notifications/report-shared/route.ts` | report 分享通知 |
 | `app/api/notifications/vapid-key/route.ts` | 把 VAPID 公鑰給 Service Worker（SW 讀不到 build-time env）|
 | `public/sw.js` | Service Worker：push、notificationclick、pushsubscriptionchange |
@@ -54,12 +54,15 @@ NAV 劇變 ───────────────────────
 1. **設定頁的推播開關讀的是瀏覽器本地 `pushManager.getSubscription()`，不是 DB。**
    開關自己變灰 ≠ `push_subscriptions` 被刪，也跟 `notification_preferences` 無關
    （那是另外三個開關）。查「開關變灰」要往瀏覽器端查，不是往 DB 查。
-2. **`combined_trades` 的 webhook 在 `net._http_response` 裡必然顯示 5 秒逾時，這是設計如此。**
-   `/api/notifications/trade-delayed` 要等 10 秒配對 hedge，而 pg_net 的逾時是 5 秒。
-   pg_net 放棄等待不代表 Vercel 沒跑完，通知仍會送出。
-   判準：逾時筆數 / 200 筆數的比例會貼近 combined_trades / trades 的比例
-   （2026-08-13 實測 20:40 對 62:126）。**看到這批逾時不要當成故障去追。**
-   代價是 trigger 分不出成功失敗，真的故障會被埋在這些雜訊裡。
+2. **`/api/notifications/trade-delayed` 回 202 是正常的，不是「還沒做完」。**
+   它要等 10 秒讓對手腿進來，但 pg_net 的逾時是 5 秒。原本 inline 等待導致
+   **每一筆** combined_trade 都在 `net._http_response` 留下逾時紀錄
+   （2026-08-13 實測比例 20:40，對上 combined_trades:trades 的 62:126）。
+   通知其實有送出，但 trigger 分不出成功失敗，真故障被埋在雜訊裡。
+   現在改成先回 202、用 Next 的 `after()` 在回應之後做等待與配對。
+   **所以現在 `net._http_response` 若再出現這支的逾時，那就是真的有問題，要追。**
+   背景工作的結果只在 Vercel logs（`[notifications/trade-delayed] done/failed`），
+   pg_net 只看得到那個 202。
 3. **同一支裝置在 `push_subscriptions` 累積多筆是正常的。**
    upsert 的衝突鍵是 `(user_id, endpoint)`，而重新訂閱會拿到新的 endpoint，
    所以每次復原都是新增一筆。舊筆要等 Apple 回 410 才會被清掉。

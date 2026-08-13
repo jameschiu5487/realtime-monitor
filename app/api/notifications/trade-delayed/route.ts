@@ -1,6 +1,17 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendPushNotification } from "@/lib/web-push";
+
+/** Time allowed for the opposite hedge leg to land before deciding this is a single-leg close. */
+const HEDGE_PAIR_WAIT_MS = 10_000;
+
+interface CombinedTradePayload {
+  combined_trade_id: number;
+  run_id: string;
+  symbol: string;
+  exchange: string;
+  ts: string;
+}
 
 function getAdminClient() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -42,17 +53,17 @@ function buildCombinedBody(strategyName: string, symbol: string, currentTrade: a
   }
 }
 
-export async function POST(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  const apiKey = process.env.NOTIFICATION_API_KEY;
-  if (!apiKey || authHeader !== `Bearer ${apiKey}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+/**
+ * Everything after the acknowledgement: wait for the sibling leg, work out
+ * whether this is a hedge or a single-leg close, and notify.
+ *
+ * Runs via after(), so the caller is not kept waiting for it. See POST below.
+ */
+async function processCombinedTrade(payload: CombinedTradePayload) {
+  const { combined_trade_id, run_id, symbol, exchange, ts } = payload;
 
-  const { combined_trade_id, run_id, symbol, exchange, ts } = await request.json();
-
-  // Wait 10 seconds for potential hedge pair
-  await new Promise((resolve) => setTimeout(resolve, 10000));
+  // Wait for the potential hedge pair to arrive.
+  await new Promise((resolve) => setTimeout(resolve, HEDGE_PAIR_WAIT_MS));
 
   const supabase = getAdminClient();
 
@@ -73,7 +84,7 @@ export async function POST(request: Request) {
 
   // If hedge pair found, only the higher ID sends (avoid duplicate)
   if (match && combined_trade_id < match.combined_trade_id) {
-    return NextResponse.json({ skipped: true, reason: "other leg will send" });
+    return { skipped: true, reason: "other leg will send" };
   }
 
   // Look up strategy name
@@ -103,7 +114,8 @@ export async function POST(request: Request) {
     .single();
 
   if (!currentTrade) {
-    return NextResponse.json({ error: "Trade not found" }, { status: 404 });
+    console.error("[notifications/trade-delayed] combined trade not found", combined_trade_id);
+    return { error: "Trade not found" };
   }
 
   // Find users with trade_combined enabled, filtered by strategy
@@ -113,14 +125,14 @@ export async function POST(request: Request) {
     .eq("trade_notifications", true)
     .eq("trade_combined", true);
 
-  if (!enabledUsers?.length) return NextResponse.json({ sent: 0 });
+  if (!enabledUsers?.length) return { sent: 0, reason: "nobody subscribed" };
 
   const filteredUsers = enabledUsers.filter((u: { user_id: string; trade_strategy_ids?: string[] }) => {
     const ids = u.trade_strategy_ids ?? [];
     return ids.length === 0 || ids.includes(strategyId);
   });
 
-  if (!filteredUsers.length) return NextResponse.json({ sent: 0 });
+  if (!filteredUsers.length) return { sent: 0, reason: "strategy filtered out" };
 
   const userIds = filteredUsers.map((u: { user_id: string }) => u.user_id);
 
@@ -143,7 +155,7 @@ export async function POST(request: Request) {
     .select("id, user_id, endpoint, p256dh, auth")
     .in("user_id", userIds);
 
-  if (!subs?.length) return NextResponse.json({ sent: 0 });
+  if (!subs?.length) return { sent: 0, reason: "no devices" };
 
   let sent = 0;
   const staleIds: string[] = [];
@@ -162,7 +174,15 @@ export async function POST(request: Request) {
         sent++;
       } catch (err: unknown) {
         const status = (err as { statusCode?: number }).statusCode;
-        if (status === 404 || status === 410) staleIds.push(sub.id);
+        if (status === 404 || status === 410) {
+          staleIds.push(sub.id);
+        } else {
+          console.error("[notifications/trade-delayed] push failed", {
+            status: status ?? "none",
+            endpoint: sub.endpoint.slice(0, 40),
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     })
   );
@@ -171,5 +191,52 @@ export async function POST(request: Request) {
     await supabase.from("push_subscriptions").delete().in("id", staleIds);
   }
 
-  return NextResponse.json({ sent, hedged: !!match });
+  return { sent, hedged: !!match };
+}
+
+/**
+ * Acknowledges the trigger immediately and does the real work afterwards.
+ *
+ * The pairing logic has to sit still for HEDGE_PAIR_WAIT_MS waiting for the
+ * other leg, but the pg_net call that invokes this gives up after 5s. Doing the
+ * wait inline meant every single combined_trades insert was recorded as a
+ * timeout in net._http_response — the notification still went out, but the
+ * trigger could not tell success from failure and genuine failures were buried
+ * in the noise. Responding 202 up front makes those logs mean something again.
+ */
+export async function POST(request: Request) {
+  const authHeader = request.headers.get("authorization");
+  const apiKey = process.env.NOTIFICATION_API_KEY;
+  if (!apiKey || authHeader !== `Bearer ${apiKey}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  let payload: CombinedTradePayload;
+  try {
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  if (payload?.combined_trade_id === undefined || !payload?.run_id) {
+    return NextResponse.json({ error: "Missing combined_trade_id or run_id" }, { status: 400 });
+  }
+
+  after(async () => {
+    try {
+      const result = await processCombinedTrade(payload);
+      console.log("[notifications/trade-delayed] done", {
+        combined_trade_id: payload.combined_trade_id,
+        ...result,
+      });
+    } catch (err) {
+      // Nothing is waiting on this any more, so an unlogged throw would vanish.
+      console.error("[notifications/trade-delayed] failed", {
+        combined_trade_id: payload.combined_trade_id,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  return NextResponse.json({ accepted: true }, { status: 202 });
 }
