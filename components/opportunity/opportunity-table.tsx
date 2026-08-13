@@ -24,7 +24,7 @@ interface OpportunityTableProps {
   onSymbolClick?: (symbol: string, exchangeA: Exchange, exchangeB: Exchange) => void;
 }
 
-type SortKey = 'symbol' | 'type' | 'rate_spread_bps' | 'net_profit_bps' | 'time_to_funding_a_secs' | 'time_to_funding_b_secs' | 'annualized_return_pct' | 'basis_bps';
+type SortKey = 'symbol' | 'type' | 'rate_spread_bps' | 'net_profit_bps' | 'time_to_funding_a_secs' | 'time_to_funding_b_secs' | 'annualized_return_pct' | 'basis_bps' | 'volume_a' | 'volume_b';
 type SortDirection = 'asc' | 'desc';
 
 export function OpportunityTable({ opportunities, volumes, onSymbolClick }: OpportunityTableProps) {
@@ -42,6 +42,14 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
   };
 
   const sortedOpportunities = useMemo(() => {
+    // Volume arrives separately from the opportunity poll, so a row may not
+    // have it yet. Treat missing as the lowest value rather than zero, so it
+    // never outranks a real figure in the default descending view.
+    const volumeFor = (opp: Opportunity, legA: boolean) => {
+      const exchange = legA ? opp.exchange_a : opp.exchange_b;
+      return volumes?.[volumeKey(exchange, opp.symbol)]?.estimatedDailyVolume ?? -Infinity;
+    };
+
     let filtered = opportunities;
     if (filter !== 'all') {
       filtered = opportunities.filter(o => o.opportunity_type === filter);
@@ -69,6 +77,11 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
           aVal = a.basis_bps === null ? -Infinity : Math.abs(a.basis_bps);
           bVal = b.basis_bps === null ? -Infinity : Math.abs(b.basis_bps);
           break;
+        case 'volume_a':
+        case 'volume_b':
+          aVal = volumeFor(a, sortKey === 'volume_a');
+          bVal = volumeFor(b, sortKey === 'volume_a');
+          break;
         default:
           aVal = a[sortKey] as number;
           bVal = b[sortKey] as number;
@@ -80,7 +93,7 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
 
       return sortDirection === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
     });
-  }, [opportunities, sortKey, sortDirection, filter]);
+  }, [opportunities, sortKey, sortDirection, filter, volumes]);
 
   const formatBps = (bps: number | null) => bps !== null ? bps.toFixed(2) : '-';
 
@@ -91,23 +104,26 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
     return `$${value.toFixed(0)}`;
   };
 
-  // Estimated daily volume for one leg, shown under that leg's funding rate.
+  // Estimated daily volume for one leg. Its own column rather than a line
+  // inside the exchange cell, so it can be sorted on — screening out illiquid
+  // pairs is the main reason to look at it at all.
   const LegVolume = ({ exchange, symbol }: { exchange: Exchange; symbol: string }) => {
     const entry = volumes?.[volumeKey(exchange, symbol)];
     if (!entry) {
-      return <div className="text-xs text-muted-foreground/50">vol —</div>;
+      return <span className="text-muted-foreground/50">—</span>;
     }
     // Fewer than 4 completed hours means a freshly listed or thin market, so
     // the extrapolation rests on less data than usual — flag it rather than
     // presenting it as equally solid.
     const partial = entry.hoursUsed < 4;
     return (
-      <div
-        className="text-xs text-muted-foreground"
+      <span
+        className={cn(partial ? "text-yellow-500" : "text-muted-foreground")}
         title={`${formatUsd(entry.quoteVolumeWindow)} over the last ${entry.hoursUsed}h, scaled to 24h`}
       >
-        vol {formatUsd(entry.estimatedDailyVolume)}/d{partial ? '*' : ''}
-      </div>
+        {formatUsd(entry.estimatedDailyVolume)}
+        {partial ? '*' : ''}
+      </span>
     );
   };
 
@@ -204,7 +220,9 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
                 <SortableHeader label="Symbol" sortKeyVal="symbol" />
                 <SortableHeader label="Type" sortKeyVal="type" />
                 <TableHead>Exchange A</TableHead>
+                <SortableHeader label="Vol A / day" sortKeyVal="volume_a" />
                 <TableHead>Exchange B</TableHead>
+                <SortableHeader label="Vol B / day" sortKeyVal="volume_b" />
                 <SortableHeader label="Basis (bps)" sortKeyVal="basis_bps" />
                 <SortableHeader label="Spread (bps)" sortKeyVal="rate_spread_bps" />
                 <TableHead>Cost (bps)</TableHead>
@@ -244,11 +262,15 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
                   <TableCell>
                     <div>{opp.exchange_a}: {opp.exchange_a_rate_bps.toFixed(2)} bps</div>
                     <div className="text-xs text-muted-foreground">{opp.exchange_a_interval_hours}h interval</div>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap tabular-nums">
                     <LegVolume exchange={opp.exchange_a} symbol={opp.symbol} />
                   </TableCell>
                   <TableCell>
                     <div>{opp.exchange_b}: {opp.exchange_b_rate_bps.toFixed(2)} bps</div>
                     <div className="text-xs text-muted-foreground">{opp.exchange_b_interval_hours}h interval</div>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap tabular-nums">
                     <LegVolume exchange={opp.exchange_b} symbol={opp.symbol} />
                   </TableCell>
                   <TableCell
