@@ -449,6 +449,36 @@ export type Database = {
           win_rate?: number;
         };
       };
+      opportunity_screens: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          // Null means the criterion is not tested — not a threshold of zero.
+          max_abs_basis_bps: number | null;
+          min_daily_volume: number | null;
+          min_spread_bps: number | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          max_abs_basis_bps?: number | null;
+          min_daily_volume?: number | null;
+          min_spread_bps?: number | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          max_abs_basis_bps?: number | null;
+          min_daily_volume?: number | null;
+          min_spread_bps?: number | null;
+          created_at?: string;
+        };
+      };
       saved_reports: {
         Row: {
           id: string;
@@ -600,6 +630,8 @@ export type PolymarketEquity = Database["public"]["Tables"]["polymarket_equity"]
 export type PolymarketPosition = Database["public"]["Tables"]["polymarket_positions"]["Row"];
 export type PolymarketSymbolPnl = Database["public"]["Tables"]["polymarket_symbol_pnl"]["Row"];
 export type BasisPair = Database["public"]["Tables"]["basis_pairs"]["Row"];
+export type OpportunityScreen =
+  Database["public"]["Tables"]["opportunity_screens"]["Row"];
 export type FundAccountEquity =
   Database["public"]["Tables"]["fund_account_equity"]["Row"];
 

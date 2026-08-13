@@ -19,6 +19,7 @@ import { useVolumes } from "@/lib/hooks/use-volumes";
 import { OpportunityStatsHeader } from "./opportunity-stats";
 import { OpportunityTable } from "./opportunity-table";
 import { TradeableBlock } from "./tradeable-block";
+import { ScreenPresets } from "./screen-presets";
 import type { ScreenThresholds } from "@/lib/opportunity-screen";
 import { FundingRatesTable } from "./funding-rates-table";
 import { OpportunitySpreadModal } from "./opportunity-spread-modal";
@@ -243,6 +244,20 @@ export function OpportunityContent() {
               min="0"
             />
           </div>
+        </div>
+
+        <div className="mt-3">
+          <ScreenPresets
+            current={thresholds}
+            onApply={(next) => {
+              // Presets store volume in USD; the field is in millions.
+              setMaxBasisInput(next.maxAbsBasisBps === null ? "" : String(next.maxAbsBasisBps));
+              setMinVolumeMInput(
+                next.minDailyVolume === null ? "" : String(next.minDailyVolume / 1e6),
+              );
+              setMinSpreadInput(next.minSpreadBps === null ? "" : String(next.minSpreadBps));
+            }}
+          />
         </div>
 
         <TabsContent value="opportunities" className="mt-4">
