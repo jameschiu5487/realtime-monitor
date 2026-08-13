@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { useOpportunitySSE } from "@/lib/hooks/use-opportunity-sse";
+import { useVolumes } from "@/lib/hooks/use-volumes";
 import { OpportunityStatsHeader } from "./opportunity-stats";
 import { OpportunityTable } from "./opportunity-table";
 import { FundingRatesTable } from "./funding-rates-table";
@@ -66,6 +67,10 @@ export function OpportunityContent() {
       }))
       .sort((a, b) => (b.net_profit_bps ?? 0) - (a.net_profit_bps ?? 0));
   }, [opportunities, selectedExchanges, costBps]);
+
+  // Volume is pulled for the rows actually on screen, not the full opportunity
+  // set — the exchange filter usually cuts this down by an order of magnitude.
+  const { volumes } = useVolumes(filteredOpportunities);
 
   // Calculate filtered stats
   const filteredStats = useMemo((): OpportunityStats | null => {
@@ -164,6 +169,7 @@ export function OpportunityContent() {
         <TabsContent value="opportunities" className="mt-4">
           <OpportunityTable
             opportunities={filteredOpportunities}
+            volumes={volumes}
             onSymbolClick={(symbol, exchangeA, exchangeB) => {
               setSelectedSymbol(symbol);
               setSelectedExchangeA(exchangeA);

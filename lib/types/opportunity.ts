@@ -44,6 +44,14 @@ export interface Opportunity {
   total_spread_cost_bps: number | null;
   net_profit_bps: number | null;
 
+  /**
+   * Current price gap between the two legs, (mark_a - mark_b) / mark_b in bps.
+   * Positive means exchange A trades above exchange B.
+   */
+  basis_bps: number | null;
+  exchange_a_mark_price: number | null;
+  exchange_b_mark_price: number | null;
+
   detected_at: string;
 }
 

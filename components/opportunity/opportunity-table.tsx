@@ -15,16 +15,19 @@ import {
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Opportunity, OpportunityType, Exchange } from "@/lib/types/opportunity";
+import { volumeKey, type VolumeEntry } from "@/lib/services/volume-fetcher";
 
 interface OpportunityTableProps {
   opportunities: Opportunity[];
+  /** Estimated daily volume keyed by `${exchange}:${symbol}`; fills in progressively. */
+  volumes?: Record<string, VolumeEntry>;
   onSymbolClick?: (symbol: string, exchangeA: Exchange, exchangeB: Exchange) => void;
 }
 
-type SortKey = 'symbol' | 'type' | 'rate_spread_bps' | 'net_profit_bps' | 'time_to_funding_a_secs' | 'time_to_funding_b_secs' | 'annualized_return_pct';
+type SortKey = 'symbol' | 'type' | 'rate_spread_bps' | 'net_profit_bps' | 'time_to_funding_a_secs' | 'time_to_funding_b_secs' | 'annualized_return_pct' | 'basis_bps';
 type SortDirection = 'asc' | 'desc';
 
-export function OpportunityTable({ opportunities, onSymbolClick }: OpportunityTableProps) {
+export function OpportunityTable({ opportunities, volumes, onSymbolClick }: OpportunityTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('net_profit_bps');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [filter, setFilter] = useState<'all' | OpportunityType>('all');
@@ -61,6 +64,11 @@ export function OpportunityTable({ opportunities, onSymbolClick }: OpportunityTa
           aVal = a.net_profit_bps ?? a.rate_spread_bps;
           bVal = b.net_profit_bps ?? b.rate_spread_bps;
           break;
+        case 'basis_bps':
+          // Sort on magnitude — a -30 bps gap is as notable as +30.
+          aVal = a.basis_bps === null ? -Infinity : Math.abs(a.basis_bps);
+          bVal = b.basis_bps === null ? -Infinity : Math.abs(b.basis_bps);
+          break;
         default:
           aVal = a[sortKey] as number;
           bVal = b[sortKey] as number;
@@ -75,6 +83,41 @@ export function OpportunityTable({ opportunities, onSymbolClick }: OpportunityTa
   }, [opportunities, sortKey, sortDirection, filter]);
 
   const formatBps = (bps: number | null) => bps !== null ? bps.toFixed(2) : '-';
+
+  const formatUsd = (value: number) => {
+    if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+    if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
+    if (value >= 1e3) return `$${(value / 1e3).toFixed(0)}K`;
+    return `$${value.toFixed(0)}`;
+  };
+
+  // Estimated daily volume for one leg, shown under that leg's funding rate.
+  const LegVolume = ({ exchange, symbol }: { exchange: Exchange; symbol: string }) => {
+    const entry = volumes?.[volumeKey(exchange, symbol)];
+    if (!entry) {
+      return <div className="text-xs text-muted-foreground/50">vol —</div>;
+    }
+    // Fewer than 4 completed hours means a freshly listed or thin market, so
+    // the extrapolation rests on less data than usual — flag it rather than
+    // presenting it as equally solid.
+    const partial = entry.hoursUsed < 4;
+    return (
+      <div
+        className="text-xs text-muted-foreground"
+        title={`${formatUsd(entry.quoteVolumeWindow)} over the last ${entry.hoursUsed}h, scaled to 24h`}
+      >
+        vol {formatUsd(entry.estimatedDailyVolume)}/d{partial ? '*' : ''}
+      </div>
+    );
+  };
+
+  const getBasisColor = (bps: number | null) => {
+    if (bps === null) return 'text-muted-foreground';
+    const magnitude = Math.abs(bps);
+    if (magnitude >= 20) return 'text-orange-500';
+    if (magnitude >= 5) return 'text-yellow-500';
+    return 'text-muted-foreground';
+  };
   const formatTime = (secs: number) => {
     if (secs < 0) return 'Passed';
     const mins = Math.floor(secs / 60);
@@ -162,6 +205,7 @@ export function OpportunityTable({ opportunities, onSymbolClick }: OpportunityTa
                 <SortableHeader label="Type" sortKeyVal="type" />
                 <TableHead>Exchange A</TableHead>
                 <TableHead>Exchange B</TableHead>
+                <SortableHeader label="Basis (bps)" sortKeyVal="basis_bps" />
                 <SortableHeader label="Spread (bps)" sortKeyVal="rate_spread_bps" />
                 <TableHead>Cost (bps)</TableHead>
                 <SortableHeader label="Net Profit (bps)" sortKeyVal="net_profit_bps" />
@@ -200,10 +244,24 @@ export function OpportunityTable({ opportunities, onSymbolClick }: OpportunityTa
                   <TableCell>
                     <div>{opp.exchange_a}: {opp.exchange_a_rate_bps.toFixed(2)} bps</div>
                     <div className="text-xs text-muted-foreground">{opp.exchange_a_interval_hours}h interval</div>
+                    <LegVolume exchange={opp.exchange_a} symbol={opp.symbol} />
                   </TableCell>
                   <TableCell>
                     <div>{opp.exchange_b}: {opp.exchange_b_rate_bps.toFixed(2)} bps</div>
                     <div className="text-xs text-muted-foreground">{opp.exchange_b_interval_hours}h interval</div>
+                    <LegVolume exchange={opp.exchange_b} symbol={opp.symbol} />
+                  </TableCell>
+                  <TableCell
+                    className={cn("font-medium", getBasisColor(opp.basis_bps))}
+                    title={
+                      opp.exchange_a_mark_price !== null && opp.exchange_b_mark_price !== null
+                        ? `${opp.exchange_a} ${opp.exchange_a_mark_price} vs ${opp.exchange_b} ${opp.exchange_b_mark_price}`
+                        : undefined
+                    }
+                  >
+                    {opp.basis_bps === null
+                      ? '-'
+                      : `${opp.basis_bps > 0 ? '+' : ''}${opp.basis_bps.toFixed(2)}`}
                   </TableCell>
                   <TableCell className="text-blue-500 font-medium">
                     {formatBps(opp.rate_spread_bps)}

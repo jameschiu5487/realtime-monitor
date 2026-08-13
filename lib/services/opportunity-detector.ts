@@ -108,6 +108,15 @@ export function detectOpportunities(fundingRates: CombinedFundingRate[]): Opport
 
       if (effectiveSpread < MIN_RATE_SPREAD_BPS) continue;
 
+      // Current price gap between the two legs. Both mark prices come from the
+      // funding snapshots that are already fetched, so this costs no extra call.
+      const markA = snapshotA.mark_price;
+      const markB = snapshotB.mark_price;
+      const basisBps =
+        Number.isFinite(markA) && Number.isFinite(markB) && markA > 0 && markB > 0
+          ? ((markA - markB) / markB) * 10000
+          : null;
+
       // Calculate annualized return based on the shorter interval
       const effectiveIntervalHours = Math.min(snapshotA.funding_interval_hours, snapshotB.funding_interval_hours);
       const periodsPerYear = (365 * 24) / effectiveIntervalHours;
@@ -138,6 +147,9 @@ export function detectOpportunities(fundingRates: CombinedFundingRate[]): Opport
         exchange_b_spread_bps: null,
         total_spread_cost_bps: null,
         net_profit_bps: effectiveSpread, // Without spread cost, net = gross
+        basis_bps: basisBps,
+        exchange_a_mark_price: Number.isFinite(markA) ? markA : null,
+        exchange_b_mark_price: Number.isFinite(markB) ? markB : null,
         detected_at: new Date().toISOString(),
       });
     }

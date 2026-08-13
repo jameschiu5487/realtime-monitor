@@ -1,21 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Exchange } from "@/lib/types/opportunity";
 import { getKlineConfig } from "@/lib/kline-config";
+import { toExchangeSymbol as formatExchangeSymbol } from "@/lib/exchange-symbols";
 
 export const runtime = "edge";
 export const preferredRegion = ["sin1", "hkg1", "kix1"];
-
-function formatExchangeSymbol(symbol: string, exchange: Exchange): string {
-  const base = symbol.replace(/USDT$/i, "");
-  switch (exchange) {
-    case "BingX":
-      return `${base}-USDT`;
-    case "Gate":
-      return `${base}_USDT`;
-    default:
-      return symbol.toUpperCase();
-  }
-}
 
 function getExchangeInterval(exchange: Exchange, intervalMinutes: number): string {
   switch (exchange) {
