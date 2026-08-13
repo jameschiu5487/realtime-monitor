@@ -23,6 +23,10 @@ export interface EquityCurveDataPoint {
   equity: number;
 }
 
+// Recharts doesn't export the chart-event state type from its public entrypoint.
+// Only activeLabel is read here, so a structural subset is enough.
+type ChartMouseState = { activeLabel?: string } | null | undefined;
+
 interface EquityCurveWithBrushProps {
   data: EquityCurveDataPoint[];
   onRangeChange?: (startTime: Date, endTime: Date) => void;
@@ -66,7 +70,7 @@ export function EquityCurveWithBrush({
   const yMin = Math.floor(minValue - padding);
   const yMax = Math.ceil(maxValue + padding);
 
-  const handleMouseDown = useCallback((e: any) => {
+  const handleMouseDown = useCallback((e: ChartMouseState) => {
     if (e && e.activeLabel) {
       setRefAreaLeft(e.activeLabel);
       setRefAreaRight(e.activeLabel);
@@ -74,7 +78,7 @@ export function EquityCurveWithBrush({
     }
   }, []);
 
-  const handleMouseMove = useCallback((e: any) => {
+  const handleMouseMove = useCallback((e: ChartMouseState) => {
     if (isSelecting && e && e.activeLabel) {
       setRefAreaRight(e.activeLabel);
     }

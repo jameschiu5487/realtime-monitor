@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { untypedWrites } from "@/lib/supabase/untyped";
 import { ArrowLeftRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -372,7 +373,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
     setSaving(true);
     try {
       const supabase = createClient();
-      const { data, error } = await (supabase as any)
+      const { data, error } = await untypedWrites(supabase)
         .from("basis_pairs")
         .insert({
           leg1_exchange: leg1.exchange,
@@ -404,7 +405,7 @@ export function BasisMonitorContent({ initialPairs }: BasisMonitorContentProps) 
   const deletePair = async (id: string) => {
     try {
       const supabase = createClient();
-      const { error } = await (supabase as any).from("basis_pairs").delete().eq("id", id);
+      const { error } = await supabase.from("basis_pairs").delete().eq("id", id);
       if (error) {
         toast.error(`刪除失敗：${error.message}`);
         return;

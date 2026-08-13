@@ -89,7 +89,7 @@ export async function POST(request: Request) {
   if (!enabledIds.length) return NextResponse.json({ sent: 0 });
 
   // Look up share_ratio per user for trade notifications
-  let ratioMap = new Map<string, number>();
+  const ratioMap = new Map<string, number>();
   if (strategy_id && trade_data && type === "trade_every") {
     const { data: accessRows } = await supabase
       .from("user_strategy_access")

@@ -311,7 +311,7 @@ export function CombinedStrategyContent({
   }, []);
 
   // Fetch data for all runs in parallel (per-run queries to avoid timeout)
-  const fetchAllRunsData = useCallback(async <T,>(
+  const fetchAllRunsData = useCallback(async <T extends { ts: string }>(
     supabase: ReturnType<typeof createClient>,
     table: string,
     ids: string[],
@@ -320,7 +320,7 @@ export function CombinedStrategyContent({
       ids.map(id => fetchRunData<T>(supabase, table, id))
     );
     return results.flat().sort(
-      (a: any, b: any) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
+      (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
     );
   }, [fetchRunData]);
 

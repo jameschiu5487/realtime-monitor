@@ -219,7 +219,7 @@ function calculateNextFundingTime(intervalHours: number): Date {
     fundingTimes.push(h);
   }
 
-  let nextFundingHour = fundingTimes.find(h => h > utcHours || (h === utcHours && utcMinutes < 0));
+  const nextFundingHour = fundingTimes.find(h => h > utcHours || (h === utcHours && utcMinutes < 0));
 
   const result = new Date(now);
   result.setUTCMinutes(0, 0, 0);

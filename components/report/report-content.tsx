@@ -25,6 +25,7 @@ import {
 import { PerformanceStats } from "@/components/charts/performance-stats";
 import { DatePickerField } from "@/components/report/date-picker-field";
 import { createClient } from "@/lib/supabase/client";
+import { untypedWrites } from "@/lib/supabase/untyped";
 import {
   mergeStrategyEquity,
   aggregateTotalEquity,
@@ -304,12 +305,11 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
   // Fetch saved reports on mount
   useEffect(() => {
     const supabase = createClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase as any)
+    supabase
       .from("saved_reports")
       .select("*")
       .order("created_at", { ascending: false })
-      .then(({ data }: { data: SavedReport[] | null }) => {
+      .then(({ data }) => {
         if (data) setSavedReports(data);
       });
   }, []);
@@ -549,9 +549,8 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
       const compressedBlob = await new Response(stream).blob();
 
       // DB insert + Storage upload in parallel
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const [dbResult, storageResult] = await Promise.all([
-        (supabase as any)
+        untypedWrites(supabase)
           .from("saved_reports")
           .insert({
             id: reportId,
@@ -575,7 +574,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
 
       if (dbResult.error) throw dbResult.error;
       if (storageResult.error) {
-        await (supabase as any).from("saved_reports").delete().eq("id", reportId);
+        await supabase.from("saved_reports").delete().eq("id", reportId);
         throw storageResult.error;
       }
 

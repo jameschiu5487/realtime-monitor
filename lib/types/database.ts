@@ -449,6 +449,50 @@ export type Database = {
           win_rate?: number;
         };
       };
+      saved_reports: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          start_date: string;
+          end_date: string;
+          selected_strategy_ids: string[];
+          forward_fill_ids: string[];
+          max_nav_change: number;
+          notes: string;
+          storage_user_id: string;
+          storage_report_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          start_date: string;
+          end_date: string;
+          selected_strategy_ids: string[];
+          forward_fill_ids?: string[];
+          max_nav_change?: number;
+          notes?: string;
+          storage_user_id?: string;
+          storage_report_id?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          start_date?: string;
+          end_date?: string;
+          selected_strategy_ids?: string[];
+          forward_fill_ids?: string[];
+          max_nav_change?: number;
+          notes?: string;
+          storage_user_id?: string;
+          storage_report_id?: string;
+          created_at?: string;
+        };
+      };
       basis_pairs: {
         Row: {
           id: string;

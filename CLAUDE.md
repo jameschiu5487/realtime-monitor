@@ -28,14 +28,33 @@ Guidance for Claude Code in this repository.
 5. 使用者偏好：以繁體中文溝通；改完 code 經確認 build 通過後 commit 並 push
    （歷次明示授權）；但 DB schema 變更、刪資料、對外發送類操作先確認。
 
+## 開發流程鐵律
+
+1. **改完 code 一律跑 `pnpm verify`**（= `lint` → `typecheck` → `build`，任一關失敗
+   就中止）。三關全綠才算「build 通過」，才能 commit。只跑 `pnpm build` 不算 ——
+   `next build` 不會擋 type error 以外的 lint 問題。
+2. **lint warning 是棘輪**：`pnpm lint` 帶 `--max-warnings 18`（2026-08-13 的 baseline）。
+   這個數字只能往下調。新程式碼不該產生新 warning；真的要放寬必須先問使用者。
+3. **每次 commit 後審查 CLAUDE.md**：`.claude/hooks/post-commit-claude-md-review.sh`
+   是 PostToolUse hook，偵測到 HEAD 真的前進才觸發，會要求依
+   `.claude/rules/claude-md-review.md` 判斷 CLAUDE.md 要不要更新。
+   **預設答案是「不用改」** —— 只有「踩過且會再踩的坑 / 新硬規則 / 新子系統 /
+   schema 結構變動 / 技術棧與指令變更」值得寫進去。git history 查得到的不要寫。
+4. **型別逃生口要具名**：需要繞過 Supabase 產生型別時走 `lib/supabase/untyped.ts`
+   的 `untypedWrites()`，不要就地寫 `as any`。那支檔案裡記了為什麼不能直接補
+   `Relationships`（補了會把全 repo 的動態 `.from(table: string)` 全部弄壞）。
+
 ## Stack
 
-Next.js 15 (App Router, Turbopack) / React 19 / TypeScript strict / Tailwind v4
-(CSS-based config, no tailwind.config.js) / shadcn/ui (new-york, lucide-react) /
-pnpm / Supabase (auth + DB + storage) / Vercel 部署 / PWA + Web Push。
+Next.js 16 (App Router, Turbopack；middleware 已改名為根目錄的 `proxy.ts`) /
+React 19 / TypeScript strict / Tailwind v4 (CSS-based config, no tailwind.config.js) /
+shadcn/ui (new-york, lucide-react) / pnpm / Supabase (auth + DB + storage) /
+Vercel 部署 / PWA + Web Push。**沒有測試框架**，驗證靠 `pnpm verify` + 手動實測。
 
 ```bash
-pnpm dev / pnpm build / pnpm lint
+pnpm dev
+pnpm verify                         # lint + typecheck + build，commit 前跑這個
+pnpm lint / pnpm typecheck / pnpm build   # 個別執行
 npx shadcn@latest add <component>   # UI 元件加到 @/components/ui
 ```
 
@@ -54,7 +73,8 @@ npx shadcn@latest add <component>   # UI 元件加到 @/components/ui
 
 ## Supabase Schema（project: kszydawqmcpsvozzjpyh）
 
-Auth：email/password，middleware.ts 保護路由，session 存 cookies。
+Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middleware 改成這個
+檔名），session 存 cookies。
 
 核心表（欄位細節不確定時用 `list_tables` 查，別猜）：
 
@@ -78,3 +98,42 @@ Auth：email/password，middleware.ts 保護路由，session 存 cookies。
 ## 子系統文件
 
 - 推播通知全系統（trigger、hedge 配對、share_ratio、驗證方法）：`docs/notifications.md`
+
+<!-- code-review-graph MCP tools -->
+## MCP Tools: code-review-graph
+
+**IMPORTANT: This project has a knowledge graph. ALWAYS use the
+code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
+the codebase.** The graph is faster, cheaper (fewer tokens), and gives
+you structural context (callers, dependents, test coverage) that file
+scanning cannot.
+
+### When to use graph tools FIRST
+
+- **Exploring code**: `semantic_search_nodes_tool` or `query_graph_tool` instead of Grep
+- **Understanding impact**: `get_impact_radius_tool` instead of manually tracing imports
+- **Code review**: `detect_changes_tool` + `get_review_context_tool` instead of reading entire files
+- **Finding relationships**: `query_graph_tool` with callers_of/callees_of/imports_of/tests_for
+- **Architecture questions**: `get_architecture_overview_tool` + `list_communities_tool`
+
+Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
+
+### Key Tools
+
+| Tool | Use when |
+| ------ | ---------- |
+| `detect_changes_tool` | Reviewing code changes — gives risk-scored analysis |
+| `get_review_context_tool` | Need source snippets for review — token-efficient |
+| `get_impact_radius_tool` | Understanding blast radius of a change |
+| `get_affected_flows_tool` | Finding which execution paths are impacted |
+| `query_graph_tool` | Tracing callers, callees, imports, tests, dependencies |
+| `semantic_search_nodes_tool` | Finding functions/classes by name or keyword |
+| `get_architecture_overview_tool` | Understanding high-level codebase structure |
+| `refactor_tool` | Planning renames, finding dead code |
+
+### Workflow
+
+1. The graph auto-updates on file changes (via hooks).
+2. Use `detect_changes_tool` for code review.
+3. Use `get_affected_flows_tool` to understand impact.
+4. Use `query_graph_tool` pattern="tests_for" to check coverage.
