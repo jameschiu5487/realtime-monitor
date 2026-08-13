@@ -127,6 +127,15 @@ export async function POST(request: Request) {
         const status = (err as { statusCode?: number }).statusCode;
         if (status === 404 || status === 410) {
           staleIds.push(sub.id);
+        } else {
+          // Anything else used to vanish here, so a subscription that failed
+          // every single send looked identical to one that was never tried.
+          // Endpoint is truncated: the full URL is a bearer-equivalent token.
+          console.error("[notifications/send] push failed", {
+            status: status ?? "none",
+            endpoint: sub.endpoint.slice(0, 40),
+            message: err instanceof Error ? err.message : String(err),
+          });
         }
       }
     })
