@@ -17,7 +17,7 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 import { useOpportunitySSE } from "@/lib/hooks/use-opportunity-sse";
 import { useVolumes } from "@/lib/hooks/use-volumes";
 import { OpportunityStatsHeader } from "./opportunity-stats";
-import { OpportunityTable } from "./opportunity-table";
+import { OpportunityTable, type ScreenThresholds } from "./opportunity-table";
 import { FundingRatesTable } from "./funding-rates-table";
 import { OpportunitySpreadModal } from "./opportunity-spread-modal";
 import type { Exchange, OpportunityStats } from "@/lib/types/opportunity";
@@ -29,6 +29,11 @@ export function OpportunityContent() {
   const [activeTab, setActiveTab] = useState<'opportunities' | 'funding-rates'>('opportunities');
   const [costBpsInput, setCostBpsInput] = useState<string>("20"); // String for input
   const costBps = parseInt(costBpsInput) || 0; // Parse for calculations
+  // Screen thresholds are kept as strings so the fields can be cleared; an
+  // empty field means "don't test this criterion" rather than "threshold 0".
+  const [maxBasisInput, setMaxBasisInput] = useState<string>("");
+  const [minVolumeMInput, setMinVolumeMInput] = useState<string>("");
+  const [minSpreadInput, setMinSpreadInput] = useState<string>("");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedExchangeA, setSelectedExchangeA] = useState<Exchange>('Binance');
   const [selectedExchangeB, setSelectedExchangeB] = useState<Exchange>('Bybit');
@@ -71,6 +76,22 @@ export function OpportunityContent() {
   // Volume is pulled for the rows actually on screen, not the full opportunity
   // set — the exchange filter usually cuts this down by an order of magnitude.
   const { volumes } = useVolumes(filteredOpportunities);
+
+  const thresholds = useMemo((): ScreenThresholds => {
+    const parse = (raw: string) => {
+      const trimmed = raw.trim();
+      if (trimmed === "") return null;
+      const value = Number(trimmed);
+      return Number.isFinite(value) ? value : null;
+    };
+    const volumeMillions = parse(minVolumeMInput);
+    return {
+      maxAbsBasisBps: parse(maxBasisInput),
+      // Entered in millions because typing 10 is nicer than typing 10000000.
+      minDailyVolume: volumeMillions === null ? null : volumeMillions * 1e6,
+      minSpreadBps: parse(minSpreadInput),
+    };
+  }, [maxBasisInput, minVolumeMInput, minSpreadInput]);
 
   // Calculate filtered stats
   const filteredStats = useMemo((): OpportunityStats | null => {
@@ -140,7 +161,7 @@ export function OpportunityContent() {
 
       {/* Tabs with Cost Input */}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <TabsList>
             <TabsTrigger value="opportunities">
               Opportunities ({filteredOpportunities.length})
@@ -164,12 +185,57 @@ export function OpportunityContent() {
               min="0"
             />
           </div>
+
+          {/* Screen: leave a field blank to skip that criterion entirely. */}
+          <div className="flex items-center gap-2 border-l pl-4">
+            <span className="text-sm text-muted-foreground whitespace-nowrap">Screen:</span>
+            <Label htmlFor="max-basis-input" className="text-sm text-muted-foreground whitespace-nowrap">
+              |Basis| ≤
+            </Label>
+            <Input
+              id="max-basis-input"
+              type="number"
+              value={maxBasisInput}
+              onChange={(e) => setMaxBasisInput(e.target.value)}
+              className="w-20 h-8"
+              placeholder="bps"
+              step="1"
+              min="0"
+            />
+            <Label htmlFor="min-volume-input" className="text-sm text-muted-foreground whitespace-nowrap">
+              Vol ≥
+            </Label>
+            <Input
+              id="min-volume-input"
+              type="number"
+              value={minVolumeMInput}
+              onChange={(e) => setMinVolumeMInput(e.target.value)}
+              className="w-20 h-8"
+              placeholder="$M"
+              step="1"
+              min="0"
+            />
+            <Label htmlFor="min-spread-input" className="text-sm text-muted-foreground whitespace-nowrap">
+              Spread ≥
+            </Label>
+            <Input
+              id="min-spread-input"
+              type="number"
+              value={minSpreadInput}
+              onChange={(e) => setMinSpreadInput(e.target.value)}
+              className="w-20 h-8"
+              placeholder="bps"
+              step="1"
+              min="0"
+            />
+          </div>
         </div>
 
         <TabsContent value="opportunities" className="mt-4">
           <OpportunityTable
             opportunities={filteredOpportunities}
             volumes={volumes}
+            thresholds={thresholds}
             onSymbolClick={(symbol, exchangeA, exchangeB) => {
               setSelectedSymbol(symbol);
               setSelectedExchangeA(exchangeA);

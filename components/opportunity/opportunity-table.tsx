@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,17 +17,52 @@ import { cn } from "@/lib/utils";
 import type { Opportunity, OpportunityType, Exchange } from "@/lib/types/opportunity";
 import { volumeKey, type VolumeEntry } from "@/lib/services/volume-fetcher";
 
+/**
+ * Screening thresholds. A null field means "don't test this", so the marker
+ * only lights up against criteria the user actually set.
+ */
+export interface ScreenThresholds {
+  /** Pass when |basis| is at or below this, in bps. Wide gaps cost you on entry. */
+  maxAbsBasisBps: number | null;
+  /** Pass when BOTH legs clear this estimated daily volume, in USD. */
+  minDailyVolume: number | null;
+  /** Pass when the raw funding rate spread is at or above this, in bps. */
+  minSpreadBps: number | null;
+}
+
+export const EMPTY_THRESHOLDS: ScreenThresholds = {
+  maxAbsBasisBps: null,
+  minDailyVolume: null,
+  minSpreadBps: null,
+};
+
 interface OpportunityTableProps {
   opportunities: Opportunity[];
   /** Estimated daily volume keyed by `${exchange}:${symbol}`; fills in progressively. */
   volumes?: Record<string, VolumeEntry>;
+  thresholds?: ScreenThresholds;
   onSymbolClick?: (symbol: string, exchangeA: Exchange, exchangeB: Exchange) => void;
 }
 
-type SortKey = 'symbol' | 'type' | 'rate_spread_bps' | 'net_profit_bps' | 'time_to_funding_a_secs' | 'time_to_funding_b_secs' | 'annualized_return_pct' | 'basis_bps' | 'volume_a' | 'volume_b';
+type SortKey = 'symbol' | 'type' | 'rate_spread_bps' | 'net_profit_bps' | 'time_to_funding_a_secs' | 'time_to_funding_b_secs' | 'annualized_return_pct' | 'basis_bps' | 'volume_a' | 'volume_b' | 'screen';
 type SortDirection = 'asc' | 'desc';
 
-export function OpportunityTable({ opportunities, volumes, onSymbolClick }: OpportunityTableProps) {
+/** Outcome of screening one row: pass, fail, or "can't tell yet". */
+type ScreenState = 'pass' | 'fail' | 'pending' | 'off';
+
+function formatUsd(value: number): string {
+  if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+  if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
+  if (value >= 1e3) return `$${(value / 1e3).toFixed(0)}K`;
+  return `$${value.toFixed(0)}`;
+}
+
+export function OpportunityTable({
+  opportunities,
+  volumes,
+  thresholds = EMPTY_THRESHOLDS,
+  onSymbolClick,
+}: OpportunityTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('net_profit_bps');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [filter, setFilter] = useState<'all' | OpportunityType>('all');
@@ -40,6 +75,55 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
       setSortDirection('desc');
     }
   };
+
+  const screenRow = useCallback(
+    (opp: Opportunity): { state: ScreenState; reasons: string[] } => {
+      const { maxAbsBasisBps, minDailyVolume, minSpreadBps } = thresholds;
+      if (maxAbsBasisBps === null && minDailyVolume === null && minSpreadBps === null) {
+        return { state: 'off', reasons: [] };
+      }
+
+      const reasons: string[] = [];
+      // Volume arrives after the row does. A row we cannot judge yet is not the
+      // same as one that failed, so it gets its own state instead of a red X.
+      let pending = false;
+
+      if (maxAbsBasisBps !== null) {
+        if (opp.basis_bps === null) {
+          pending = true;
+          reasons.push('basis unavailable');
+        } else if (Math.abs(opp.basis_bps) > maxAbsBasisBps) {
+          reasons.push(`|basis| ${Math.abs(opp.basis_bps).toFixed(1)} > ${maxAbsBasisBps}`);
+        }
+      }
+
+      if (minDailyVolume !== null) {
+        // Both legs must clear it — an arb is only as liquid as its thinner side.
+        for (const [label, exchange] of [
+          ['A', opp.exchange_a],
+          ['B', opp.exchange_b],
+        ] as const) {
+          const entry = volumes?.[volumeKey(exchange, opp.symbol)];
+          if (!entry) {
+            pending = true;
+            reasons.push(`vol ${label} not loaded yet`);
+          } else if (entry.estimatedDailyVolume < minDailyVolume) {
+            reasons.push(
+              `vol ${label} ${formatUsd(entry.estimatedDailyVolume)} < ${formatUsd(minDailyVolume)}`,
+            );
+          }
+        }
+      }
+
+      if (minSpreadBps !== null && opp.rate_spread_bps < minSpreadBps) {
+        reasons.push(`spread ${opp.rate_spread_bps.toFixed(1)} < ${minSpreadBps}`);
+      }
+
+      if (reasons.length === 0) return { state: 'pass', reasons };
+      return { state: pending ? 'pending' : 'fail', reasons };
+    },
+    [thresholds, volumes],
+  );
 
   const sortedOpportunities = useMemo(() => {
     // Volume arrives separately from the opportunity poll, so a row may not
@@ -82,6 +166,12 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
           aVal = volumeFor(a, sortKey === 'volume_a');
           bVal = volumeFor(b, sortKey === 'volume_a');
           break;
+        case 'screen': {
+          const rank = { pass: 2, pending: 1, fail: 0, off: 0 } as const;
+          aVal = rank[screenRow(a).state];
+          bVal = rank[screenRow(b).state];
+          break;
+        }
         default:
           aVal = a[sortKey] as number;
           bVal = b[sortKey] as number;
@@ -93,16 +183,9 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
 
       return sortDirection === 'asc' ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
     });
-  }, [opportunities, sortKey, sortDirection, filter, volumes]);
+  }, [opportunities, sortKey, sortDirection, filter, volumes, screenRow]);
 
   const formatBps = (bps: number | null) => bps !== null ? bps.toFixed(2) : '-';
-
-  const formatUsd = (value: number) => {
-    if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
-    if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
-    if (value >= 1e3) return `$${(value / 1e3).toFixed(0)}K`;
-    return `$${value.toFixed(0)}`;
-  };
 
   // Estimated daily volume for one leg. Its own column rather than a line
   // inside the exchange cell, so it can be sorted on — screening out illiquid
@@ -124,6 +207,32 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
         {formatUsd(entry.estimatedDailyVolume)}
         {partial ? '*' : ''}
       </span>
+    );
+  };
+
+  // Pass/fail marker. The tooltip names every criterion that failed, so a row
+  // that misses by a hair is distinguishable from one that misses by a mile.
+  const ScreenBlock = ({ opp }: { opp: Opportunity }) => {
+    const { state, reasons } = screenRow(opp);
+    if (state === 'off') {
+      return <span className="text-muted-foreground/30" title="No screen set">·</span>;
+    }
+    const style = {
+      pass: 'bg-green-500 border-green-500',
+      fail: 'bg-transparent border-muted-foreground/30',
+      pending: 'bg-transparent border-yellow-500 border-dashed',
+    }[state];
+    const label = {
+      pass: 'Passes the screen',
+      fail: reasons.join('\n'),
+      pending: reasons.join('\n'),
+    }[state];
+    return (
+      <span
+        className={cn('inline-block h-3 w-3 rounded-sm border', style)}
+        title={label}
+        aria-label={state}
+      />
     );
   };
 
@@ -217,6 +326,7 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
           <Table>
             <TableHeader>
               <TableRow>
+                <SortableHeader label="" sortKeyVal="screen" />
                 <SortableHeader label="Symbol" sortKeyVal="symbol" />
                 <SortableHeader label="Type" sortKeyVal="type" />
                 <TableHead>Exchange A</TableHead>
@@ -241,6 +351,9 @@ export function OpportunityTable({ opportunities, volumes, onSymbolClick }: Oppo
                     opp.is_in_entry_window && "bg-yellow-500/5"
                   )}
                 >
+                  <TableCell className="w-6 pr-0">
+                    <ScreenBlock opp={opp} />
+                  </TableCell>
                   <TableCell
                     className="font-medium cursor-pointer hover:text-blue-500"
                     onClick={() => onSymbolClick?.(opp.symbol, opp.exchange_a, opp.exchange_b)}
