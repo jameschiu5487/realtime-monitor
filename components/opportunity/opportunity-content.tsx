@@ -17,7 +17,9 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 import { useOpportunitySSE } from "@/lib/hooks/use-opportunity-sse";
 import { useVolumes } from "@/lib/hooks/use-volumes";
 import { OpportunityStatsHeader } from "./opportunity-stats";
-import { OpportunityTable, type ScreenThresholds } from "./opportunity-table";
+import { OpportunityTable } from "./opportunity-table";
+import { TradeableBlock } from "./tradeable-block";
+import type { ScreenThresholds } from "@/lib/opportunity-screen";
 import { FundingRatesTable } from "./funding-rates-table";
 import { OpportunitySpreadModal } from "./opportunity-spread-modal";
 import type { Exchange, OpportunityStats } from "@/lib/types/opportunity";
@@ -158,6 +160,18 @@ export function OpportunityContent() {
           Refresh
         </Button>
       </div>
+
+      {/* Whatever currently clears the screen, pulled up out of the table */}
+      <TradeableBlock
+        opportunities={filteredOpportunities}
+        volumes={volumes}
+        thresholds={thresholds}
+        onSymbolClick={(symbol, exchangeA, exchangeB) => {
+          setSelectedSymbol(symbol);
+          setSelectedExchangeA(exchangeA);
+          setSelectedExchangeB(exchangeB);
+        }}
+      />
 
       {/* Tabs with Cost Input */}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>

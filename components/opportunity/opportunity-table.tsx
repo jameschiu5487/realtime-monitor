@@ -16,25 +16,12 @@ import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Opportunity, OpportunityType, Exchange } from "@/lib/types/opportunity";
 import { volumeKey, type VolumeEntry } from "@/lib/services/volume-fetcher";
-
-/**
- * Screening thresholds. A null field means "don't test this", so the marker
- * only lights up against criteria the user actually set.
- */
-export interface ScreenThresholds {
-  /** Pass when |basis| is at or below this, in bps. Wide gaps cost you on entry. */
-  maxAbsBasisBps: number | null;
-  /** Pass when BOTH legs clear this estimated daily volume, in USD. */
-  minDailyVolume: number | null;
-  /** Pass when the raw funding rate spread is at or above this, in bps. */
-  minSpreadBps: number | null;
-}
-
-export const EMPTY_THRESHOLDS: ScreenThresholds = {
-  maxAbsBasisBps: null,
-  minDailyVolume: null,
-  minSpreadBps: null,
-};
+import {
+  EMPTY_THRESHOLDS,
+  formatCompactUsd,
+  screenOpportunity,
+  type ScreenThresholds,
+} from "@/lib/opportunity-screen";
 
 interface OpportunityTableProps {
   opportunities: Opportunity[];
@@ -47,15 +34,6 @@ interface OpportunityTableProps {
 type SortKey = 'symbol' | 'type' | 'rate_spread_bps' | 'net_profit_bps' | 'time_to_funding_a_secs' | 'time_to_funding_b_secs' | 'annualized_return_pct' | 'basis_bps' | 'volume_a' | 'volume_b' | 'screen';
 type SortDirection = 'asc' | 'desc';
 
-/** Outcome of screening one row: pass, fail, or "can't tell yet". */
-type ScreenState = 'pass' | 'fail' | 'pending' | 'off';
-
-function formatUsd(value: number): string {
-  if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
-  if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
-  if (value >= 1e3) return `$${(value / 1e3).toFixed(0)}K`;
-  return `$${value.toFixed(0)}`;
-}
 
 export function OpportunityTable({
   opportunities,
@@ -77,51 +55,7 @@ export function OpportunityTable({
   };
 
   const screenRow = useCallback(
-    (opp: Opportunity): { state: ScreenState; reasons: string[] } => {
-      const { maxAbsBasisBps, minDailyVolume, minSpreadBps } = thresholds;
-      if (maxAbsBasisBps === null && minDailyVolume === null && minSpreadBps === null) {
-        return { state: 'off', reasons: [] };
-      }
-
-      const reasons: string[] = [];
-      // Volume arrives after the row does. A row we cannot judge yet is not the
-      // same as one that failed, so it gets its own state instead of a red X.
-      let pending = false;
-
-      if (maxAbsBasisBps !== null) {
-        if (opp.basis_bps === null) {
-          pending = true;
-          reasons.push('basis unavailable');
-        } else if (Math.abs(opp.basis_bps) > maxAbsBasisBps) {
-          reasons.push(`|basis| ${Math.abs(opp.basis_bps).toFixed(1)} > ${maxAbsBasisBps}`);
-        }
-      }
-
-      if (minDailyVolume !== null) {
-        // Both legs must clear it — an arb is only as liquid as its thinner side.
-        for (const [label, exchange] of [
-          ['A', opp.exchange_a],
-          ['B', opp.exchange_b],
-        ] as const) {
-          const entry = volumes?.[volumeKey(exchange, opp.symbol)];
-          if (!entry) {
-            pending = true;
-            reasons.push(`vol ${label} not loaded yet`);
-          } else if (entry.estimatedDailyVolume < minDailyVolume) {
-            reasons.push(
-              `vol ${label} ${formatUsd(entry.estimatedDailyVolume)} < ${formatUsd(minDailyVolume)}`,
-            );
-          }
-        }
-      }
-
-      if (minSpreadBps !== null && opp.rate_spread_bps < minSpreadBps) {
-        reasons.push(`spread ${opp.rate_spread_bps.toFixed(1)} < ${minSpreadBps}`);
-      }
-
-      if (reasons.length === 0) return { state: 'pass', reasons };
-      return { state: pending ? 'pending' : 'fail', reasons };
-    },
+    (opp: Opportunity) => screenOpportunity(opp, volumes, thresholds),
     [thresholds, volumes],
   );
 
@@ -202,9 +136,9 @@ export function OpportunityTable({
     return (
       <span
         className={cn(partial ? "text-yellow-500" : "text-muted-foreground")}
-        title={`${formatUsd(entry.quoteVolumeWindow)} over the last ${entry.hoursUsed}h, scaled to 24h`}
+        title={`${formatCompactUsd(entry.quoteVolumeWindow)} over the last ${entry.hoursUsed}h, scaled to 24h`}
       >
-        {formatUsd(entry.estimatedDailyVolume)}
+        {formatCompactUsd(entry.estimatedDailyVolume)}
         {partial ? '*' : ''}
       </span>
     );
