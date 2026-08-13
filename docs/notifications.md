@@ -1,6 +1,6 @@
 # Push Notification 系統架構
 
-最後更新：2026-07-03。改動任何一段後請更新本檔（見底部「維護規則」）。
+最後更新：2026-08-13。改動任何一段後請更新本檔（見底部「維護規則」）。
 
 ## 全貌
 
@@ -26,7 +26,8 @@ NAV 劇變 ───────────────────────
 | `app/api/notifications/send/route.ts` | 通用發送端點（trade_every / nav_change / report）|
 | `app/api/notifications/trade-delayed/route.ts` | combined trade 的 hedge 配對邏輯 |
 | `app/api/notifications/report-shared/route.ts` | report 分享通知 |
-| `public/sw.js` | Service Worker，處理 push 與 notificationclick |
+| `app/api/notifications/vapid-key/route.ts` | 把 VAPID 公鑰給 Service Worker（SW 讀不到 build-time env）|
+| `public/sw.js` | Service Worker：push、notificationclick、pushsubscriptionchange |
 
 ## 業務規則（改 code 前必讀）
 
@@ -40,6 +41,28 @@ NAV 劇變 ───────────────────────
 4. **點擊導向**：trade 與 combined trade 通知點擊後導向
    `/strategies/{strategyId}/runs/{runId}`。
 5. **失效訂閱清理**：push 發送收到 404/410 → 從 push_subscriptions 刪除該筆。
+   其他錯誤不刪，但會 `console.error`（以前是整個吞掉，導致「每次都發不出去的訂閱」
+   跟「根本沒被嘗試的訂閱」在任何地方都看起來一樣）。
+6. **訂閱自動復原**：瀏覽器會自己丟掉訂閱（金鑰輪換、iOS 回收久未開啟的 PWA 儲存）。
+   兩道防線：`sw.js` 的 `pushsubscriptionchange` 重新訂閱並回報；
+   `use-push-notification.ts` 在「permission 仍為 granted 但沒有訂閱」時靜默重訂。
+   **靜默重訂必須檢查 localStorage 的 `push-opt-out` 旗標** —— 使用者手動關閉通知時
+   permission 仍然是 granted，少了這個旗標會在下次開頁面把他剛關掉的通知又打開。
+
+## 除錯陷阱（都真的白繞過，別再繞第二次）
+
+1. **設定頁的推播開關讀的是瀏覽器本地 `pushManager.getSubscription()`，不是 DB。**
+   開關自己變灰 ≠ `push_subscriptions` 被刪，也跟 `notification_preferences` 無關
+   （那是另外三個開關）。查「開關變灰」要往瀏覽器端查，不是往 DB 查。
+2. **`combined_trades` 的 webhook 在 `net._http_response` 裡必然顯示 5 秒逾時，這是設計如此。**
+   `/api/notifications/trade-delayed` 要等 10 秒配對 hedge，而 pg_net 的逾時是 5 秒。
+   pg_net 放棄等待不代表 Vercel 沒跑完，通知仍會送出。
+   判準：逾時筆數 / 200 筆數的比例會貼近 combined_trades / trades 的比例
+   （2026-08-13 實測 20:40 對 62:126）。**看到這批逾時不要當成故障去追。**
+   代價是 trigger 分不出成功失敗，真的故障會被埋在這些雜訊裡。
+3. **同一支裝置在 `push_subscriptions` 累積多筆是正常的。**
+   upsert 的衝突鍵是 `(user_id, endpoint)`，而重新訂閱會拿到新的 endpoint，
+   所以每次復原都是新增一筆。舊筆要等 Apple 回 410 才會被清掉。
 
 ## DB 端（Supabase project: kszydawqmcpsvozzjpyh）
 
