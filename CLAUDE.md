@@ -102,6 +102,10 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   欄位順序、排序方向、成交量單位都不一樣（BingX 只給 base、BitMart 給合約張數），
   解析錯不會噴錯、只會讓數字差 1000 倍。那裡記了每一家已實測驗證的對照與交叉驗算法。
   canonical↔native 符號轉換一律用 `lib/exchange-symbols.ts`，不要各自重寫。
+- **兩腿價差一律算 `(B − A) / A`**（opportunity 家族：spread modal 的歷史與即時兩條
+  路徑、positions 的 entry spread、opportunity 表的 basis 欄）。直覺容易寫成
+  `(A − B) / B`，寫反了不會壞、只會讓同一筆資料在表格與圖表差一個負號 —— 已經發生過。
+  例外：`lib/basis.ts` 是 basis-monitor 子系統，legs 由使用者自選，用 `(leg1 − leg2) / leg2`。
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
