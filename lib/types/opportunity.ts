@@ -45,8 +45,11 @@ export interface Opportunity {
   net_profit_bps: number | null;
 
   /**
-   * Current price gap between the two legs, (mark_a - mark_b) / mark_b in bps.
-   * Positive means exchange A trades above exchange B.
+   * Current price gap between the two legs, (mark_b - mark_a) / mark_a in bps.
+   * Positive means exchange B trades above exchange A.
+   *
+   * Same orientation as the spread chart in opportunity-spread-modal and the
+   * entry spread on the positions page — do not flip it in isolation.
    */
   basis_bps: number | null;
   exchange_a_mark_price: number | null;

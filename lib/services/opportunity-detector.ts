@@ -110,11 +110,16 @@ export function detectOpportunities(fundingRates: CombinedFundingRate[]): Opport
 
       // Current price gap between the two legs. Both mark prices come from the
       // funding snapshots that are already fetched, so this costs no extra call.
+      //
+      // Orientation is (B - A) / A to match the spread chart this row opens
+      // (opportunity-spread-modal, both its historical and live paths) and the
+      // entry spread on the positions page. Flipping it reads as a sign error
+      // when you click through from the table to the chart.
       const markA = snapshotA.mark_price;
       const markB = snapshotB.mark_price;
       const basisBps =
         Number.isFinite(markA) && Number.isFinite(markB) && markA > 0 && markB > 0
-          ? ((markA - markB) / markB) * 10000
+          ? ((markB - markA) / markA) * 10000
           : null;
 
       // Calculate annualized return based on the shorter interval
