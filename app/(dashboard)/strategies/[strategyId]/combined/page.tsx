@@ -5,6 +5,8 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import { CombinedStrategyContent } from "@/components/combined-strategy-content";
+import { CapitalSelector } from "@/components/strategies/capital-selector";
+import { selectCapitalGroup } from "@/lib/capital-groups";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Strategy,
@@ -103,6 +105,7 @@ interface CombinedPageProps {
   }>;
   searchParams: Promise<{
     range?: string;
+    capital?: string;
   }>;
 }
 
@@ -110,7 +113,7 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
   noStore();
 
   const { strategyId } = await params;
-  const { range } = await searchParams;
+  const { range, capital } = await searchParams;
 
   // Determine time filter: default 7 days, or all if range=all
   const isAllRange = range === "all";
@@ -135,7 +138,15 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
     .eq("strategy_id", strategyId)
     .order("start_time", { ascending: true });
 
-  const runs = (allRuns ?? []).filter((r: StrategyRun) => (r.mode as string) === "realtime");
+  const realtimeRuns = (allRuns ?? []).filter(
+    (r: StrategyRun) => (r.mode as string) === "realtime"
+  ) as StrategyRun[];
+
+  // Runs sharing an initial_capital are the same account restarted, one after
+  // another; aggregating across levels mixes incompatible capital bases.
+  const { groups: capitalOptions, selected: selectedCapital, runs, capitalBase } =
+    selectCapitalGroup(realtimeRuns, capital);
+
   const runIds = runs.map((r: StrategyRun) => r.run_id);
 
   if (runIds.length === 0) {
@@ -180,11 +191,7 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
     console.log(`[Combined] Equity curve date range: ${sorted[0].ts} to ${sorted[sorted.length - 1].ts}`);
   }
 
-  // Calculate total initial capital from all runs
-  const totalInitialCapital = (runs ?? []).reduce(
-    (sum: number, run: StrategyRun) => sum + (run.initial_capital || 0),
-    0
-  );
+  const totalInitialCapital = capitalBase;
 
   // Check if any run has hedge mode enabled
   const enableHedge = (runs ?? []).some((run: StrategyRun) => {
@@ -212,9 +219,16 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
           <h2 className="text-2xl font-bold">{(strategy as Strategy).name} - Combined View</h2>
           <p className="text-muted-foreground">
             {runIds.length} runs combined • Initial Capital: ${(totalInitialCapital * shareRatio).toLocaleString()}
+            {selectedCapital === null && capitalOptions.length > 1 && (
+              <span className="ml-1 text-yellow-500">
+                (sum across {capitalOptions.length} capital levels)
+              </span>
+            )}
           </p>
         </div>
       </div>
+
+      <CapitalSelector options={capitalOptions} selected={selectedCapital} />
 
       <CombinedStrategyContent
         strategyId={strategyId}
