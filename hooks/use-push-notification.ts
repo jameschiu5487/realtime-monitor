@@ -70,44 +70,72 @@ export function usePushNotification() {
   const [state, setState] = useState<PushState>("loading");
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
 
+  // Re-checks the subscription and quietly restores it when the browser has
+  // dropped one. Safe to call repeatedly: it never prompts, and it leaves a
+  // deliberate opt-out alone.
+  const ensureSubscription = useCallback(async (reg: ServiceWorkerRegistration) => {
+    if (Notification.permission === "denied") {
+      setState("denied");
+      return;
+    }
+    if (await reg.pushManager.getSubscription()) {
+      setState("subscribed");
+      return;
+    }
+    if (Notification.permission === "granted" && !hasOptedOut()) {
+      try {
+        setState((await createSubscription(reg)) ? "subscribed" : "unsubscribed");
+      } catch {
+        setState("unsubscribed");
+      }
+      return;
+    }
+    setState("unsubscribed");
+  }, []);
+
   useEffect(() => {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
       setState("unsupported");
       return;
     }
 
+    let disposed = false;
+    let checking = false;
+    let regRef: ServiceWorkerRegistration | null = null;
+
+    const check = async () => {
+      // iOS drops push subscriptions every few days, and pushsubscriptionchange
+      // does not fire there to tell us. Checking only on mount means recovery
+      // waits for a cold start — resuming the PWA from the app switcher does
+      // not remount React — and every notification in between is lost with
+      // nothing reporting a failure. So re-check whenever the app comes back to
+      // the foreground, which is the soonest we can notice.
+      if (disposed || checking || !regRef) return;
+      if (document.visibilityState !== "visible") return;
+      checking = true;
+      try {
+        await ensureSubscription(regRef);
+      } finally {
+        checking = false;
+      }
+    };
+
     navigator.serviceWorker
       .register("/sw.js")
       .then(async (reg) => {
+        if (disposed) return;
+        regRef = reg;
         setRegistration(reg);
-        const sub = await reg.pushManager.getSubscription();
-
-        if (Notification.permission === "denied") {
-          setState("denied");
-          return;
-        }
-        if (sub) {
-          setState("subscribed");
-          return;
-        }
-        if (Notification.permission === "granted" && !hasOptedOut()) {
-          // Permission is still granted, the user has not switched this off,
-          // yet the subscription is gone. That is the browser's doing — key
-          // rotation, or iOS reclaiming storage for a PWA that sat unused —
-          // and left alone it reads as "Not enabled" until someone notices and
-          // taps again, which is the reported "it disables itself" behaviour.
-          // Re-subscribing needs no prompt, so just do it.
-          try {
-            setState((await createSubscription(reg)) ? "subscribed" : "unsubscribed");
-          } catch {
-            setState("unsubscribed");
-          }
-          return;
-        }
-        setState("unsubscribed");
+        await ensureSubscription(reg);
+        document.addEventListener("visibilitychange", check);
       })
       .catch(() => setState("unsupported"));
-  }, []);
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [ensureSubscription]);
 
   const subscribe = useCallback(async () => {
     if (!registration) return false;

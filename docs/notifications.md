@@ -1,6 +1,6 @@
 # Push Notification 系統架構
 
-最後更新：2026-08-13。改動任何一段後請更新本檔（見底部「維護規則」）。
+最後更新：2026-08-26。改動任何一段後請更新本檔（見底部「維護規則」）。
 
 ## 全貌
 
@@ -43,11 +43,19 @@ NAV 劇變 ───────────────────────
 5. **失效訂閱清理**：push 發送收到 404/410 → 從 push_subscriptions 刪除該筆。
    其他錯誤不刪，但會 `console.error`（以前是整個吞掉，導致「每次都發不出去的訂閱」
    跟「根本沒被嘗試的訂閱」在任何地方都看起來一樣）。
-6. **訂閱自動復原**：瀏覽器會自己丟掉訂閱（金鑰輪換、iOS 回收久未開啟的 PWA 儲存）。
-   兩道防線：`sw.js` 的 `pushsubscriptionchange` 重新訂閱並回報；
-   `use-push-notification.ts` 在「permission 仍為 granted 但沒有訂閱」時靜默重訂。
+6. **訂閱自動復原**：瀏覽器會自己丟掉訂閱。iOS 實測每 **2.7～4 天**丟一次
+   （8/16→8/20→8/23→8/26）。復原靠 `use-push-notification.ts` 的 `ensureSubscription()`，
+   在「permission 仍為 granted 但沒有訂閱」時靜默重訂，觸發時機有兩個：
+   掛載時、以及 **`visibilitychange` 回到前景時**。
+   後者不可省：iOS PWA 從 App 切換器叫回前景不會讓 React 重新掛載，
+   只在掛載時檢查等於要等冷啟動，中間發出的通知全部靜默遺失。
+   `sw.js` 也有 `pushsubscriptionchange` handler，但**實測在 iOS 從未生效**（見除錯陷阱 4），
+   別把它當成防線。
    **靜默重訂必須檢查 localStorage 的 `push-opt-out` 旗標** —— 使用者手動關閉通知時
    permission 仍然是 granted，少了這個旗標會在下次開頁面把他剛關掉的通知又打開。
+7. **同裝置只留一筆訂閱**：`subscribe` route 在寫入新訂閱後，會刪掉同 `user_id`
+   + 同 `device_name` 的其他列。因為重訂閱會拿到新 endpoint，而 upsert 的衝突鍵是
+   `(user_id, endpoint)`，不修剪就會無限累積。
 
 ## 除錯陷阱（都真的白繞過，別再繞第二次）
 
@@ -63,9 +71,19 @@ NAV 劇變 ───────────────────────
    **所以現在 `net._http_response` 若再出現這支的逾時，那就是真的有問題，要追。**
    背景工作的結果只在 Vercel logs（`[notifications/trade-delayed] done/failed`），
    pg_net 只看得到那個 202。
-3. **同一支裝置在 `push_subscriptions` 累積多筆是正常的。**
-   upsert 的衝突鍵是 `(user_id, endpoint)`，而重新訂閱會拿到新的 endpoint，
-   所以每次復原都是新增一筆。舊筆要等 Apple 回 410 才會被清掉。
+3. **同一支裝置累積多筆訂閱不再正常** —— 2026-08-26 起 subscribe route 會自動修剪。
+   若又看到某裝置有多筆，代表修剪失效，要查（route 內修剪失敗只記 log 不擋請求）。
+4. **`Apple 回 201` 不代表使用者收到。** 死掉的 endpoint Apple 照樣回 201 而非 410，
+   所以 `sent` 這個數字會把「送進黑洞」算成成功，`cleaned` 也一直是 0。
+   **不要用 `sent` 判斷使用者是否真的收到通知。**
+5. **iOS 收不到通知時，先確認訂閱新舊而不是查發送端。** 典型情境：iOS 丟掉訂閱後、
+   使用者下次把 App 叫回前景之前，這段期間的通知全部遺失，而 DB、pg_net、
+   Vercel logs **沒有任何一層會報錯**。判準：看 `push_subscriptions.created_at`
+   是不是又冒出新的一列 —— 有，就代表期間發生過一次丟失。
+6. **`pushsubscriptionchange` 在 iOS 上實測從未生效。**
+   `sw.js` 的 handler 會把 `device_name` 寫成 `auto-renewed (pushsubscriptionchange)`，
+   但 production 累積的訂閱列裡這個字串從未出現過，全部來自前景檢查。
+   handler 留著（其他瀏覽器可能有用），但**不要把它當成 iOS 的防線**。
 
 ## DB 端（Supabase project: kszydawqmcpsvozzjpyh）
 
