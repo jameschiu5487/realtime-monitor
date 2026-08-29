@@ -95,6 +95,12 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   所有對用戶顯示/推播的金額都要乘 share_ratio
 - **push_subscriptions / notification_preferences**：見 `docs/notifications.md`
 
+**`fund_account_equity` 有一張觸發器維護的衍生表 `fund_account_equity_hourly`**
+（Overview 的 30 天資金曲線靠它，直接讀原始表要 2.8 秒會撞 8 秒 statement_timeout）。
+觸發器只涵蓋 INSERT/UPDATE，**沒有 DELETE** —— 刪原始表資料時彙總表不會跟著變，
+Overview 會靜默顯示錯的金額。要刪就同時處理兩張表，或事後重跑
+`supabase/manual/2026-08-29-fund-equity-hourly-rollup.sql` 的回填段。
+
 ## 子系統文件
 
 - 推播通知全系統（trigger、hedge 配對、share_ratio、驗證方法）：`docs/notifications.md`
