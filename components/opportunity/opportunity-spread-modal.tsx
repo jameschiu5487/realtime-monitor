@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Exchange } from "@/lib/types/opportunity";
+import { EXCHANGE_COLORS } from "@/lib/exchange-colors";
 import { KLINE_CONFIGS, getKlineConfig } from "@/lib/kline-config";
 
 interface DataPoint {
@@ -58,15 +59,6 @@ interface OpportunitySpreadModalProps {
 
 // Config is now dynamic via KLINE_CONFIGS
 
-const EXCHANGE_COLORS: Record<Exchange, string> = {
-  Binance: "#eab308",
-  Bybit: "#06b6d4",
-  BingX: "#22c55e",
-  Gate: "#3b82f6",
-  Bitget: "#a855f7",
-  Zoomex: "#f97316",
-  BitMart: "#ec4899",
-};
 
 const EXCHANGE_TEXT_CLASSES: Record<Exchange, string> = {
   Binance: "text-yellow-500",

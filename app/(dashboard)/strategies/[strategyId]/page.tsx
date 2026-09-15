@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, BarChart3, ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { StrategyRunsTable } from "@/components/strategies/strategy-runs-table";
+import { SlippageAnalysis } from "@/components/strategies/slippage-analysis";
+import type { SlippageTrade } from "@/lib/slippage";
 import type { Strategy, StrategyRun } from "@/lib/types/database";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +57,26 @@ export default async function StrategyDetailPage({
     .eq("strategy_id", strategyId)
     .single() as { data: { share_ratio: number } | null };
   const shareRatio = accessData?.share_ratio ?? 1;
+
+  // Slippage is reported per fill, so it is read straight from trades rather
+  // than any rollup. exec_slippage_bps only exists from 2026-08-10, so older
+  // strategies legitimately come back empty and the section hides itself.
+  const runIds = runs.map((r) => r.run_id);
+  let slippageTrades: SlippageTrade[] = [];
+  if (runIds.length > 0) {
+    const { data: slippageRows, error: slippageError } = await supabase
+      .from("trades")
+      .select("ts, exchange, exec_slippage_bps")
+      .in("run_id", runIds)
+      .not("exec_slippage_bps", "is", null)
+      .order("ts", { ascending: false })
+      .limit(5000);
+
+    if (slippageError) {
+      console.error("Error fetching slippage:", slippageError);
+    }
+    slippageTrades = (slippageRows ?? []) as SlippageTrade[];
+  }
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -137,6 +159,9 @@ export default async function StrategyDetailPage({
           </Card>
         </Link>
       )}
+
+      {/* Execution Slippage — renders nothing when the strategy has no data */}
+      <SlippageAnalysis trades={slippageTrades} />
 
       {/* Runs Section */}
       <Card>
