@@ -9,7 +9,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, BarChart3, ArrowRight } from "lucide-react";
+import { ArrowLeft, BarChart3, ArrowRight, LayoutGrid } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { StrategyRunsTable } from "@/components/strategies/strategy-runs-table";
 import { SlippageAnalysis } from "@/components/strategies/slippage-analysis";
@@ -154,6 +154,34 @@ export default async function StrategyDetailPage({
                   </span>{" "}
                   active
                 </span>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+      )}
+
+      {/* Fleet View — only for strategies deployed as parallel pods, i.e.
+          runs carrying distinct pod names in notes (e.g. kore smallcap16) */}
+      {new Set(runs.map((r) => r.notes).filter(Boolean)).size >= 2 && (
+        <Link href={`/strategies/${strategyId}/fleet`}>
+          <Card className="transition-colors hover:bg-accent/50 active:bg-accent/50">
+            <CardContent className="p-4 sm:p-5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                    <LayoutGrid className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <CardTitle className="text-sm sm:text-base">
+                      Fleet View
+                    </CardTitle>
+                    <CardDescription className="text-xs sm:text-sm">
+                      {new Set(runs.map((r) => r.notes).filter(Boolean)).size}{" "}
+                      pods — live health and aggregated PnL
+                    </CardDescription>
+                  </div>
+                </div>
+                <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
               </div>
             </CardContent>
           </Card>
