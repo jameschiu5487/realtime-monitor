@@ -90,7 +90,12 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
 - **pnl_series**（每小時，PK = run_id+ts）: total_pnl, total_funding_pnl, total_price_pnl,
   total_fee, 以及 binance_*/bybit_* 各自拆分
 - **equity_curve**（PK = run_id+ts）: total_equity, total_pnl, binance_equity, binance_pnl,
-  bybit_equity, bybit_pnl, drawdown_pct
+  bybit_equity, bybit_pnl, drawdown_pct。
+  **`binance_*` / `bybit_*` 是沿用舊的兩所命名，不代表真的是那兩家** —— 欄位其實是
+  「第一腿 / 第二腿」。例如 basis-funding 交易的是 binance + zoomex，zoomex 腿存在
+  `bybit_equity`。要知道某個 run 真正的交易所，查 `trades.exchange`，別看欄位名。
+  另外 `total_equity = binance_equity + bybit_equity`、`total_pnl` 同理，精確成立，
+  改動任一腿都要一起維持這個關係。
 - **user_strategy_access**: user_id, strategy_id, share_ratio —— 用戶對策略的份額，
   所有對用戶顯示/推播的金額都要乘 share_ratio
 - **push_subscriptions / notification_preferences**：見 `docs/notifications.md`
