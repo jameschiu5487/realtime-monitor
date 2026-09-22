@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { unstable_noStore as noStore } from "next/cache";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowRight, ChevronDown, Layers, TrendingUp } from "lucide-react";
+import { ArrowRight, Layers, TrendingUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { groupStrategies, parentIdOf } from "@/lib/strategy-hierarchy";
 import type { Strategy } from "@/lib/types/database";
@@ -84,20 +84,7 @@ export default async function StrategiesPage() {
             children.length === 0 ? (
               <StrategyCard key={strategy.strategy_id} strategy={strategy} />
             ) : (
-              <div key={strategy.strategy_id} className="sm:col-span-2 space-y-2">
-                <StrategyCard strategy={strategy} childCount={children.length} />
-                <details open className="group rounded-lg border border-dashed">
-                  <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
-                    <ChevronDown className="h-3.5 w-3.5 -rotate-90 transition-transform group-open:rotate-0" />
-                    {children.length} child {children.length === 1 ? "strategy" : "strategies"} of {strategy.name}
-                  </summary>
-                  <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 px-3 pb-3">
-                    {children.map((child) => (
-                      <StrategyCard key={child.strategy_id} strategy={child} />
-                    ))}
-                  </div>
-                </details>
-              </div>
+              <ParentStrategyCard key={strategy.strategy_id} strategy={strategy} childStrategies={children} />
             )
           )}
         </div>
@@ -106,16 +93,8 @@ export default async function StrategiesPage() {
   );
 }
 
-function StrategyCard({
-  strategy,
-  childCount,
-}: {
-  strategy: Strategy;
-  /** Set for a parent: it aggregates this many visible children. */
-  childCount?: number;
-}) {
-  const isParent = childCount !== undefined;
-  const Icon = isParent ? Layers : TrendingUp;
+function StrategyCard({ strategy }: { strategy: Strategy }) {
+  const Icon = TrendingUp;
 
   return (
     <Link href={`/strategies/${strategy.strategy_id}`} className="block h-full">
@@ -132,7 +111,6 @@ function StrategyCard({
                 </h3>
                 <span className="text-xs font-mono text-muted-foreground">
                   v{strategy.version}
-                  {isParent && ` · aggregate of ${childCount} ${childCount === 1 ? "book" : "books"}`}
                 </span>
               </div>
             </div>
@@ -156,5 +134,72 @@ function StrategyCard({
         </CardContent>
       </Card>
     </Link>
+  );
+}
+
+/**
+ * A parent strategy as one grid card, the same size as the others. The card body
+ * links to the parent page; each child is its own link. Uses the stretched-link
+ * pattern (an overlay on the parent link) because anchors cannot nest.
+ */
+function ParentStrategyCard({
+  strategy,
+  childStrategies,
+}: {
+  strategy: Strategy;
+  childStrategies: Strategy[];
+}) {
+  const prefix = `${strategy.name} · `;
+  const shortName = (name: string) => (name.startsWith(prefix) ? name.slice(prefix.length) : name);
+
+  return (
+    <Card className="relative h-full transition-colors hover:bg-accent/50 active:bg-accent/50">
+      <CardContent className="p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+              <Layers className="h-4 w-4 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-semibold text-sm sm:text-base truncate">
+                <Link
+                  href={`/strategies/${strategy.strategy_id}`}
+                  className="after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
+                >
+                  {strategy.name}
+                </Link>
+              </h3>
+              <span className="text-xs font-mono text-muted-foreground">
+                v{strategy.version} · {childStrategies.length}{" "}
+                {childStrategies.length === 1 ? "sub-strategy" : "sub-strategies"}
+              </span>
+            </div>
+          </div>
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground mt-2" />
+        </div>
+
+        <div className="relative z-10 mt-3 flex flex-wrap gap-1.5">
+          {childStrategies.map((child) => (
+            <Link
+              key={child.strategy_id}
+              href={`/strategies/${child.strategy_id}`}
+              className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground"
+            >
+              <TrendingUp className="h-3 w-3" />
+              {shortName(child.name)}
+            </Link>
+          ))}
+        </div>
+
+        <p className="text-xs text-muted-foreground/70 font-mono mt-3">
+          Created{" "}
+          {new Date(strategy.created_at).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })}
+        </p>
+      </CardContent>
+    </Card>
   );
 }
