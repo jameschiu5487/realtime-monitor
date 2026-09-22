@@ -131,16 +131,20 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
     return notFound();
   }
 
-  // Fetch all runs for this strategy, only include "realtime" mode (exclude "test-realtime" etc.)
+  // Fetch all runs for this strategy, only include live-money modes: "realtime"
+  // (legacy name) and "live" (exclude "paper", "backtest", "test-realtime" etc.).
+  // Until 2026-09-22 only "realtime" was included, so strategies writing mode
+  // "live" (e.g. Kepler · XS Momentum) showed no runs here.
   const { data: allRuns } = await supabase
     .from("strategy_runs")
     .select("*")
     .eq("strategy_id", strategyId)
     .order("start_time", { ascending: true });
 
-  const realtimeRuns = (allRuns ?? []).filter(
-    (r: StrategyRun) => (r.mode as string) === "realtime"
-  ) as StrategyRun[];
+  const realtimeRuns = (allRuns ?? []).filter((r: StrategyRun) => {
+    const mode = r.mode as string;
+    return mode === "realtime" || mode === "live";
+  }) as StrategyRun[];
 
   // Runs sharing an initial_capital are the same account restarted, one after
   // another; aggregating across levels mixes incompatible capital bases.

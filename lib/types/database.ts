@@ -17,6 +17,13 @@ export type Database = {
           version: string;
           description: string | null;
           created_at: string;
+          /**
+           * Parent strategy (one level; null = top-level). Added by
+           * supabase/manual/2026-09-22-strategy-parent.sql — rows read before
+           * that ran carry no such key, so read it via lib/strategy-hierarchy.ts
+           * rather than trusting it to be present.
+           */
+          parent_strategy_id: string | null;
         };
         Insert: {
           strategy_id?: string;
@@ -25,6 +32,7 @@ export type Database = {
           version: string;
           description?: string | null;
           created_at?: string;
+          parent_strategy_id?: string | null;
         };
         Update: {
           strategy_id?: string;
@@ -33,6 +41,7 @@ export type Database = {
           version?: string;
           description?: string | null;
           created_at?: string;
+          parent_strategy_id?: string | null;
         };
       };
       strategy_runs: {

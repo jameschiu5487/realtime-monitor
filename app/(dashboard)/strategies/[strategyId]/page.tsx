@@ -9,10 +9,12 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, BarChart3, ArrowRight } from "lucide-react";
+import { ArrowLeft, BarChart3, ArrowRight, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { StrategyRunsTable } from "@/components/strategies/strategy-runs-table";
 import { SlippageAnalysis } from "@/components/strategies/slippage-analysis";
+import { ParentStrategyView } from "@/components/strategies/parent-strategy-view";
+import { fetchChildStrategies, parentIdOf } from "@/lib/strategy-hierarchy";
 import type { SlippageTrade } from "@/lib/slippage";
 import type { Strategy, StrategyRun } from "@/lib/types/database";
 
@@ -21,16 +23,19 @@ export const revalidate = 0;
 
 interface StrategyDetailPageProps {
   params: Promise<{ strategyId: string }>;
+  searchParams: Promise<{ paper?: string }>;
 }
 
 export default async function StrategyDetailPage({
   params,
+  searchParams,
 }: StrategyDetailPageProps) {
   noStore();
   const { strategyId } = await params;
+  const { paper } = await searchParams;
   const supabase = await createClient();
 
-  const [strategyResult, runsResult] = await Promise.all([
+  const [strategyResult, runsResult, childStrategies] = await Promise.all([
     supabase
       .from("strategies")
       .select("*")
@@ -41,6 +46,8 @@ export default async function StrategyDetailPage({
       .select("*")
       .eq("strategy_id", strategyId)
       .order("start_time", { ascending: false }),
+    // Empty when this isn't a parent — or when parent_strategy_id doesn't exist yet.
+    fetchChildStrategies(supabase, strategyId),
   ]);
 
   const strategy = strategyResult.data as Strategy | null;
@@ -48,6 +55,50 @@ export default async function StrategyDetailPage({
 
   if (strategyResult.error || !strategy) {
     return notFound();
+  }
+
+  // Parent strategy: aggregate view of the children the user can access.
+  // The parent is visible with access to it or to any child; each child still
+  // needs its own access to be included.
+  if (childStrategies.length > 0) {
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: accessRows } = await supabase
+      .from("user_strategy_access")
+      .select("strategy_id, share_ratio")
+      .eq("user_id", user?.id ?? "") as {
+      data: { strategy_id: string; share_ratio: number }[] | null;
+    };
+    const ratioById = new Map(
+      (accessRows ?? []).map((a) => [a.strategy_id, Number(a.share_ratio) || 1])
+    );
+    const visibleChildren = childStrategies.filter((c) => ratioById.has(c.strategy_id));
+    if (!ratioById.has(strategyId) && visibleChildren.length === 0) {
+      return notFound();
+    }
+
+    return (
+      <ParentStrategyView
+        supabase={supabase}
+        parent={strategy}
+        childStrategies={visibleChildren}
+        shareRatioByChild={Object.fromEntries(
+          visibleChildren.map((c) => [c.strategy_id, ratioById.get(c.strategy_id) ?? 1])
+        )}
+        includePaper={paper === "1"}
+      />
+    );
+  }
+
+  // Child strategy: resolve the parent for the breadcrumb.
+  const parentId = parentIdOf(strategy);
+  let parentStrategy: { strategy_id: string; name: string } | null = null;
+  if (parentId) {
+    const { data } = await supabase
+      .from("strategies")
+      .select("strategy_id, name")
+      .eq("strategy_id", parentId)
+      .maybeSingle() as { data: { strategy_id: string; name: string } | null };
+    parentStrategy = data;
   }
 
   // Fetch share ratio for current user
@@ -82,7 +133,7 @@ export default async function StrategyDetailPage({
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="flex items-start gap-3 sm:gap-4 pb-4 border-b">
-        <Link href="/strategies">
+        <Link href={parentStrategy ? `/strategies/${parentStrategy.strategy_id}` : "/strategies"}>
           <Button
             variant="ghost"
             size="icon"
@@ -94,6 +145,20 @@ export default async function StrategyDetailPage({
         <div className="flex-1 min-w-0">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
             <div className="min-w-0">
+              {parentStrategy && (
+                <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                  <Link href="/strategies" className="hover:text-foreground">
+                    Strategies
+                  </Link>
+                  <ChevronRight className="h-3 w-3" />
+                  <Link
+                    href={`/strategies/${parentStrategy.strategy_id}`}
+                    className="hover:text-foreground"
+                  >
+                    {parentStrategy.name}
+                  </Link>
+                </nav>
+              )}
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate">
                 {strategy.name}
               </h1>

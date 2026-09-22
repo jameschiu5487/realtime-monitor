@@ -78,7 +78,11 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
 
 核心表（欄位細節不確定時用 `list_tables` 查，別猜）：
 
-- **strategies**: strategy_id (PK), user_id, name, version, description
+- **strategies**: strategy_id (PK), user_id, name, version, description, parent_strategy_id
+  （nullable 自我參照、一層；`supabase/manual/2026-09-22-strategy-parent.sql`）。有子策略的
+  「母策略」（如 Kepler）自己沒有 run，`/strategies/[id]` 會改顯示子策略目前 live run 的加總
+  （`components/strategies/parent-strategy-view.tsx`）。讀這個欄位一律走
+  `lib/strategy-hierarchy.ts`：它容忍欄位不存在（42703），SQL 未套用前 UI 退回扁平列表。
 - **strategy_runs**: run_id (PK), strategy_id (FK), mode ('backtest'|'paper'|'live'|'realtime'),
   status, start_time, end_time, initial_capital, params (jsonb), code_ref, notes
 - **trades**: trade_id (PK), run_id (FK), ts, symbol, exchange, action, side ('buy'|'sell'),
