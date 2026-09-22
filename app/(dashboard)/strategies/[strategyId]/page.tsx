@@ -20,6 +20,7 @@ import {
   SimulatedEquityNote,
 } from "@/components/strategies/simulated-equity-note";
 import type { SlippageTrade } from "@/lib/slippage";
+import { formatVersion } from "@/lib/utils";
 import type { Strategy, StrategyRun } from "@/lib/types/database";
 
 export const dynamic = "force-dynamic";
@@ -166,7 +167,7 @@ export default async function StrategyDetailPage({
               )}
             </div>
             <span className="text-xs font-mono text-muted-foreground shrink-0">
-              v{strategy.version}
+              {formatVersion(strategy.version)}
             </span>
           </div>
         </div>

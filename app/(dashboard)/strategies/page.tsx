@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ArrowRight, Layers, TrendingUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { groupStrategies, parentIdOf } from "@/lib/strategy-hierarchy";
+import { formatVersion } from "@/lib/utils";
 import type { Strategy } from "@/lib/types/database";
 
 export const dynamic = "force-dynamic";
@@ -110,7 +111,7 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
                   {strategy.name}
                 </h3>
                 <span className="text-xs font-mono text-muted-foreground">
-                  v{strategy.version}
+                  {formatVersion(strategy.version)}
                 </span>
               </div>
             </div>
@@ -170,7 +171,7 @@ function ParentStrategyCard({
                 </Link>
               </h3>
               <span className="text-xs font-mono text-muted-foreground">
-                v{strategy.version} · {childStrategies.length}{" "}
+                {formatVersion(strategy.version)} · {childStrategies.length}{" "}
                 {childStrategies.length === 1 ? "sub-strategy" : "sub-strategies"}
               </span>
             </div>

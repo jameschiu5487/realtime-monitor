@@ -46,7 +46,7 @@ import {
   type ParentBook,
   type ParentPosition,
 } from "@/lib/parent-strategy";
-import { cn } from "@/lib/utils";
+import { cn, formatVersion } from "@/lib/utils";
 import type {
   FundAccountEquity,
   Json,
@@ -266,7 +266,7 @@ export async function ParentStrategyView({
               </p>
             </div>
             <span className="text-xs font-mono text-muted-foreground shrink-0">
-              v{parent.version}
+              {formatVersion(parent.version)}
             </span>
           </div>
         </div>
@@ -340,7 +340,7 @@ export async function ParentStrategyView({
                   <div className="min-w-0">
                     <CardTitle className="text-sm sm:text-base truncate">{child.name}</CardTitle>
                     <CardDescription className="text-xs font-mono">
-                      v{child.version} · share {(shareRatioByChild[child.strategy_id] ?? 1).toString()}
+                      {formatVersion(child.version)} · share {(shareRatioByChild[child.strategy_id] ?? 1).toString()}
                     </CardDescription>
                   </div>
                   <Link
