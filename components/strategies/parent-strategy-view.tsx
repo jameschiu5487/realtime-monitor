@@ -285,7 +285,7 @@ export async function ParentStrategyView({
       {/* Everything below is derived from the children's virtual books */}
       <div className="space-y-2 border-t pt-4 sm:pt-6">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-lg sm:text-xl font-semibold tracking-tight">子策略（模擬權益）</h2>
+          <h2 className="text-lg sm:text-xl font-semibold tracking-tight">Sub-strategies (simulated equity)</h2>
           <SimulatedEquityBadge />
         </div>
         <SimulatedEquityNote />
@@ -309,19 +309,19 @@ export async function ParentStrategyView({
       <Card>
         <CardContent className="p-0">
           <div className="grid grid-cols-2 sm:grid-cols-4">
-            <Figure label="模擬總權益" value={money(books.length ? totalEquity : null)} />
+            <Figure label="Simulated total equity" value={money(books.length ? totalEquity : null)} />
             <Figure
-              label="模擬總 PnL"
+              label="Simulated total PnL"
               value={money(books.length ? totalPnl : null, true)}
               className={tone(totalPnl)}
             />
             <Figure
-              label="模擬報酬率"
+              label="Simulated return"
               value={pct(totalInitial > 0 ? ((totalEquity - totalInitial) / totalInitial) * 100 : null, true)}
               className={tone(totalEquity - totalInitial)}
             />
             <Figure
-              label="模擬未實現 PnL"
+              label="Simulated unrealized PnL"
               value={money(positions.length ? totalUpnl : 0, true)}
               className={tone(totalUpnl)}
             />
@@ -368,7 +368,7 @@ export async function ParentStrategyView({
                         </span>
                       </div>
                       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                        <dt className="text-muted-foreground">模擬權益</dt>
+                        <dt className="text-muted-foreground">Simulated equity</dt>
                         <dd className="text-right font-mono">{money(b.equity)}</dd>
                         <dt className="text-muted-foreground">Return</dt>
                         <dd className={cn("text-right font-mono", tone(b.returnPct))}>
@@ -409,9 +409,9 @@ export async function ParentStrategyView({
                 shareRatio={1}
               />
               <EquityCurveChart
-                title="子策略模擬權益加總"
-                description="各子策略虛擬帳本權益相加（模擬值，非帳戶實際資金）"
-                currentLabel="模擬權益"
+                title="Sub-strategies simulated equity (sum)"
+                description="Sum of the sub-strategies' virtual book equity (simulated, not real account money)"
+                currentLabel="Simulated equity"
                 data={aggregate.map((p) => ({ time: p.ts, equity: p.total_equity }))}
               />
               {books.length > 1 && (
@@ -421,16 +421,16 @@ export async function ParentStrategyView({
                 </p>
               )}
               <DrawdownChart
-                title="子策略模擬權益加總回撤 (%)"
-                description="依上方模擬權益加總計算，非帳戶實際回撤"
+                title="Sub-strategies simulated equity drawdown (%)"
+                description="Computed from the simulated equity sum above, not the real account drawdown"
                 data={aggregate.map((p) => ({ time: p.ts, drawdown: -p.drawdown_pct }))}
               />
             </>
           )}
           {pnlSeries.length > 0 && (
             <AggregatePnlChart
-              title="子策略模擬 PnL 加總"
-              description="各子策略虛擬帳本的累計 PnL 相加（模擬值）"
+              title="Sub-strategies simulated PnL (sum)"
+              description="Sum of the sub-strategies' cumulative virtual-book PnL (simulated)"
               data={pnlSeries}
             />
           )}
@@ -441,11 +441,11 @@ export async function ParentStrategyView({
       <Card>
         <CardHeader className="px-3 sm:px-6">
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm sm:text-base font-medium">
-            目前持倉（依虛擬帳本）
+            Current positions (virtual books)
             <SimulatedEquityBadge />
           </CardTitle>
           <CardDescription className="text-xs">
-            {positions.length} open · notional {money(totalNotional)} · 模擬 uPnL {money(totalUpnl, true)} · 各子策略帳本自身的部位與標記價估值
+            {positions.length} open · notional {money(totalNotional)} · simulated uPnL {money(totalUpnl, true)} · each sub-strategy&apos;s own book positions valued at mark
           </CardDescription>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">

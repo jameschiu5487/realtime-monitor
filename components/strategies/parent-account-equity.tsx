@@ -37,7 +37,7 @@ const RANGE_MS: Record<AccountEquityRange, number> = {
 
 const COLOR = "hsl(142 76% 36%)";
 const chartConfig = {
-  equity: { label: "帳戶權益", color: COLOR },
+  equity: { label: "Account equity", color: COLOR },
 } satisfies ChartConfig;
 
 function money(value: number, signed = false): string {
@@ -122,7 +122,7 @@ export function ParentAccountEquity({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Landmark className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-          <h2 className="text-lg sm:text-xl font-semibold tracking-tight">帳戶實際資金</h2>
+          <h2 className="text-lg sm:text-xl font-semibold tracking-tight">Real account equity</h2>
           {accountIds.map((id) => (
             <span
               key={id}
@@ -152,33 +152,33 @@ export function ParentAccountEquity({
       {!hasData ? (
         <Card>
           <CardContent className="space-y-1 py-6 text-center">
-            <p className="text-sm font-medium">尚無帳戶資金資料</p>
+            <p className="text-sm font-medium">No account equity data yet</p>
             <p className="text-xs text-muted-foreground">
               {fetchError
-                ? "帳戶權益暫時讀取失敗，請稍後重新整理。"
+                ? "Could not load account equity. Please refresh in a moment."
                 : accountIds.length === 0
-                  ? "子策略目前的 live run 尚未在參數（params.api）標明交易帳戶；交易系統寫入後，這裡會自動顯示該帳戶的實際權益。"
-                  : `帳戶 ${accountIds.join("、")} 目前沒有權益紀錄。`}
+                  ? "The children's live runs do not name a trading account in params.api yet; the real account equity appears here once the trading system writes it."
+                  : `No equity records for account ${accountIds.join(", ")} yet.`}
             </p>
           </CardContent>
         </Card>
       ) : (
         <Card className="gap-0 py-0">
           <div className="grid grid-cols-2 sm:grid-cols-4 border-b">
-            <Figure label="目前帳戶權益" value={money(total)} />
+            <Figure label="Current account equity" value={money(total)} />
             <Figure
-              label={`${range} 變化`}
+              label={`${range} change`}
               value={money(delta, true)}
               sub={deltaPct === null ? undefined : `${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(2)}%`}
               className={tone(delta)}
             />
             <Figure
-              label={`${range} 最大回撤`}
+              label={`${range} max drawdown`}
               value={drawdown ? `${drawdown.pct > 0 ? "-" : ""}${drawdown.pct.toFixed(2)}%` : "—"}
               sub={drawdown && drawdown.amount > 0 ? money(-drawdown.amount) : undefined}
               className={drawdown && drawdown.pct > 0 ? "text-red-600 dark:text-red-400" : ""}
             />
-            <Figure label="最後更新" value={utcMinute(lastUpdateMs)} small />
+            <Figure label="Last update" value={utcMinute(lastUpdateMs)} small />
           </div>
           <CardContent className="px-2 py-4 sm:px-6">
             <ChartContainer config={chartConfig} className="aspect-auto h-[240px] sm:h-[280px] w-full">
@@ -240,7 +240,7 @@ export function ParentAccountEquity({
                       }}
                       formatter={(value) => (
                         <div className="flex w-full items-center justify-between gap-4">
-                          <span className="text-muted-foreground">帳戶權益</span>
+                          <span className="text-muted-foreground">Account equity</span>
                           <span className="font-mono font-medium">{money(Number(value))}</span>
                         </div>
                       )}
@@ -249,7 +249,7 @@ export function ParentAccountEquity({
                 />
                 <Area
                   dataKey="equity"
-                  name="帳戶權益"
+                  name="Account equity"
                   type="monotone"
                   fill="url(#fillParentAccountEquity)"
                   stroke={COLOR}
@@ -264,14 +264,14 @@ export function ParentAccountEquity({
       <div className="space-y-1 text-xs text-muted-foreground">
         <p>
           <Badge variant="outline" className="mr-1.5 border-emerald-500/50 text-emerald-700 dark:text-emerald-400">
-            實際
+            Real
           </Badge>
-          交易所回報的帳戶總權益（fund_account_equity），為帳戶全額、未乘份額；出入金會直接反映在曲線與回撤上。
-          24 小時內每 5 分鐘一點，更早為每小時一點。
+          Total account equity reported by the exchange (fund_account_equity): the whole account, not scaled by share; deposits and withdrawals show up in the curve and drawdown.
+          One point per 5 minutes within 24 h, hourly before that.
         </p>
         {showRatioNote && (
           <p className="text-amber-700 dark:text-amber-400">
-            你在 {parentName} 的份額（share_ratio）為 {parentShareRatio}；上方帳戶實際資金為帳戶全額，並未依此份額縮放。
+            Your share of {parentName} (share_ratio) is {parentShareRatio}; the real account equity above is the whole account and is not scaled by it.
           </p>
         )}
       </div>

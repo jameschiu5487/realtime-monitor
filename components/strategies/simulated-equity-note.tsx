@@ -13,14 +13,14 @@ import { cn } from "@/lib/utils";
  *
  * No hooks, so this renders from server and client components alike.
  */
-export const SIMULATED_EQUITY_LABEL = "模擬權益（虛擬帳本）";
+export const SIMULATED_EQUITY_LABEL = "Simulated equity (virtual book)";
 
 export const SIMULATED_EQUITY_NOTE =
-  "子策略權益由各自的虛擬帳本（自身成交、標記價、手續費、資金費）計算，為模擬值，不等於帳戶實際資金；帳戶實際資金見上方。";
+  "Sub-strategy equity is computed from each strategy's own virtual book (its fills, mark prices, fees and funding). It is simulated and is not the real account money; see the real account equity above.";
 
 /** Same note for a child page, where the real money is on the parent page, not above. */
 const CHILD_PAGE_NOTE =
-  "此處權益由本子策略的虛擬帳本（自身成交、標記價、手續費、資金費）計算，為模擬值，不等於帳戶實際資金。";
+  "This equity is computed from this sub-strategy's own virtual book (its fills, mark prices, fees and funding). It is simulated and is not the real account money.";
 
 export function SimulatedEquityBadge({ className }: { className?: string }) {
   return (
@@ -63,16 +63,16 @@ export function SimulatedEquityNote({
         {parent ? (
           <>
             <span className="font-medium text-foreground">{SIMULATED_EQUITY_LABEL}</span>
-            {"："}
-            {CHILD_PAGE_NOTE}
-            帳戶實際資金請見母策略{" "}
+            {": "}
+            {CHILD_PAGE_NOTE}{" "}
+            Real account equity is on the parent strategy{" "}
             <Link
               href={`/strategies/${parent.strategy_id}`}
               className="font-medium text-foreground underline underline-offset-2 hover:text-primary"
             >
               {parent.name}
             </Link>
-            。
+            .
           </>
         ) : (
           SIMULATED_EQUITY_NOTE
