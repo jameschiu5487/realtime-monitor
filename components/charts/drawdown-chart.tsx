@@ -29,6 +29,8 @@ export interface DrawdownDataPoint {
 
 interface DrawdownChartProps {
   data: DrawdownDataPoint[];
+  title?: string;
+  description?: string;
 }
 
 const chartConfig = {
@@ -38,7 +40,11 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
-export function DrawdownChart({ data }: DrawdownChartProps) {
+export function DrawdownChart({
+  data,
+  title = "Drawdown (%)",
+  description = "Portfolio drawdown percentage over time",
+}: DrawdownChartProps) {
   let maxDrawdown = 0;
   for (const d of data) { if (d.drawdown < maxDrawdown) maxDrawdown = d.drawdown; }
   const maxDrawdownPoint = data.find((d) => d.drawdown === maxDrawdown);
@@ -47,8 +53,8 @@ export function DrawdownChart({ data }: DrawdownChartProps) {
     <Card>
       <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
         <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5 sm:py-6">
-          <CardTitle>Drawdown (%)</CardTitle>
-          <CardDescription>Portfolio drawdown percentage over time</CardDescription>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
         </div>
         <div className="flex">
           <div className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">

@@ -10,6 +10,11 @@ import { IndividualTradePnLChart } from "@/components/charts/individual-trade-pn
 import { CumulativeTradePnLChart } from "@/components/charts/cumulative-trade-pnl-chart";
 import { CombinedTradesTable } from "@/components/trades/combined-trades-table";
 import { PerformanceStats } from "@/components/charts/performance-stats";
+import {
+  SIMULATED_EQUITY_LABEL,
+  SimulatedEquityBadge,
+  SimulatedEquityNote,
+} from "@/components/strategies/simulated-equity-note";
 import { SymbolPnLChart } from "@/components/charts/symbol-pnl-chart";
 import { createClient } from "@/lib/supabase/client";
 import type { EquityCurveDataPoint } from "@/components/charts/equity-curve-chart";
@@ -30,6 +35,12 @@ interface CombinedStrategyContentProps {
   runIds: string[];
   enableHedge: boolean;
   shareRatio: number;
+  /**
+   * Set when this strategy is a child of a parent strategy: its equity is then
+   * a simulation from its own virtual book, labelled as such, with a link to
+   * the parent page for the real account money.
+   */
+  parentStrategy?: { strategy_id: string; name: string } | null;
 }
 
 // Downsample time series: if range > 30 days, keep only every 5 minutes
@@ -265,6 +276,7 @@ export function CombinedStrategyContent({
   runIds,
   enableHedge,
   shareRatio,
+  parentStrategy = null,
 }: CombinedStrategyContentProps) {
   // State: single source of truth
   const [equityCurve, setEquityCurve] = useState<EquityCurve[]>(initialEquityCurve);
@@ -655,7 +667,9 @@ export function CombinedStrategyContent({
       <div className="space-y-3 sm:space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Combined Performance</h2>
+          {parentStrategy && <SimulatedEquityBadge />}
         </div>
+        {parentStrategy && <SimulatedEquityNote parent={parentStrategy} />}
 
         {/* Performance Stats */}
         <PerformanceStats
@@ -680,6 +694,7 @@ export function CombinedStrategyContent({
           data={filteredEquityCurveData}
           onRangeChange={handleChartRangeChange}
           initEquity={baselineEquity}
+          title={parentStrategy ? SIMULATED_EQUITY_LABEL : undefined}
         />
 
         {/* Row 2: Exposure */}

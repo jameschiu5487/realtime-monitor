@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, type ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis, ReferenceArea } from "recharts";
 import {
   Card,
@@ -33,6 +33,10 @@ interface EquityCurveWithBrushProps {
   // Equity at the start of the run. When provided, the header also shows
   // Init Equity and PnL (current − init).
   initEquity?: number;
+  /** Card title; defaults to "Equity Curve". */
+  title?: string;
+  /** Rendered next to the title, e.g. a "simulated" badge. */
+  titleBadge?: ReactNode;
 }
 
 const chartConfig = {
@@ -49,6 +53,8 @@ export function EquityCurveWithBrush({
   data,
   onRangeChange,
   initEquity,
+  title = "Equity Curve",
+  titleBadge,
 }: EquityCurveWithBrushProps) {
   const [refAreaLeft, setRefAreaLeft] = useState<string | null>(null);
   const [refAreaRight, setRefAreaRight] = useState<string | null>(null);
@@ -115,8 +121,9 @@ export function EquityCurveWithBrush({
     <Card>
       <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
         <div className="flex flex-1 flex-col justify-center gap-1 px-4 py-3 sm:px-6 sm:py-5">
-          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-            Equity Curve
+          <CardTitle className="flex flex-wrap items-center gap-2 text-base sm:text-lg">
+            {title}
+            {titleBadge}
             <Button
               variant="ghost"
               size="icon"

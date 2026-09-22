@@ -14,7 +14,11 @@ import { createClient } from "@/lib/supabase/server";
 import { StrategyRunsTable } from "@/components/strategies/strategy-runs-table";
 import { SlippageAnalysis } from "@/components/strategies/slippage-analysis";
 import { ParentStrategyView } from "@/components/strategies/parent-strategy-view";
-import { fetchChildStrategies, parentIdOf } from "@/lib/strategy-hierarchy";
+import { fetchChildStrategies, fetchParentRef } from "@/lib/strategy-hierarchy";
+import {
+  SimulatedEquityBadge,
+  SimulatedEquityNote,
+} from "@/components/strategies/simulated-equity-note";
 import type { SlippageTrade } from "@/lib/slippage";
 import type { Strategy, StrategyRun } from "@/lib/types/database";
 
@@ -81,6 +85,7 @@ export default async function StrategyDetailPage({
         supabase={supabase}
         parent={strategy}
         childStrategies={visibleChildren}
+        parentShareRatio={ratioById.get(strategyId) ?? null}
         shareRatioByChild={Object.fromEntries(
           visibleChildren.map((c) => [c.strategy_id, ratioById.get(c.strategy_id) ?? 1])
         )}
@@ -89,17 +94,9 @@ export default async function StrategyDetailPage({
     );
   }
 
-  // Child strategy: resolve the parent for the breadcrumb.
-  const parentId = parentIdOf(strategy);
-  let parentStrategy: { strategy_id: string; name: string } | null = null;
-  if (parentId) {
-    const { data } = await supabase
-      .from("strategies")
-      .select("strategy_id, name")
-      .eq("strategy_id", parentId)
-      .maybeSingle() as { data: { strategy_id: string; name: string } | null };
-    parentStrategy = data;
-  }
+  // Child strategy: resolve the parent for the breadcrumb and the
+  // "simulated equity" labelling.
+  const parentStrategy = await fetchParentRef(supabase, strategy);
 
   // Fetch share ratio for current user
   const { data: accessData } = await supabase
@@ -175,6 +172,9 @@ export default async function StrategyDetailPage({
         </div>
       </div>
 
+      {/* A child's figures come from its own virtual book, not the account */}
+      {parentStrategy && <SimulatedEquityNote parent={parentStrategy} />}
+
       {/* Combined View Card */}
       {runs.length > 0 && (
         <Link href={`/strategies/${strategyId}/combined`}>
@@ -186,8 +186,9 @@ export default async function StrategyDetailPage({
                     <BarChart3 className="h-4 w-4 text-primary" />
                   </div>
                   <div className="min-w-0">
-                    <CardTitle className="text-sm sm:text-base">
+                    <CardTitle className="flex flex-wrap items-center gap-2 text-sm sm:text-base">
                       Combined Performance
+                      {parentStrategy && <SimulatedEquityBadge />}
                     </CardTitle>
                     <CardDescription className="text-xs sm:text-sm">
                       {runs.length} runs combined with gap filling

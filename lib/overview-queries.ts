@@ -538,3 +538,61 @@ export async function getFundAccountEquity(
     fineSince
   );
 }
+
+/**
+ * Hourly account equity for specific accounts, straight from the
+ * trigger-maintained rollup table (one row per account per hour, the last
+ * reading in that hour). Used for ranges beyond the 30d the bucketed RPC
+ * covers. Reading the raw table instead over months would hit the 8s
+ * statement_timeout — see supabase/manual/2026-08-29-fund-equity-hourly-rollup.sql.
+ *
+ * Rows come back in the FundAccountEquity shape with `ts` = bucket_ts, the same
+ * convention the RPC's coarse part uses. [since, until) half-open.
+ */
+type HourlyFundEquityRow = {
+  account_id: string;
+  exchange: string;
+  bucket_ts: string;
+  total_equity: number | string;
+};
+
+export async function getFundAccountEquityHourly(
+  supabase: SupabaseClient,
+  accountIds: string[],
+  since: string,
+  until: string
+): Promise<FundAccountEquity[]> {
+  if (accountIds.length === 0) return [];
+
+  return cachedQuery(
+    "fund-account-equity-hourly",
+    ["overview:fund-account-equity-hourly"],
+    async (ids: string[], sinceIso: string, untilIso: string) => {
+      const rows = await fetchAllPages<HourlyFundEquityRow>(
+        "fund_account_equity_hourly",
+        (from, to) =>
+          supabase
+            .from("fund_account_equity_hourly")
+            .select("account_id, exchange, bucket_ts, total_equity")
+            .in("account_id", ids)
+            .gte("bucket_ts", sinceIso)
+            .lt("bucket_ts", untilIso)
+            .order("bucket_ts", { ascending: true })
+            // Tie-break so offset pages stay stable across accounts.
+            .order("account_id", { ascending: true })
+            .range(from, to) as unknown as PromiseLike<
+            PageResult<HourlyFundEquityRow>
+          >
+      );
+      return rows.map((row) => ({
+        account_id: row.account_id,
+        exchange: row.exchange,
+        ts: row.bucket_ts,
+        total_equity: Number(row.total_equity),
+      }));
+    },
+    accountIds,
+    since,
+    until
+  );
+}

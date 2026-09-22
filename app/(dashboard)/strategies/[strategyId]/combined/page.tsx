@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { CombinedStrategyContent } from "@/components/combined-strategy-content";
 import { CapitalSelector } from "@/components/strategies/capital-selector";
 import { selectCapitalGroup } from "@/lib/capital-groups";
+import { fetchParentRef } from "@/lib/strategy-hierarchy";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Strategy,
@@ -211,6 +212,9 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
     .single() as { data: { share_ratio: number } | null };
   const shareRatio = accessData?.share_ratio ?? 1;
 
+  // A child of a parent strategy: its equity is a simulation of its own book.
+  const parentStrategy = await fetchParentRef(supabase, strategy as Strategy);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -243,6 +247,7 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
         runIds={runIds}
         enableHedge={enableHedge}
         shareRatio={shareRatio}
+        parentStrategy={parentStrategy}
       />
     </div>
   );

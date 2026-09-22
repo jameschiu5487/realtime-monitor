@@ -22,8 +22,20 @@ import { EquityCurveChart } from "@/components/charts/equity-curve-chart";
 import { DrawdownChart } from "@/components/charts/drawdown-chart";
 import { PerformanceStats } from "@/components/charts/performance-stats";
 import { AggregatePnlChart } from "@/components/strategies/aggregate-pnl-chart";
-import { bucketedSince, getCombinedTrades, getEquityCurve } from "@/lib/overview-queries";
+import { ParentAccountEquity } from "@/components/strategies/parent-account-equity";
+import {
+  SimulatedEquityBadge,
+  SimulatedEquityNote,
+} from "@/components/strategies/simulated-equity-note";
+import {
+  bucketedSince,
+  getCombinedTrades,
+  getEquityCurve,
+  getFundAccountEquity,
+  getFundAccountEquityHourly,
+} from "@/lib/overview-queries";
 import { buildCombinedEquityCurve } from "@/lib/utils/equity";
+import { accountIdsFromRunParams } from "@/lib/utils/fund-account-strategy";
 import {
   currentPositions,
   equityByRun,
@@ -35,16 +47,59 @@ import {
   type ParentPosition,
 } from "@/lib/parent-strategy";
 import { cn } from "@/lib/utils";
-import type { Position, Strategy, StrategyRun } from "@/lib/types/database";
+import type {
+  FundAccountEquity,
+  Json,
+  Position,
+  Strategy,
+  StrategyRun,
+} from "@/lib/types/database";
 
 /** Window for the aggregate charts. Book returns are still measured from initial_capital. */
 const WINDOW_DAYS = 30;
 const POSITION_ROWS_PER_RUN = 500;
+/** Longest range of the real account-equity chart (read from the hourly rollup). */
+const ACCOUNT_WINDOW_DAYS = 90;
 
 type BookRun = Pick<
   StrategyRun,
   "run_id" | "strategy_id" | "mode" | "status" | "start_time" | "initial_capital"
->;
+> & {
+  /** params->api only; the rest of params is a large engine config we don't read. */
+  api: Record<string, unknown> | null;
+};
+
+/**
+ * Real account equity for the given accounts.
+ *
+ * The last 30d come from the same cached, bucketed RPC the Overview uses (and
+ * with the same window arguments, so both share one cache entry): 5-minute
+ * detail for 24h, hourly before. 30–90d are read straight from the hourly
+ * rollup table. Never the raw table over long ranges — 8s statement_timeout.
+ */
+async function loadAccountEquity(
+  supabase: SupabaseClient,
+  accountIds: string[]
+): Promise<{ rows: FundAccountEquity[]; error: string | null; nowMs: number }> {
+  const nowMs = Date.now();
+  if (accountIds.length === 0) return { rows: [], error: null, nowMs };
+
+  const wanted = new Set(accountIds);
+  const since30d = bucketedSince(WINDOW_DAYS);
+  const [recent, older] = await Promise.all([
+    getFundAccountEquity(supabase, since30d, bucketedSince(1)),
+    getFundAccountEquityHourly(
+      supabase,
+      accountIds,
+      bucketedSince(ACCOUNT_WINDOW_DAYS),
+      since30d
+    ),
+  ]);
+  const rows = [...older, ...recent.data.filter((r) => wanted.has(r.account_id))].map(
+    (r) => ({ account_id: r.account_id, exchange: r.exchange, ts: r.ts, total_equity: Number(r.total_equity) })
+  );
+  return { rows, error: recent.error, nowMs };
+}
 
 interface ParentStrategyViewProps {
   supabase: SupabaseClient;
@@ -53,6 +108,8 @@ interface ParentStrategyViewProps {
   childStrategies: Strategy[];
   /** Viewer's share_ratio per child strategy_id. */
   shareRatioByChild: Record<string, number>;
+  /** Viewer's share_ratio on the parent itself; null without direct access. */
+  parentShareRatio: number | null;
   includePaper: boolean;
 }
 
@@ -89,31 +146,43 @@ export async function ParentStrategyView({
   parent,
   childStrategies: children,
   shareRatioByChild,
+  parentShareRatio,
   includePaper,
 }: ParentStrategyViewProps) {
   const childIds = children.map((c) => c.strategy_id);
   const childName = new Map(children.map((c) => [c.strategy_id, c.name]));
 
-  let runs: BookRun[] = [];
+  let running: BookRun[] = [];
   if (childIds.length > 0) {
     const { data, error } = await supabase
       .from("strategy_runs")
-      .select("run_id, strategy_id, mode, status, start_time, initial_capital")
+      .select("run_id, strategy_id, mode, status, start_time, initial_capital, api:params->api")
       .in("strategy_id", childIds)
       .eq("status", "running")
       .order("start_time", { ascending: true });
     if (error) console.error("Error fetching child runs:", error);
-    runs = ((data ?? []) as unknown as BookRun[]).filter((r) =>
-      isParentBookMode(r.mode as string, includePaper)
-    );
+    running = (data ?? []) as unknown as BookRun[];
   }
+  const runs = running.filter((r) => isParentBookMode(r.mode as string, includePaper));
+
+  // Real money: the account(s) behind the children's live runs. Paper books
+  // never touch an account, so the "Include paper" toggle doesn't apply here.
+  const accountIds = Array.from(
+    new Set(
+      running
+        .filter((r) => isParentBookMode(r.mode as string, false))
+        // Re-nest the selected subtree the way accountIdsFromRunParams reads it.
+        .flatMap((r) => accountIdsFromRunParams({ api: r.api } as unknown as Json))
+    )
+  ).sort((a, b) => a.localeCompare(b));
 
   const runIds = runs.map((r) => r.run_id);
   const ratioByRun: Record<string, number> = {};
   for (const r of runs) ratioByRun[r.run_id] = shareRatioByChild[r.strategy_id] ?? 1;
 
   const since = bucketedSince(WINDOW_DAYS);
-  const [equityRows, combinedTrades, positionRows] = await Promise.all([
+  const [accountEquity, equityRows, combinedTrades, positionRows] = await Promise.all([
+    loadAccountEquity(supabase, accountIds),
     getEquityCurve(supabase, runIds, since, bucketedSince(1)),
     getCombinedTrades(supabase, runIds, since),
     Promise.all(
@@ -203,6 +272,25 @@ export async function ParentStrategyView({
         </div>
       </div>
 
+      {/* Real account money — the only real figures on this page */}
+      <ParentAccountEquity
+        parentName={parent.name}
+        accountIds={accountIds}
+        rows={accountEquity.rows}
+        nowMs={accountEquity.nowMs}
+        parentShareRatio={parentShareRatio}
+        fetchError={accountEquity.error}
+      />
+
+      {/* Everything below is derived from the children's virtual books */}
+      <div className="space-y-2 border-t pt-4 sm:pt-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-lg sm:text-xl font-semibold tracking-tight">子策略（模擬權益）</h2>
+          <SimulatedEquityBadge />
+        </div>
+        <SimulatedEquityNote />
+      </div>
+
       {/* Mode toggle */}
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="text-muted-foreground">Books:</span>
@@ -221,19 +309,19 @@ export async function ParentStrategyView({
       <Card>
         <CardContent className="p-0">
           <div className="grid grid-cols-2 sm:grid-cols-4">
-            <Figure label="Total Equity" value={money(books.length ? totalEquity : null)} />
+            <Figure label="模擬總權益" value={money(books.length ? totalEquity : null)} />
             <Figure
-              label="Total PnL"
+              label="模擬總 PnL"
               value={money(books.length ? totalPnl : null, true)}
               className={tone(totalPnl)}
             />
             <Figure
-              label="Return on Capital"
+              label="模擬報酬率"
               value={pct(totalInitial > 0 ? ((totalEquity - totalInitial) / totalInitial) * 100 : null, true)}
               className={tone(totalEquity - totalInitial)}
             />
             <Figure
-              label="Unrealized PnL"
+              label="模擬未實現 PnL"
               value={money(positions.length ? totalUpnl : 0, true)}
               className={tone(totalUpnl)}
             />
@@ -280,7 +368,7 @@ export async function ParentStrategyView({
                         </span>
                       </div>
                       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                        <dt className="text-muted-foreground">Equity</dt>
+                        <dt className="text-muted-foreground">模擬權益</dt>
                         <dd className="text-right font-mono">{money(b.equity)}</dd>
                         <dt className="text-muted-foreground">Return</dt>
                         <dd className={cn("text-right font-mono", tone(b.returnPct))}>
@@ -321,6 +409,9 @@ export async function ParentStrategyView({
                 shareRatio={1}
               />
               <EquityCurveChart
+                title="子策略模擬權益加總"
+                description="各子策略虛擬帳本權益相加（模擬值，非帳戶實際資金）"
+                currentLabel="模擬權益"
                 data={aggregate.map((p) => ({ time: p.ts, equity: p.total_equity }))}
               />
               {books.length > 1 && (
@@ -330,20 +421,31 @@ export async function ParentStrategyView({
                 </p>
               )}
               <DrawdownChart
+                title="子策略模擬權益加總回撤 (%)"
+                description="依上方模擬權益加總計算，非帳戶實際回撤"
                 data={aggregate.map((p) => ({ time: p.ts, drawdown: -p.drawdown_pct }))}
               />
             </>
           )}
-          {pnlSeries.length > 0 && <AggregatePnlChart data={pnlSeries} />}
+          {pnlSeries.length > 0 && (
+            <AggregatePnlChart
+              title="子策略模擬 PnL 加總"
+              description="各子策略虛擬帳本的累計 PnL 相加（模擬值）"
+              data={pnlSeries}
+            />
+          )}
         </>
       )}
 
       {/* Combined positions */}
       <Card>
         <CardHeader className="px-3 sm:px-6">
-          <CardTitle className="text-sm sm:text-base font-medium">Current Positions</CardTitle>
+          <CardTitle className="flex flex-wrap items-center gap-2 text-sm sm:text-base font-medium">
+            目前持倉（依虛擬帳本）
+            <SimulatedEquityBadge />
+          </CardTitle>
           <CardDescription className="text-xs">
-            {positions.length} open · notional {money(totalNotional)} · uPnL {money(totalUpnl, true)}
+            {positions.length} open · notional {money(totalNotional)} · 模擬 uPnL {money(totalUpnl, true)} · 各子策略帳本自身的部位與標記價估值
           </CardDescription>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">

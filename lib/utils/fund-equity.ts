@@ -179,3 +179,30 @@ export function upsertFundEquityRow(
     (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()
   );
 }
+
+/**
+ * Largest peak-to-trough fall of a curve. `pct` is positive (5 = −5%),
+ * `amount` is the dollar fall at that trough. null for an empty curve.
+ *
+ * Deposits and withdrawals are not netted out — account equity moves with
+ * transfers, so a withdrawal shows up here as a drawdown.
+ */
+export function maxDrawdown(
+  curve: ChartDataPoint[]
+): { pct: number; amount: number } | null {
+  if (curve.length === 0) return null;
+  let peak = curve[0].equity;
+  let worstPct = 0;
+  let worstAmount = 0;
+  for (const point of curve) {
+    if (point.equity > peak) peak = point.equity;
+    if (peak <= 0) continue;
+    const fall = peak - point.equity;
+    const pct = (fall / peak) * 100;
+    if (pct > worstPct) {
+      worstPct = pct;
+      worstAmount = fall;
+    }
+  }
+  return { pct: worstPct, amount: worstAmount };
+}

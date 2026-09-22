@@ -5,6 +5,7 @@ import { RunDetailsHeader } from "@/components/strategies/run-details-header";
 import { RunDetailsContent } from "@/components/run-details-content";
 import { PolymarketRunContent } from "@/components/polymarket/polymarket-run-content";
 import { GriffinRunContent } from "@/components/griffin/griffin-run-content";
+import { fetchParentRef } from "@/lib/strategy-hierarchy";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Strategy,
@@ -239,6 +240,9 @@ export default async function RunDetailsPage({ params, searchParams }: RunDetail
     .single() as { data: { share_ratio: number } | null };
   const shareRatio = accessData?.share_ratio ?? 1;
 
+  // A child of a parent strategy: its equity is a simulation of its own book.
+  const parentStrategy = await fetchParentRef(supabase, strategy);
+
   // Check if hedge is enabled from run params
   const runParams = run.params as { strategy?: { enable_hedge?: boolean } } | null;
   const enableHedge = runParams?.strategy?.enable_hedge ?? false;
@@ -256,6 +260,7 @@ export default async function RunDetailsPage({ params, searchParams }: RunDetail
         initialCapital={run.initial_capital}
         enableHedge={enableHedge}
         shareRatio={shareRatio}
+        parentStrategy={parentStrategy}
       />
     </div>
   );

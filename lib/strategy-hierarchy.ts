@@ -99,3 +99,29 @@ export function groupStrategies(strategies: Strategy[]): StrategyGroup[] {
     Math.max(created(g.strategy), ...g.children.map(created));
   return groups.sort((a, b) => newest(b) - newest(a));
 }
+
+export interface ParentRef {
+  strategy_id: string;
+  name: string;
+}
+
+/**
+ * The parent of a strategy (id + name), or null for a top-level strategy.
+ * Child pages use it for the breadcrumb and to label their equity as a
+ * simulation of the child's own virtual book (the real account money is on
+ * the parent page).
+ */
+export async function fetchParentRef(
+  supabase: SupabaseClient,
+  strategy: Pick<Strategy, "parent_strategy_id">
+): Promise<ParentRef | null> {
+  const parentId = parentIdOf(strategy);
+  if (!parentId) return null;
+  const { data, error } = await supabase
+    .from("strategies")
+    .select("strategy_id, name")
+    .eq("strategy_id", parentId)
+    .maybeSingle();
+  if (error) console.error("Error fetching parent strategy:", error);
+  return (data as ParentRef | null) ?? null;
+}

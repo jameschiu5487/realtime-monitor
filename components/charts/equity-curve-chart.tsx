@@ -22,6 +22,10 @@ export interface EquityCurveDataPoint {
 
 interface EquityCurveChartProps {
   data: EquityCurveDataPoint[];
+  title?: string;
+  description?: string;
+  /** Caption above the latest value. */
+  currentLabel?: string;
 }
 
 const chartConfig = {
@@ -31,7 +35,12 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
-export function EquityCurveChart({ data }: EquityCurveChartProps) {
+export function EquityCurveChart({
+  data,
+  title = "Equity Curve",
+  description = "Portfolio equity over time",
+  currentLabel = "Current Equity",
+}: EquityCurveChartProps) {
   const currentEquity = data.length > 0 ? data[data.length - 1].equity : 0;
 
   // Calculate Y-axis domain based on actual data range
@@ -48,12 +57,12 @@ export function EquityCurveChart({ data }: EquityCurveChartProps) {
     <Card>
       <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
         <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5 sm:py-6">
-          <CardTitle>Equity Curve</CardTitle>
-          <CardDescription>Portfolio equity over time</CardDescription>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
         </div>
         <div className="flex">
           <div className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">
-            <span className="text-xs text-muted-foreground">Current Equity</span>
+            <span className="text-xs text-muted-foreground">{currentLabel}</span>
             <span className="text-lg font-bold leading-none sm:text-3xl text-emerald-600 dark:text-emerald-400">
               ${currentEquity.toFixed(2)}
             </span>

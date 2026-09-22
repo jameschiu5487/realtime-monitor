@@ -25,15 +25,23 @@ const chartConfig = {
 } satisfies ChartConfig;
 
 /** Summed cumulative PnL across a parent strategy's books. */
-export function AggregatePnlChart({ data }: { data: PnlPoint[] }) {
+export function AggregatePnlChart({
+  data,
+  title = "Summed PnL",
+  description = "Cumulative PnL of every book, added together",
+}: {
+  data: PnlPoint[];
+  title?: string;
+  description?: string;
+}) {
   const current = data.length > 0 ? data[data.length - 1].pnl : 0;
 
   return (
     <Card>
       <CardHeader className="flex flex-col items-stretch border-b p-0 sm:flex-row">
         <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5 sm:py-6">
-          <CardTitle>Summed PnL</CardTitle>
-          <CardDescription>Cumulative PnL of every book, added together</CardDescription>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
         </div>
         <div className="flex">
           <div className="flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left sm:border-t-0 sm:border-l sm:px-8 sm:py-6">

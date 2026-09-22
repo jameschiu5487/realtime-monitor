@@ -15,6 +15,11 @@ import { IndividualTradePnLChart } from "@/components/charts/individual-trade-pn
 import { CumulativeTradePnLChart } from "@/components/charts/cumulative-trade-pnl-chart";
 import { CombinedTradesTable } from "@/components/trades/combined-trades-table";
 import { PerformanceStats } from "@/components/charts/performance-stats";
+import {
+  SIMULATED_EQUITY_LABEL,
+  SimulatedEquityBadge,
+  SimulatedEquityNote,
+} from "@/components/strategies/simulated-equity-note";
 import { SymbolPnLChart } from "@/components/charts/symbol-pnl-chart";
 import {
   useRealtimeEquityCurve,
@@ -43,6 +48,12 @@ interface RunDetailsContentProps {
   initialCapital: number;
   enableHedge: boolean;
   shareRatio: number;
+  /**
+   * Set when this strategy is a child of a parent strategy: its equity is then
+   * a simulation from its own virtual book, labelled as such, with a link to
+   * the parent page for the real account money.
+   */
+  parentStrategy?: { strategy_id: string; name: string } | null;
 }
 
 // Parallel fetch function - fetches all pages concurrently
@@ -212,6 +223,7 @@ export function RunDetailsContent({
   initialCapital,
   enableHedge,
   shareRatio,
+  parentStrategy = null,
 }: RunDetailsContentProps) {
   // State for loading all historical data
   const [isLoadingAll, setIsLoadingAll] = useState(false);
@@ -524,7 +536,9 @@ export function RunDetailsContent({
       <div className="space-y-3 sm:space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Performance Charts</h2>
+          {parentStrategy && <SimulatedEquityBadge />}
         </div>
+        {parentStrategy && <SimulatedEquityNote parent={parentStrategy} />}
 
         {/* Performance Stats */}
         <PerformanceStats
@@ -550,6 +564,7 @@ export function RunDetailsContent({
             data={filteredEquityCurveData}
             onRangeChange={handleChartRangeChange}
             initEquity={baselineEquity}
+            title={parentStrategy ? SIMULATED_EQUITY_LABEL : undefined}
           />
           <ExchangeEquityChart data={filteredExchangeEquityData} />
         </div>
