@@ -83,8 +83,10 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   「母策略」（如 Kepler）自己沒有 run，`/strategies/[id]` 會改顯示子策略目前 live run 的加總
   （`components/strategies/parent-strategy-view.tsx`）。讀這個欄位一律走
   `lib/strategy-hierarchy.ts`：它容忍欄位不存在（42703），SQL 未套用前 UI 退回扁平列表。
-  子策略的 run 淨值是**模擬帳本**，Overview 不把它們算進任何指標；母策略另有獨立卡片
-  （無勾選框），真錢看資金面板上該帳戶那一列。
+  子策略的 run 淨值是**模擬帳本**，Overview 不把它們算進任何 run 層級指標。母策略另有
+  獨立卡片，勾選後 Active Equity Curve 會畫它的**帳戶真實權益**（`externalSeries`，取自
+  資金面板已解出的資料）—— 它沒有 run_id，所以刻意不走曲線的歷史補抓、即時訂閱與
+  run-mode 過濾，那些路徑全以 run_id 驅動、會把它靜默丟掉。
 - **strategy_runs**: run_id (PK), strategy_id (FK), mode ('backtest'|'paper'|'live'|'realtime'|
   'test-realtime'), status, start_time, end_time, initial_capital, params (jsonb), code_ref, notes。
   **Overview 只認 `realtime` / `test-realtime`**（`app/(dashboard)/page.tsx` 與
