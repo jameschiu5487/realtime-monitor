@@ -38,6 +38,38 @@ interface OverviewPerformanceChartProps {
   shareRatioMap: Record<string, number>;
   /** strategy_id -> strategy name for per-strategy stats display */
   strategyNameMap: Record<string, string>;
+  /**
+   * Series that do not come from equity_curve: a parent strategy's real
+   * exchange-account equity (e.g. Kepler -> zoomex_3), strategyId -> points in
+   * ascending ts order. It has no run ids, so it never goes near the run-based
+   * paths below (history loads, realtime) — it is merged straight into the
+   * per-strategy map, where totals and stats pick it up.
+   */
+  externalSeries?: Record<string, { ts: string; equity: number }[]>;
+  /** Names for externalSeries keys; they are not in strategyNameMap. */
+  externalStrategyNames?: Record<string, string>;
+}
+
+/**
+ * An equity_curve-shaped row for an external series. Account equity carries no
+ * pnl or position value, so those are zero; the whole equity sits in the first
+ * leg so total_equity = binance_equity + bybit_equity still holds.
+ */
+function externalPoint(strategyId: string, ts: string, equity: number): EquityCurve {
+  return {
+    run_id: `external:${strategyId}`,
+    ts,
+    total_equity: equity,
+    total_pnl: 0,
+    total_position_value: 0,
+    binance_equity: equity,
+    binance_pnl: 0,
+    binance_position_value: 0,
+    bybit_equity: 0,
+    bybit_pnl: 0,
+    bybit_position_value: 0,
+    drawdown_pct: 0,
+  };
 }
 
 
@@ -50,6 +82,8 @@ export function OverviewPerformanceChart({
   runToStrategyMap,
   shareRatioMap,
   strategyNameMap,
+  externalSeries,
+  externalStrategyNames,
 }: OverviewPerformanceChartProps) {
   const [equityData, setEquityData] = useState<EquityCurve[]>(initialEquityData);
   const [combinedTrades, setCombinedTrades] = useState<CombinedTrade[]>(initialCombinedTrades);
@@ -211,8 +245,18 @@ export function OverviewPerformanceChart({
     for (const [strategyId, data] of grouped) {
       merged.set(strategyId, mergeStrategyEquity(data));
     }
+    // Not passed through mergeStrategyEquity: its 10-minute gap bridging is
+    // about restarted runs, and the account series is already continuous
+    // (hourly further back is its normal resolution, not a gap).
+    for (const [strategyId, points] of Object.entries(externalSeries ?? {})) {
+      if (points.length === 0) continue;
+      merged.set(
+        strategyId,
+        points.map((p) => externalPoint(strategyId, p.ts, p.equity))
+      );
+    }
     return merged;
-  }, [equityData, runToStrategyMap]);
+  }, [equityData, runToStrategyMap, externalSeries]);
 
   // Aggregate across strategies (for chart)
   const chartData = useMemo(() => {
@@ -320,13 +364,14 @@ export function OverviewPerformanceChart({
 
       return {
         strategyId,
-        strategyName: strategyNameMap[strategyId] ?? "Unknown",
+        strategyName:
+          strategyNameMap[strategyId] ?? externalStrategyNames?.[strategyId] ?? "Unknown",
         filteredEquity,
         filteredTrades,
         runCount: strategyRunIds[strategyId]?.length ?? 0,
       };
     });
-  }, [mergedPerStrategy, shareRatioMap, timeRange, combinedTrades, strategyRunIds, strategyNameMap]);
+  }, [mergedPerStrategy, shareRatioMap, timeRange, combinedTrades, strategyRunIds, strategyNameMap, externalStrategyNames]);
 
   // Compute P&L for selected time range
   const rangePnl = useMemo(() => {
@@ -353,6 +398,11 @@ export function OverviewPerformanceChart({
   const padding = (maxValue - minValue) * 0.1 || 10;
   const yMin = Math.floor(minValue - padding);
   const yMax = Math.ceil(maxValue + padding);
+
+  // Plain derivation, not a hook: this sits after an early return above.
+  const externalNames = Object.entries(externalSeries ?? {})
+    .filter(([, points]) => points.length > 0)
+    .map(([id]) => externalStrategyNames?.[id] ?? strategyNameMap[id] ?? id);
 
   return (
     <div className="space-y-3">
@@ -510,6 +560,13 @@ export function OverviewPerformanceChart({
         filteredEquityCurve={filteredEquityCurve}
         filteredCombinedTrades={filteredCombinedTrades}
       />
+      {externalNames.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {externalNames.join(", ")} {externalNames.length === 1 ? "is" : "are"} included at
+          real exchange-account equity. Accounts report no position value, so combined Net
+          Exposure leaves them out, and the combined curve starts where their data begins.
+        </p>
+      )}
 
       {/* Per-Strategy Stats */}
       {perStrategyStats.length > 1 && (

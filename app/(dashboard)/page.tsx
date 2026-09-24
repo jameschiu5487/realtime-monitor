@@ -121,9 +121,20 @@ export default async function DashboardPage() {
           // Same rule as the parent page: "live" plus the legacy "realtime", no paper.
           isParentBookMode(r.mode as string, false)
       );
+      // Earliest live child run of any status: the account is the parent's money
+      // from then on, so anything before it isn't the parent's to plot.
+      const firstLiveStart = allRuns
+        .filter(
+          (r) =>
+            parentOf.get(r.strategy_id) === parent.strategy_id &&
+            isParentBookMode(r.mode as string, false)
+        )
+        .map((r) => r.start_time)
+        .sort()[0] ?? null;
       return {
         strategyId: parent.strategy_id,
         strategyName: parent.name,
+        firstLiveStart,
         liveRunCount: liveChildRuns.length,
         childCount: new Set(liveChildRuns.map((r) => r.strategy_id)).size,
         accountIds: [

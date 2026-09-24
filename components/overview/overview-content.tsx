@@ -80,12 +80,14 @@ interface ActiveStrategy {
 
 /**
  * A parent strategy (e.g. Kepler). It has no runs; its children keep simulated
- * books on a shared exchange account, so the card carries no money of its own —
- * the real figure is that account's row on the fund dashboard.
+ * books on a shared exchange account. Its real money is that account's equity:
+ * shown on the fund dashboard, and plotted in the equity curve when selected.
  */
 export interface ParentStrategyCard {
   strategyId: string;
   strategyName: string;
+  /** Start of the earliest live child run; the account series is trimmed to it. */
+  firstLiveStart: string | null;
   /** Running live child books. */
   liveRunCount: number;
   childCount: number;
@@ -103,7 +105,7 @@ interface OverviewContentProps {
   allStrategies: Strategy[];
   allRuns: StrategyRun[];
   activeStrategies: ActiveStrategy[];
-  /** Rendered alongside active strategies, but outside selection and metrics. */
+  /** Rendered alongside active strategies; selectable, but never in run-level metrics. */
   parentStrategies?: ParentStrategyCard[];
   runningRunIds: string[];
   shareRatioMap: Record<string, number>;
@@ -131,13 +133,19 @@ function FundEquitySection({
   shareRatio,
   accountStrategies,
   onSummaryChange,
+  onRowsChange,
 }: {
   promise: Promise<{ data: FundAccountEquity[]; error: string | null }>;
   shareRatio: number;
   accountStrategies: ReturnType<typeof buildAccountStrategyMap>;
   onSummaryChange: (summary: FundSummary) => void;
+  /** Hands the resolved rows up, so the equity curve can plot parents' accounts without refetching. */
+  onRowsChange?: (rows: FundAccountEquity[]) => void;
 }) {
   const { data, error } = use(promise);
+  useEffect(() => {
+    onRowsChange?.(data);
+  }, [data, onRowsChange]);
   return (
     <FundEquityDashboard
       initialData={data}
@@ -162,7 +170,10 @@ function FundEquitySkeleton() {
   );
 }
 
-function useSelectedStrategies(activeStrategies: ActiveStrategy[]) {
+/** Stable default so an absent prop doesn't churn the selection memo. */
+const NO_PARENTS: ParentStrategyCard[] = [];
+
+function useSelectedStrategies(selectableIds: string[]) {
   const [selectedIds, setSelectedIds] = useState<Set<string> | null>(null);
 
   // Load from localStorage on mount
@@ -172,7 +183,7 @@ function useSelectedStrategies(activeStrategies: ActiveStrategy[]) {
       if (stored) {
         const parsed = JSON.parse(stored) as string[];
         // Only keep IDs that are still active
-        const activeIds = new Set(activeStrategies.map((s) => s.strategyId));
+        const activeIds = new Set(selectableIds);
         const valid = parsed.filter((id) => activeIds.has(id));
         if (valid.length > 0) {
           setSelectedIds(new Set(valid));
@@ -183,8 +194,8 @@ function useSelectedStrategies(activeStrategies: ActiveStrategy[]) {
       // ignore
     }
     // Default: all active strategies selected
-    setSelectedIds(new Set(activeStrategies.map((s) => s.strategyId)));
-  }, [activeStrategies]);
+    setSelectedIds(new Set(selectableIds));
+  }, [selectableIds]);
 
   // Persist to localStorage
   useEffect(() => {
@@ -206,14 +217,14 @@ function useSelectedStrategies(activeStrategies: ActiveStrategy[]) {
     });
   }, []);
 
-  return { selectedIds: selectedIds ?? new Set(activeStrategies.map((s) => s.strategyId)), toggle };
+  return { selectedIds: selectedIds ?? new Set(selectableIds), toggle };
 }
 
 export function OverviewContent({
   allStrategies,
   allRuns,
   activeStrategies,
-  parentStrategies = [],
+  parentStrategies = NO_PARENTS,
   runningRunIds,
   shareRatioMap,
   runToStrategyMap,
@@ -224,7 +235,14 @@ export function OverviewContent({
   strategyRunIds,
   fundEquityPromise,
 }: OverviewContentProps) {
-  const { selectedIds, toggle } = useSelectedStrategies(activeStrategies);
+  const selectableIds = useMemo(
+    () => [
+      ...activeStrategies.map((s) => s.strategyId),
+      ...parentStrategies.map((p) => p.strategyId),
+    ],
+    [activeStrategies, parentStrategies]
+  );
+  const { selectedIds, toggle } = useSelectedStrategies(selectableIds);
   const { runMode, selectRunMode } = useRunModeFilter();
   const fundShareRatio = useMemo(
     () => deriveFundShareRatio(shareRatioMap),
@@ -338,6 +356,45 @@ export function OverviewContent({
    * equity curve can show real money on its own without changing what the
    * numbers above it count.
    */
+  // Resolved fund equity rows, lifted out of the streamed dashboard.
+  const [fundRows, setFundRows] = useState<FundAccountEquity[] | null>(null);
+
+  /**
+   * Selected parents' real account equity, for the equity curve.
+   *
+   * Built from the fund rows, not from any run, so it bypasses chartFiltered:
+   * that filter works by run id and would always drop a series with none. It
+   * follows the run-mode toggle by meaning instead — account equity is real
+   * money, so it shows under All and Realtime and not under Test.
+   */
+  const externalSeries = useMemo(() => {
+    const out: Record<string, { ts: string; equity: number }[]> = {};
+    if (!fundRows || runMode === "test-realtime") return out;
+    for (const parent of parentStrategies) {
+      if (!selectedIds.has(parent.strategyId) || parent.accountIds.length === 0) continue;
+      const accounts = new Set(parent.accountIds);
+      const since = parent.firstLiveStart
+        ? new Date(parent.firstLiveStart).getTime()
+        : Number.NEGATIVE_INFINITY;
+      const byTs = new Map<string, number>();
+      for (const row of fundRows) {
+        if (!accounts.has(row.account_id)) continue;
+        if (new Date(row.ts).getTime() < since) continue;
+        // Buckets are shared across accounts, so equal ts means the same instant.
+        byTs.set(row.ts, (byTs.get(row.ts) ?? 0) + Number(row.total_equity));
+      }
+      out[parent.strategyId] = [...byTs.entries()]
+        .map(([ts, equity]) => ({ ts, equity }))
+        .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+    }
+    return out;
+  }, [fundRows, runMode, parentStrategies, selectedIds]);
+
+  const parentNameMap = useMemo(
+    () => Object.fromEntries(parentStrategies.map((p) => [p.strategyId, p.strategyName])),
+    [parentStrategies]
+  );
+
   const chartFiltered = useMemo(() => {
     if (runMode === "all") return filtered;
 
@@ -496,6 +553,7 @@ export function OverviewContent({
           shareRatio={fundShareRatio}
           accountStrategies={accountStrategies}
           onSummaryChange={handleFundSummaryChange}
+          onRowsChange={setFundRows}
         />
       </Suspense>
 
@@ -573,14 +631,32 @@ export function OverviewContent({
                 </Card>
               );
             })}
-            {parentStrategies.map((parent) => (
-              // No checkbox: selection drives run-level metrics, and a parent's
-              // child books are simulated, so nothing here should feed them.
-              <Card key={parent.strategyId} className="transition-colors hover:bg-accent/50">
+            {parentStrategies.map((parent) => {
+              // Selecting a parent adds its real account equity to the equity
+              // curve. It has no runs, so the run-level metrics are unaffected.
+              const isSelected = selectedIds.has(parent.strategyId);
+              return (
+              <Card
+                key={parent.strategyId}
+                className={cn(
+                  "transition-colors",
+                  isSelected ? "hover:bg-accent/50" : "opacity-50 hover:opacity-70"
+                )}
+              >
                 <CardContent className="p-3 sm:p-4">
                   <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => toggle(parent.strategyId)}
+                      className="shrink-0"
+                    />
                     <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <div className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
+                    <div
+                      className={cn(
+                        "h-2 w-2 shrink-0 rounded-full bg-emerald-500",
+                        isSelected && "animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.4)]"
+                      )}
+                    />
                     <Link
                       // The parent detail page, not /combined — a parent has no runs of its own.
                       href={`/strategies/${parent.strategyId}`}
@@ -613,7 +689,8 @@ export function OverviewContent({
                   )}
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
           </div>
         </div>
       ) : (
@@ -660,6 +737,8 @@ export function OverviewContent({
               runToStrategyMap={runToStrategyMap}
               shareRatioMap={shareRatioMap}
               strategyNameMap={chartFiltered.strategyNameMap}
+              externalSeries={externalSeries}
+              externalStrategyNames={parentNameMap}
             />
           </CardContent>
         </Card>
