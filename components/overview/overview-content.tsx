@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, Suspense, use } from "react";
 import Link from "next/link";
+import { Layers } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FundEquityDashboard } from "@/components/overview/fund-equity-dashboard";
@@ -77,6 +78,21 @@ interface ActiveStrategy {
   latestStartTime: string;
 }
 
+/**
+ * A parent strategy (e.g. Kepler). It has no runs; its children keep simulated
+ * books on a shared exchange account, so the card carries no money of its own —
+ * the real figure is that account's row on the fund dashboard.
+ */
+export interface ParentStrategyCard {
+  strategyId: string;
+  strategyName: string;
+  /** Running live child books. */
+  liveRunCount: number;
+  childCount: number;
+  /** Exchange accounts the child books trade on, e.g. ["zoomex_3"]. */
+  accountIds: string[];
+}
+
 interface MetricsData {
   latestEquities: EquityCurve[];
   equities24hAgo: EquityCurve[];
@@ -87,6 +103,8 @@ interface OverviewContentProps {
   allStrategies: Strategy[];
   allRuns: StrategyRun[];
   activeStrategies: ActiveStrategy[];
+  /** Rendered alongside active strategies, but outside selection and metrics. */
+  parentStrategies?: ParentStrategyCard[];
   runningRunIds: string[];
   shareRatioMap: Record<string, number>;
   runToStrategyMap: Record<string, string>;
@@ -195,6 +213,7 @@ export function OverviewContent({
   allStrategies,
   allRuns,
   activeStrategies,
+  parentStrategies = [],
   runningRunIds,
   shareRatioMap,
   runToStrategyMap,
@@ -215,10 +234,20 @@ export function OverviewContent({
     (mode: string) => mode === "realtime" || mode === "test-realtime",
     []
   );
-  const accountStrategies = useMemo(
-    () => buildAccountStrategyMap(allRuns, strategyNameMap, isLiveMode),
-    [allRuns, strategyNameMap, isLiveMode]
-  );
+  const accountStrategies = useMemo(() => {
+    const map = buildAccountStrategyMap(allRuns, strategyNameMap, isLiveMode);
+    // A parent's child books run as "live", which isLiveMode leaves out, so
+    // their account would otherwise show no occupant. Label it with the parent
+    // once rather than each child: the account is the parent's money.
+    for (const parent of parentStrategies) {
+      for (const accountId of parent.accountIds) {
+        const names = map[accountId] ?? [];
+        if (!names.includes(parent.strategyName)) names.push(parent.strategyName);
+        map[accountId] = names;
+      }
+    }
+    return map;
+  }, [allRuns, strategyNameMap, isLiveMode, parentStrategies]);
   const strategyAccounts = useMemo(
     () => buildStrategyAccountMap(allRuns, isLiveMode),
     [allRuns, isLiveMode]
@@ -471,7 +500,7 @@ export function OverviewContent({
       </Suspense>
 
       {/* Active Strategies */}
-      {activeStrategies.length > 0 ? (
+      {activeStrategies.length + parentStrategies.length > 0 ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
@@ -544,6 +573,47 @@ export function OverviewContent({
                 </Card>
               );
             })}
+            {parentStrategies.map((parent) => (
+              // No checkbox: selection drives run-level metrics, and a parent's
+              // child books are simulated, so nothing here should feed them.
+              <Card key={parent.strategyId} className="transition-colors hover:bg-accent/50">
+                <CardContent className="p-3 sm:p-4">
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
+                    <Link
+                      // The parent detail page, not /combined — a parent has no runs of its own.
+                      href={`/strategies/${parent.strategyId}`}
+                      className="font-medium text-sm sm:text-base truncate flex-1 hover:underline"
+                    >
+                      {parent.strategyName}
+                    </Link>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-mono uppercase">
+                      live
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground font-mono mt-2 ml-10">
+                    {parent.childCount} {parent.childCount === 1 ? "child" : "children"} ·{" "}
+                    {parent.liveRunCount} live {parent.liveRunCount === 1 ? "book" : "books"}
+                  </p>
+                  {parent.accountIds.length > 0 && (
+                    <div className="mt-2 ml-10 flex flex-wrap gap-1.5">
+                      {parent.accountIds.map((accountId) => (
+                        <span
+                          key={accountId}
+                          className={cn(
+                            "rounded-md px-1.5 py-0.5 text-xs font-mono font-medium",
+                            exchangeBadgeClass(accountId)
+                          )}
+                        >
+                          {accountId}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </div>
       ) : (

@@ -1,4 +1,5 @@
 import { unstable_cache } from "next/cache";
+import { isMissingColumnError } from "@/lib/strategy-hierarchy";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   CombinedTrade,
@@ -169,6 +170,8 @@ type RunApiRow = {
 
 export type OverviewStrategy = Pick<Strategy, "strategy_id" | "name"> & {
   market?: string;
+  /** Set on child strategies; the parent itself has no runs. */
+  parent_strategy_id?: string | null;
 };
 
 /**
@@ -187,12 +190,19 @@ export async function getStrategiesAndRuns(supabase: SupabaseClient): Promise<{
     "strategies-and-runs",
     ["overview:strategies-and-runs"],
     async () => {
-      const [strategiesResult, runsResult] = await Promise.all([
-        supabase.from("strategies").select("strategy_id, name, market"),
+      const [strategiesFirst, runsResult] = await Promise.all([
+        supabase.from("strategies").select("strategy_id, name, market, parent_strategy_id"),
         supabase
           .from("strategy_runs")
           .select("run_id, strategy_id, status, mode, start_time, api:params->api"),
       ]);
+
+      // parent_strategy_id arrived with supabase/manual/2026-09-22-strategy-parent.sql.
+      // Where that hasn't been applied, fall back to the old column list rather
+      // than blanking the whole Overview (same tolerance as lib/strategy-hierarchy.ts).
+      const strategiesResult = isMissingColumnError(strategiesFirst.error)
+        ? await supabase.from("strategies").select("strategy_id, name, market")
+        : strategiesFirst;
 
       if (strategiesResult.error) {
         console.error("Error fetching strategies:", strategiesResult.error);

@@ -11,6 +11,9 @@ import {
   hourBucket,
 } from "@/lib/overview-queries";
 import type { Strategy, StrategyRun } from "@/lib/types/database";
+import { isParentBookMode } from "@/lib/parent-strategy";
+import { accountIdsFromRunParams } from "@/lib/utils/fund-account-strategy";
+import type { ParentStrategyCard } from "@/components/overview/overview-content";
 
 // NOTE: no `export const revalidate` here — reading cookies for auth makes this
 // route dynamic, so a page-level revalidate would silently do nothing. Caching
@@ -54,8 +57,19 @@ export default async function DashboardPage() {
     shareRatioMap[row.strategy_id] = row.share_ratio;
   }
 
+  // Children of a parent strategy (e.g. Kepler) keep virtual books on a shared
+  // exchange account — their equity is simulated, not money. They are kept out
+  // of every per-run figure here; the parent gets its own card below instead,
+  // and its real money is the account row on the fund dashboard.
+  const parentOf = new Map<string, string>();
+  for (const s of allStrategiesRaw) {
+    if (s.parent_strategy_id) parentOf.set(s.strategy_id, s.parent_strategy_id);
+  }
+  const isOverviewRun = (r: StrategyRun) =>
+    isOverviewLiveMode(r.mode as string) && !parentOf.has(r.strategy_id);
+
   const runningRunIds = allRuns
-    .filter((r) => r.status === "running" && isOverviewLiveMode(r.mode as string))
+    .filter((r) => r.status === "running" && isOverviewRun(r))
     .map((r) => r.run_id);
 
   const runToStrategyMap: Record<string, string> = {};
@@ -71,7 +85,7 @@ export default async function DashboardPage() {
   // Group by strategy for combined display — realtime + test-realtime
   const activeStrategyIds = new Set(
     allRuns
-      .filter((r) => r.status === "running" && isOverviewLiveMode(r.mode as string))
+      .filter((r) => r.status === "running" && isOverviewRun(r))
       .map((r) => r.strategy_id)
   );
   const activeStrategies = Array.from(activeStrategyIds).map((strategyId) => {
@@ -92,6 +106,32 @@ export default async function DashboardPage() {
         )[0]?.start_time ?? "",
     };
   });
+
+  // One card per parent with at least one running live child book. Nothing
+  // here feeds the metrics, the performance chart or the selection — only the
+  // card itself and the account badge, both from real-account data.
+  const parentIds = new Set(parentOf.values());
+  const parentStrategies: ParentStrategyCard[] = allStrategies
+    .filter((s) => parentIds.has(s.strategy_id))
+    .map((parent) => {
+      const liveChildRuns = allRuns.filter(
+        (r) =>
+          parentOf.get(r.strategy_id) === parent.strategy_id &&
+          r.status === "running" &&
+          // Same rule as the parent page: "live" plus the legacy "realtime", no paper.
+          isParentBookMode(r.mode as string, false)
+      );
+      return {
+        strategyId: parent.strategy_id,
+        strategyName: parent.name,
+        liveRunCount: liveChildRuns.length,
+        childCount: new Set(liveChildRuns.map((r) => r.strategy_id)).size,
+        accountIds: [
+          ...new Set(liveChildRuns.flatMap((r) => accountIdsFromRunParams(r.params))),
+        ].sort((a, b) => a.localeCompare(b)),
+      };
+    })
+    .filter((p) => p.liveRunCount > 0);
 
   // Pre-fetch chart data: realtime + test-realtime runs for active strategies
   const strategyRunIds: Record<string, string[]> = {};
@@ -135,6 +175,7 @@ export default async function DashboardPage() {
       allStrategies={allStrategies}
       allRuns={allRuns}
       activeStrategies={activeStrategies}
+      parentStrategies={parentStrategies}
       runningRunIds={runningRunIds}
       shareRatioMap={shareRatioMap}
       runToStrategyMap={runToStrategyMap}
