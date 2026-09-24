@@ -119,6 +119,13 @@ function isOversized(value: unknown): value is OversizedMarker {
  * marker instead. Subsequent requests see the marker (no re-measuring for the
  * revalidate window) and read straight through, which is exactly the behaviour
  * an uncacheable payload should have — minus the crash.
+ *
+ * Cache keys: unstable_cache keys on the callback's source plus keyParts, and
+ * the callback it sees is always the `measured` wrapper below — identical for
+ * every fetcher. Editing a fetcher's select therefore does NOT change its key,
+ * and the Vercel data cache survives deployments, so the old payload shape
+ * keeps being served. Whenever a fetcher's output shape changes, bump the
+ * version in its keyParts.
  */
 async function cachedQuery<A extends unknown[], T>(
   label: string,
@@ -188,7 +195,9 @@ export async function getStrategiesAndRuns(supabase: SupabaseClient): Promise<{
 }> {
   return cachedQuery(
     "strategies-and-runs",
-    ["overview:strategies-and-runs"],
+    // Bump the version whenever this query's output shape changes — see the
+    // note on cachedQuery. v2 added strategies.parent_strategy_id.
+    ["overview:strategies-and-runs:v2"],
     async () => {
       const [strategiesFirst, runsResult] = await Promise.all([
         supabase.from("strategies").select("strategy_id, name, market, parent_strategy_id"),
