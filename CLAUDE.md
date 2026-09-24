@@ -118,6 +118,10 @@ Overview 會靜默顯示錯的金額。要刪就同時處理兩張表，或事�
 ## 子系統文件
 
 - 推播通知全系統（trigger、hedge 配對、share_ratio、驗證方法）：`docs/notifications.md`
+- **改 `lib/overview-queries.ts` 任何查詢的輸出欄位時，要把它的 cache keyParts 升版**
+  （如 `overview:strategies-and-runs:v2`）。`cachedQuery` 交給 `unstable_cache` 的永遠是同一個
+  包裝函式，改 `select` 不會改變 key，而 Vercel data cache 會跨部署保留 —— 新程式碼會一直
+  拿到舊形狀的資料且不報錯。Kepler 上 Overview 時就卡在這裡。
 - **跨交易所行情解析前先讀 `lib/services/volume-fetcher.ts` 的檔頭**：七家的 K 線
   欄位順序、排序方向、成交量單位都不一樣（BingX 只給 base、BitMart 給合約張數），
   解析錯不會噴錯、只會讓數字差 1000 倍。那裡記了每一家已實測驗證的對照與交叉驗算法。
