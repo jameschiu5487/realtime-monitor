@@ -107,6 +107,8 @@ interface OverviewContentProps {
   activeStrategies: ActiveStrategy[];
   /** Rendered alongside active strategies; selectable, but never in run-level metrics. */
   parentStrategies?: ParentStrategyCard[];
+  /** Parent strategy_id -> its live books' fill notional, for turnover. */
+  parentFills?: Record<string, { ts: string; notional: number }[]>;
   runningRunIds: string[];
   shareRatioMap: Record<string, number>;
   runToStrategyMap: Record<string, string>;
@@ -234,6 +236,7 @@ export function OverviewContent({
   combinedTradesData,
   strategyRunIds,
   fundEquityPromise,
+  parentFills,
 }: OverviewContentProps) {
   const selectableIds = useMemo(
     () => [
@@ -739,6 +742,7 @@ export function OverviewContent({
               strategyNameMap={chartFiltered.strategyNameMap}
               externalSeries={externalSeries}
               externalStrategyNames={parentNameMap}
+              externalFills={parentFills}
             />
           </CardContent>
         </Card>

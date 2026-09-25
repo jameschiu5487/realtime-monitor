@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/table";
 import { EquityCurveChart } from "@/components/charts/equity-curve-chart";
 import { DrawdownChart } from "@/components/charts/drawdown-chart";
-import { PerformanceStats } from "@/components/charts/performance-stats";
+import { PerformanceStats, type TurnoverFigures } from "@/components/charts/performance-stats";
 import { AggregatePnlChart } from "@/components/strategies/aggregate-pnl-chart";
 import { ParentAccountEquity } from "@/components/strategies/parent-account-equity";
 import {
@@ -30,6 +30,7 @@ import {
 import {
   bucketedSince,
   getCombinedTrades,
+  getFillNotional,
   getEquityCurve,
   getFundAccountEquity,
   getFundAccountEquityHourly,
@@ -181,7 +182,7 @@ export async function ParentStrategyView({
   for (const r of runs) ratioByRun[r.run_id] = shareRatioByChild[r.strategy_id] ?? 1;
 
   const since = bucketedSince(WINDOW_DAYS);
-  const [accountEquity, equityRows, combinedTrades, positionRows] = await Promise.all([
+  const [accountEquity, equityRows, combinedTrades, positionRows, fills] = await Promise.all([
     loadAccountEquity(supabase, accountIds),
     getEquityCurve(supabase, runIds, since, bucketedSince(1)),
     getCombinedTrades(supabase, runIds, since),
@@ -197,6 +198,7 @@ export async function ParentStrategyView({
         return (data ?? []) as Position[];
       })
     ),
+    getFillNotional(supabase, runIds, since),
   ]);
 
   const seriesByRun = equityByRun(equityRows);
@@ -228,6 +230,18 @@ export async function ParentStrategyView({
     combinedTrades.filter((t) => new Date(t.ts).getTime() >= aggregateStart),
     ratioByRun
   );
+  // Turnover from fills: the Kepler engine records every fill in trades but
+  // writes combined_trades only for some round trips, so combined-trade
+  // notional reads near zero.
+  const statsTurnover: TurnoverFigures | undefined =
+    aggregate.length > 0
+      ? {
+          notional: fills
+            .filter((f) => new Date(f.ts).getTime() >= aggregateStart)
+            .reduce((sum, f) => sum + f.notional * (ratioByRun[f.run_id] ?? 1), 0),
+          pnl: aggregate[aggregate.length - 1].total_equity - aggregate[0].total_equity,
+        }
+      : undefined;
 
   const totalEquity = books.reduce((s, b) => s + (b.equity ?? 0), 0);
   const totalPnl = books.reduce((s, b) => s + (b.pnl ?? 0), 0);
@@ -407,6 +421,7 @@ export async function ParentStrategyView({
                 filteredEquityCurve={aggregate}
                 filteredCombinedTrades={statsTrades}
                 shareRatio={1}
+                turnover={statsTurnover}
               />
               <EquityCurveChart
                 title="Sub-strategies simulated equity (sum)"

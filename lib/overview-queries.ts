@@ -448,6 +448,49 @@ export async function getCombinedTrades(
   );
 }
 
+/** One fill's traded notional (|quantity_actual × price|), unscaled. */
+export interface FillNotional {
+  run_id: string;
+  ts: string;
+  notional: number;
+}
+
+/**
+ * Fills as notional, for turnover on books whose engine doesn't write
+ * combined_trades (Kepler records fills in `trades` only).
+ */
+export async function getFillNotional(
+  supabase: SupabaseClient,
+  runIds: string[],
+  since: string
+): Promise<FillNotional[]> {
+  if (runIds.length === 0) return [];
+
+  type Row = { run_id: string; ts: string; quantity_actual: number | null; price: number | null };
+  return cachedQuery(
+    "fill-notional",
+    ["overview:fill-notional:v1"],
+    async (ids: string[], sinceIso: string) => {
+      const rows = await fetchAllPages<Row>("trades", (from, to) =>
+        supabase
+          .from("trades")
+          .select("run_id, ts, quantity_actual, price")
+          .in("run_id", ids)
+          .gte("ts", sinceIso)
+          .order("ts", { ascending: true })
+          .range(from, to) as unknown as PromiseLike<PageResult<Row>>
+      );
+      return rows.map((r) => ({
+        run_id: r.run_id,
+        ts: r.ts,
+        notional: Math.abs(Number(r.quantity_actual ?? 0) * Number(r.price ?? 0)),
+      }));
+    },
+    runIds,
+    since
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Fund account equity                                                        */
 /* -------------------------------------------------------------------------- */

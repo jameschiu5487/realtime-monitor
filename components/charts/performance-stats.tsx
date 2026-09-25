@@ -9,6 +9,29 @@ interface PerformanceStatsProps {
   filteredEquityCurve: EquityCurve[];
   filteredCombinedTrades: CombinedTrade[];
   shareRatio?: number;
+  /**
+   * Replaces the turnover (and the PnL it is divided into) derived from
+   * combined trades. For books whose engine doesn't write combined_trades —
+   * Kepler records fills in `trades` only — so turnover would read 0.
+   */
+  turnover?: TurnoverFigures;
+}
+
+export interface TurnoverFigures {
+  notional: number;
+  pnl: number;
+}
+
+/** Turnover as entry + exit notional of combined trades, with their summed PnL. */
+export function combinedTradeTurnover(trades: CombinedTrade[]): TurnoverFigures {
+  let notional = 0;
+  let pnl = 0;
+  for (const t of trades) {
+    notional += Math.abs(t.quantity * t.entry_price);
+    if (t.exit_price) notional += Math.abs(t.quantity * t.exit_price);
+    pnl += t.total_pnl ?? 0;
+  }
+  return { notional, pnl };
 }
 
 function formatPercent(value: number, decimals: number = 2) {
@@ -85,7 +108,11 @@ function ColoredStatCard({
 }
 
 // Calculate statistics from equity curve data
-function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrade[]) {
+function calculateStats(
+  equityCurve: EquityCurve[],
+  combinedTrades: CombinedTrade[],
+  turnoverOverride?: TurnoverFigures
+) {
   if (equityCurve.length === 0) {
     return {
       totalReturn: 0,
@@ -189,13 +216,8 @@ function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrad
   }
 
   // Total Turnover: entry + exit notional values
-  const totalTurnover = combinedTrades.reduce((sum, trade) => {
-    const entryNotional = Math.abs(trade.quantity * trade.entry_price);
-    const exitNotional = trade.exit_price
-      ? Math.abs(trade.quantity * trade.exit_price)
-      : 0;
-    return sum + entryNotional + exitNotional;
-  }, 0);
+  const { notional: totalTurnover, pnl: totalPnl } =
+    turnoverOverride ?? combinedTradeTurnover(combinedTrades);
 
   // Turnover Rate: total turnover / initial equity
   const turnoverRate = initialEquity > 0 ? totalTurnover / initialEquity : 0;
@@ -204,10 +226,6 @@ function calculateStats(equityCurve: EquityCurve[], combinedTrades: CombinedTrad
   const dailyTurnoverRate = periodDays > 0 ? turnoverRate / periodDays : 0;
 
   // PnL per Turnover in basis points
-  const totalPnl = combinedTrades.reduce(
-    (sum, trade) => sum + (trade.total_pnl ?? 0),
-    0
-  );
   const pnlPerTurnoverBps = totalTurnover > 0 ? (totalPnl / totalTurnover) * 10000 : 0;
 
   return {
@@ -230,11 +248,12 @@ export function PerformanceStats({
   filteredEquityCurve,
   filteredCombinedTrades,
   shareRatio = 1,
+  turnover,
 }: PerformanceStatsProps) {
   // Calculate stats based on selected time range
   const stats = useMemo(
-    () => calculateStats(filteredEquityCurve, filteredCombinedTrades),
-    [filteredEquityCurve, filteredCombinedTrades]
+    () => calculateStats(filteredEquityCurve, filteredCombinedTrades, turnover),
+    [filteredEquityCurve, filteredCombinedTrades, turnover]
   );
 
   // Scale dollar-amount stats by share ratio

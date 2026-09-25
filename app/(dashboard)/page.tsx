@@ -3,6 +3,7 @@ import { OverviewContent } from "@/components/overview/overview-content";
 import {
   bucketedSince,
   getCombinedTrades,
+  getFillNotional,
   getEquityCurve,
   getEquityEndpoints,
   getFundAccountEquity,
@@ -145,6 +146,19 @@ export default async function DashboardPage() {
     })
     .filter((p) => p.liveRunCount > 0);
 
+  // Every live child run of a shown parent (any status — fills from books that
+  // have since stopped still traded that account), run_id -> parent_id. Kepler
+  // writes fills to trades but hardly any combined_trades, so its turnover
+  // comes from here.
+  const shownParents = new Set(parentStrategies.map((p) => p.strategyId));
+  const parentLiveRunIds = new Map<string, string>();
+  for (const r of allRuns) {
+    const parentId = parentOf.get(r.strategy_id);
+    if (parentId && shownParents.has(parentId) && isParentBookMode(r.mode as string, false)) {
+      parentLiveRunIds.set(r.run_id, parentId);
+    }
+  }
+
   // Pre-fetch chart data: realtime + test-realtime runs for active strategies
   const strategyRunIds: Record<string, string[]> = {};
   const allActiveRunIds: string[] = [];
@@ -175,12 +189,21 @@ export default async function DashboardPage() {
     todayTrades,
     equityData,
     combinedTradesData,
+    parentFillRows,
   ] = await Promise.all([
     getEquityEndpoints(supabase, runningRunIds, since24h),
     getTodayTradeRunIds(supabase, runningRunIds, todayStart.toISOString()),
     getEquityCurve(supabase, allActiveRunIds, since7d, since24h),
     getCombinedTrades(supabase, allActiveRunIds, since30d),
+    getFillNotional(supabase, [...parentLiveRunIds.keys()], since30d),
   ]);
+
+  const parentFills: Record<string, { ts: string; notional: number }[]> = {};
+  for (const f of parentFillRows) {
+    const parentId = parentLiveRunIds.get(f.run_id);
+    if (!parentId) continue;
+    (parentFills[parentId] ??= []).push({ ts: f.ts, notional: f.notional });
+  }
 
   return (
     <OverviewContent
@@ -201,6 +224,7 @@ export default async function DashboardPage() {
       combinedTradesData={combinedTradesData}
       strategyRunIds={strategyRunIds}
       fundEquityPromise={fundEquityPromise}
+      parentFills={parentFills}
     />
   );
 }

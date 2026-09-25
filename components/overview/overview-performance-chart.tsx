@@ -11,7 +11,11 @@ import {
 import { TimeRangeSelector, TimeRange } from "@/components/charts/time-range-selector";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { PerformanceStats } from "@/components/charts/performance-stats";
+import {
+  PerformanceStats,
+  combinedTradeTurnover,
+  type TurnoverFigures,
+} from "@/components/charts/performance-stats";
 import {
   mergeStrategyEquity,
   aggregateTotalEquity,
@@ -48,6 +52,11 @@ interface OverviewPerformanceChartProps {
   externalSeries?: Record<string, { ts: string; equity: number }[]>;
   /** Names for externalSeries keys; they are not in strategyNameMap. */
   externalStrategyNames?: Record<string, string>;
+  /**
+   * Fill notional per externalSeries key. The account series has no combined
+   * trades, so turnover comes from its books' fills instead.
+   */
+  externalFills?: Record<string, { ts: string; notional: number }[]>;
 }
 
 /**
@@ -84,6 +93,7 @@ export function OverviewPerformanceChart({
   strategyNameMap,
   externalSeries,
   externalStrategyNames,
+  externalFills,
 }: OverviewPerformanceChartProps) {
   const [equityData, setEquityData] = useState<EquityCurve[]>(initialEquityData);
   const [combinedTrades, setCombinedTrades] = useState<CombinedTrade[]>(initialCombinedTrades);
@@ -339,6 +349,40 @@ export function OverviewPerformanceChart({
     });
   }, [combinedTrades, timeRange]);
 
+  // Turnover of each plotted external series within the range: its fills'
+  // notional, over the account equity change (unscaled, like combined trades).
+  const externalTurnover = useMemo(() => {
+    const out = new Map<string, TurnoverFigures>();
+    const start = timeRange.start.getTime();
+    const end = timeRange.end.getTime();
+    const inRange = (ts: string) => {
+      const t = new Date(ts).getTime();
+      return t >= start && t <= end;
+    };
+    for (const strategyId of Object.keys(externalSeries ?? {})) {
+      const points = (mergedPerStrategy.get(strategyId) ?? []).filter((p) => inRange(p.ts));
+      if (points.length === 0) continue;
+      const notional = (externalFills?.[strategyId] ?? [])
+        .filter((f) => inRange(f.ts))
+        .reduce((sum, f) => sum + f.notional, 0);
+      const pnl = points[points.length - 1].total_equity - points[0].total_equity;
+      out.set(strategyId, { notional, pnl });
+    }
+    return out;
+  }, [externalSeries, externalFills, mergedPerStrategy, timeRange]);
+
+  // Combined turnover only needs overriding when an external series is in it.
+  const combinedTurnover = useMemo((): TurnoverFigures | undefined => {
+    if (externalTurnover.size === 0) return undefined;
+    const total = combinedTradeTurnover(filteredCombinedTrades);
+    for (const [strategyId, t] of externalTurnover) {
+      const ratio = shareRatioMap[strategyId] ?? 1;
+      total.notional += t.notional * ratio;
+      total.pnl += t.pnl * ratio;
+    }
+    return total;
+  }, [externalTurnover, filteredCombinedTrades, shareRatioMap]);
+
   // Per-strategy filtered data for individual strategy stats
   const perStrategyStats = useMemo(() => {
     const strategyIds = Array.from(mergedPerStrategy.keys());
@@ -368,10 +412,11 @@ export function OverviewPerformanceChart({
           strategyNameMap[strategyId] ?? externalStrategyNames?.[strategyId] ?? "Unknown",
         filteredEquity,
         filteredTrades,
+        turnover: externalTurnover.get(strategyId),
         runCount: strategyRunIds[strategyId]?.length ?? 0,
       };
     });
-  }, [mergedPerStrategy, shareRatioMap, timeRange, combinedTrades, strategyRunIds, strategyNameMap, externalStrategyNames]);
+  }, [mergedPerStrategy, shareRatioMap, timeRange, combinedTrades, strategyRunIds, strategyNameMap, externalStrategyNames, externalTurnover]);
 
   // Compute P&L for selected time range
   const rangePnl = useMemo(() => {
@@ -559,6 +604,7 @@ export function OverviewPerformanceChart({
       <PerformanceStats
         filteredEquityCurve={filteredEquityCurve}
         filteredCombinedTrades={filteredCombinedTrades}
+        turnover={combinedTurnover}
       />
       {externalNames.length > 0 && (
         <p className="text-xs text-muted-foreground">
@@ -587,6 +633,7 @@ export function OverviewPerformanceChart({
                 filteredEquityCurve={s.filteredEquity}
                 filteredCombinedTrades={s.filteredTrades}
                 shareRatio={shareRatioMap[s.strategyId] ?? 1}
+                turnover={s.turnover}
               />
             </div>
           ))}
