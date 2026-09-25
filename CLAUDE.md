@@ -92,6 +92,8 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   **Overview 只認 `realtime` / `test-realtime`**（`app/(dashboard)/page.tsx` 與
   `overview-content.tsx` 各一份判斷）；母策略頁則認 `live` + `realtime`（`lib/parent-strategy.ts`）。
   非子策略的策略若改用 `live`，會在 Overview 靜默消失 —— Kepler 就是這樣不見的。
+  **`start_time` 實際可能是 null**（引擎會先建 run 再補時間），產生型別卻標 `string`；
+  直接 `.slice()` / `new Date()` 會讓整頁 SSR 崩成 error boundary —— Kepler 頁就這樣掛過。
 - **trades**: trade_id (PK), run_id (FK), ts, symbol, exchange, action, side ('buy'|'sell'),
   quantity_nominal, quantity_actual, price, fee_amount_usdt, fee_rate_bps,
   funding_rate, interval_hours, status
