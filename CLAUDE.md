@@ -87,6 +87,9 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   獨立卡片，勾選後 Active Equity Curve 會畫它的**帳戶真實權益**（`externalSeries`，取自
   資金面板已解出的資料）—— 它沒有 run_id，所以刻意不走曲線的歷史補抓、即時訂閱與
   run-mode 過濾，那些路徑全以 run_id 驅動、會把它靜默丟掉。
+  **Kepler 引擎只把成交寫進 `trades`，`combined_trades` 只有零星幾筆**：任何從
+  combined_trades 算的指標（turnover、positions 數、勝率）對它都近乎 0。turnover 已改走
+  `getFillNotional` + PerformanceStats 的 `turnover` prop，其他指標還沒有。
 - **strategy_runs**: run_id (PK), strategy_id (FK), mode ('backtest'|'paper'|'live'|'realtime'|
   'test-realtime'), status, start_time, end_time, initial_capital, params (jsonb), code_ref, notes。
   **Overview 只認 `realtime` / `test-realtime`**（`app/(dashboard)/page.tsx` 與
