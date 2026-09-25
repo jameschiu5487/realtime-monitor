@@ -29,7 +29,8 @@ export interface ParentBook {
   childId: string;
   childName: string;
   mode: string;
-  startTime: string;
+  /** Nullable in practice: the engine can register a run before stamping start_time. */
+  startTime: string | null;
   shareRatio: number;
   /** Scaled by shareRatio. */
   initialCapital: number;

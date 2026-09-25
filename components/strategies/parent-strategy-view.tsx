@@ -364,7 +364,7 @@ export async function ParentStrategyView({
                       <div className="flex items-center justify-between gap-2 mb-2">
                         <Badge variant={b.mode === "paper" ? "secondary" : "default"}>{b.mode}</Badge>
                         <span className="text-xs text-muted-foreground font-mono">
-                          since {b.startTime.slice(0, 10)}
+                          {b.startTime ? `since ${b.startTime.slice(0, 10)}` : "starting…"}
                         </span>
                       </div>
                       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">

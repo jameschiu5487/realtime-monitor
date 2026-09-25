@@ -130,6 +130,7 @@ export default async function DashboardPage() {
             isParentBookMode(r.mode as string, false)
         )
         .map((r) => r.start_time)
+        .filter(Boolean)
         .sort()[0] ?? null;
       return {
         strategyId: parent.strategy_id,
