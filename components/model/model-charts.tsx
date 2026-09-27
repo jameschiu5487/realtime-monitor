@@ -25,6 +25,8 @@ import {
 import {
   ChartConfig,
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
@@ -57,11 +59,18 @@ const fmtTs = (ms: number) =>
 /* ------------------------------------------------------------------ */
 
 const icConfig = {
-  ic: { label: "IC", color: COLORS.pred },
-  rankIc: { label: "Rank IC", color: COLORS.truth },
-  cumulativeIc: { label: "Cumulative IC", color: COLORS.cumulative },
-  n: { label: "Symbols", color: "hsl(var(--muted-foreground))" },
+  ic: { label: "IC (this settlement)", color: COLORS.pred },
+  rankIc: { label: "Rank IC (this settlement)", color: COLORS.truth },
+  cumulativeIc: { label: "Cumulative IC (pooled, dashed)", color: COLORS.cumulative },
+  n: { label: "Symbols scored (bars)", color: "#94a3b8" },
 } satisfies ChartConfig;
+
+const TOOLTIP_LABELS: Record<string, string> = {
+  ic: "IC",
+  rankIc: "Rank IC",
+  cumulativeIc: "Cumulative IC",
+  n: "Symbols",
+};
 
 export function IcTrendChart({ events }: { events: EventPoint[] }) {
   return (
@@ -107,14 +116,15 @@ export function IcTrendChart({ events }: { events: EventPoint[] }) {
                     labelFormatter={(_, p) => fmtTs(Number(p?.[0]?.payload?.fundingTs))}
                     formatter={(v, name) => (
                       <span className="font-mono">
-                        {icConfig[name as keyof typeof icConfig]?.label ?? name}:{" "}
+                        {TOOLTIP_LABELS[name as string] ?? name}:{" "}
                         {typeof v === "number" ? (name === "n" ? v : v.toFixed(3)) : "—"}
                       </span>
                     )}
                   />
                 }
               />
-              <Bar yAxisId="n" dataKey="n" fill="var(--color-n)" opacity={0.15} />
+              <ChartLegend content={<ChartLegendContent className="flex-wrap" />} />
+              <Bar yAxisId="n" dataKey="n" fill="var(--color-n)" opacity={0.25} />
               <Line
                 yAxisId="ic"
                 dataKey="ic"
@@ -286,6 +296,7 @@ export function ScatterCalibration({
                     />
                   }
                 />
+                <ChartLegend content={<ChartLegendContent />} />
                 <Bar dataKey="meanPred" fill="var(--color-meanPred)" radius={2} />
                 <Bar dataKey="meanTrue" fill="var(--color-meanTrue)" radius={2} />
               </ComposedChart>
@@ -346,6 +357,7 @@ export function DistributionChart({ bins }: { bins: HistogramBin[] }) {
                   />
                 }
               />
+              <ChartLegend content={<ChartLegendContent className="flex-wrap" />} />
               {(["truth", "pred", "error"] as const).map((k) => (
                 <Area
                   key={k}
