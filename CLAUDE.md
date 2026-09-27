@@ -68,6 +68,7 @@ npx shadcn@latest add <component>   # UI 元件加到 @/components/ui
 /strategies/[strategyId]               策略詳情 + runs
 /strategies/[strategyId]/runs/[runId]  run 詳情（圖表、trades、指標）
 /report                                報表產生（日期區間 + 策略多選）
+/model                                 shadow 模型預測監控（ypred vs 實際 y）
 /settings                              通知設定等
 ```
 
@@ -112,6 +113,10 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   `bybit_equity`。要知道某個 run 真正的交易所，查 `trades.exchange`，別看欄位名。
   另外 `total_equity = binance_equity + bybit_equity`、`total_pnl` 同理，精確成立，
   改動任一腿都要一起維持這個關係。
+- **shadow_prediction / shadow_event_ledger**（`/model` 用；外部 shadow 程式寫入）：以
+  `(funding_ts_ms, symbol)` 對接，**兩表間沒有 FK**，PostgREST 不能 embed，要兩次查詢後在
+  程式裡 join（`app/(dashboard)/model/page.tsx`）。只有 ledger `origin = 'live'` 算真實預測，
+  `backfill` 是啟動回補。authenticated 只有唯讀 policy（`supabase/manual/2026-09-28-shadow-model-read-policy.sql`）。
 - **user_strategy_access**: user_id, strategy_id, share_ratio —— 用戶對策略的份額，
   所有對用戶顯示/推播的金額都要乘 share_ratio
 - **push_subscriptions / notification_preferences**：見 `docs/notifications.md`
