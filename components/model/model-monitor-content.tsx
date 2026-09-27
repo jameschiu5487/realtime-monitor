@@ -26,7 +26,8 @@ import { DistributionChart, IcTrendChart, ScatterCalibration } from "./model-cha
 
 /** Predictions land at :30 + 5s and outcomes 8m05s after settlement. */
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
-const TABLE_LIMIT = 300;
+/** Rendered rows cap; the table scrolls inside a fixed height either way. */
+const TABLE_LIMIT = 1000;
 
 interface ModelMonitorContentProps {
   rows: ModelRow[];
@@ -169,9 +170,9 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
           </CardDescription>
         </CardHeader>
         <CardContent className="px-0 sm:px-6">
-          <div className="overflow-x-auto">
+          <div className="max-h-[480px] overflow-auto">
             <table className="w-full text-xs font-mono">
-              <thead className="text-muted-foreground">
+              <thead className="sticky top-0 z-10 bg-card text-muted-foreground">
                 <tr className="border-b text-left">
                   <th className="px-2 py-1.5 font-medium">Settlement</th>
                   <th className="px-2 py-1.5 font-medium">Symbol</th>
