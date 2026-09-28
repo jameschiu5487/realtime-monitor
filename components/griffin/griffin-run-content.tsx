@@ -28,6 +28,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { formatDateTime as taipeiDateTime, formatTime as taipeiTime } from "@/lib/time";
 
 interface GriffinRunContentProps {
   runId: string;
@@ -39,11 +40,11 @@ interface GriffinRunContentProps {
 }
 
 function formatTime(ts: string) {
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return taipeiTime(ts, { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatDateTime(ts: string) {
-  return new Date(ts).toLocaleString([], {
+  return taipeiDateTime(ts, {
     month: "short",
     day: "numeric",
     hour: "2-digit",

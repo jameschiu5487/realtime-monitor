@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/chart";
 import { cn } from "@/lib/utils";
 import type { CombinedTrade } from "@/lib/types/database";
+import { formatDate, formatDateTime } from "@/lib/time";
 
 interface SymbolPnLChartProps {
   combinedTrades: CombinedTrade[];
@@ -70,16 +71,11 @@ export function SymbolPnLChart({ combinedTrades, initialCapital }: SymbolPnLChar
     const hedgeGroups = new Map<string, { symbol: string; ts: string; totalPnl: number }>();
 
     for (const trade of validTrades) {
-      // Round timestamp to nearest minute for grouping
-      const tradeTime = new Date(trade.ts);
+      // Truncate to the minute for grouping. Epoch arithmetic, not local getters:
+      // minute boundaries are the same in every zone, and ts must stay a real
+      // instant because it is parsed back with new Date() below.
       const roundedTime = new Date(
-        tradeTime.getFullYear(),
-        tradeTime.getMonth(),
-        tradeTime.getDate(),
-        tradeTime.getHours(),
-        tradeTime.getMinutes(),
-        0,
-        0
+        Math.floor(new Date(trade.ts).getTime() / 60_000) * 60_000
       ).toISOString();
 
       const key = `${trade.symbol}|${roundedTime}`;
@@ -258,7 +254,7 @@ export function SymbolPnLChart({ combinedTrades, initialCapital }: SymbolPnLChar
                   minTickGap={50}
                   tickFormatter={(value) => {
                     const date = new Date(value);
-                    return date.toLocaleDateString("en-US", {
+                    return formatDate(date, {
                       month: "2-digit",
                       day: "2-digit",
                     });
@@ -279,7 +275,7 @@ export function SymbolPnLChart({ combinedTrades, initialCapital }: SymbolPnLChar
                       className="w-[200px] max-h-[300px] overflow-y-auto"
                       labelFormatter={(value) => {
                         const date = new Date(value);
-                        return date.toLocaleString("en-US", {
+                        return formatDateTime(date, {
                           month: "short",
                           day: "numeric",
                           hour: "2-digit",

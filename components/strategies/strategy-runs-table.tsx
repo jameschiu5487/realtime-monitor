@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import type { StrategyRun } from "@/lib/types/database";
+import { formatDateTime as taipeiDateTime } from "@/lib/time";
 
 interface StrategyRunsTableProps {
   runs: StrategyRun[];
@@ -42,7 +43,7 @@ const statusVariants: Record<
 
 function formatDateTime(dateString: string) {
   const date = new Date(dateString);
-  return date.toLocaleString("en-US", {
+  return taipeiDateTime(date, {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",

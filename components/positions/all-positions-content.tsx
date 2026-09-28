@@ -18,6 +18,7 @@ import { createClient } from "@/lib/supabase/client";
 import { SpreadChart } from "./spread-chart";
 import { FundingRateMonitor } from "./funding-rate-monitor";
 import type { Position } from "@/lib/types/database";
+import { formatTime } from "@/lib/time";
 
 // Extended position type with strategy info
 interface PositionWithStrategy extends Position {
@@ -290,7 +291,7 @@ export function AllPositionsContent({
       <div>
         <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Positions</h2>
         <p className="text-sm text-muted-foreground" suppressHydrationWarning>
-          All running strategy positions • Updated {lastUpdateTime.toLocaleTimeString()}
+          All running strategy positions • Updated {formatTime(lastUpdateTime)}
         </p>
       </div>
 

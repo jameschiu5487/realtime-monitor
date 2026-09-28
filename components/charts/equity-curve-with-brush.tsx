@@ -17,6 +17,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { formatDate, formatDateTime } from "@/lib/time";
 
 export interface EquityCurveDataPoint {
   time: string;
@@ -195,7 +196,7 @@ export function EquityCurveWithBrush({
               minTickGap={32}
               tickFormatter={(value) => {
                 const date = new Date(value);
-                return date.toLocaleDateString("en-US", {
+                return formatDate(date, {
                   month: "short",
                   day: "numeric",
                   hour: "2-digit",
@@ -216,7 +217,7 @@ export function EquityCurveWithBrush({
                   className="w-[150px]"
                   labelFormatter={(value) => {
                     const date = new Date(value);
-                    return date.toLocaleString("en-US", {
+                    return formatDateTime(date, {
                       year: "numeric",
                       month: "numeric",
                       day: "numeric",

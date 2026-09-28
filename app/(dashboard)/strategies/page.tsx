@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { groupStrategies, parentIdOf } from "@/lib/strategy-hierarchy";
 import { formatVersion } from "@/lib/utils";
 import type { Strategy } from "@/lib/types/database";
+import { formatDate } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -126,7 +127,7 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
 
           <p className="text-xs text-muted-foreground/70 font-mono mt-3">
             Created{" "}
-            {new Date(strategy.created_at).toLocaleDateString("en-US", {
+            {formatDate(strategy.created_at, {
               month: "short",
               day: "numeric",
               year: "numeric",
@@ -194,7 +195,7 @@ function ParentStrategyCard({
 
         <p className="text-xs text-muted-foreground/70 font-mono mt-3">
           Created{" "}
-          {new Date(strategy.created_at).toLocaleDateString("en-US", {
+          {formatDate(strategy.created_at, {
             month: "short",
             day: "numeric",
             year: "numeric",

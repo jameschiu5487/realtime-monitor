@@ -14,6 +14,7 @@ import {
   exchangeBadgeClass,
 } from "@/lib/utils/fund-account-strategy";
 import { deriveFundShareRatio } from "@/lib/utils/fund-equity";
+import { formatDate } from "@/lib/time";
 import type {
   Strategy,
   StrategyRun,
@@ -538,11 +539,10 @@ export function OverviewContent({
               <p className="text-lg sm:text-2xl lg:text-3xl font-bold font-mono tabular-nums mt-1">
                 {metrics.todayTradeCount}
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
-                {new Date().toLocaleDateString("en-US", {
+              <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1" suppressHydrationWarning>
+                {formatDate(new Date(), {
                   month: "short",
                   day: "numeric",
-                  timeZone: "UTC",
                 })}
               </p>
             </div>

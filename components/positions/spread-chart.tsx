@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { KLINE_CONFIGS, getKlineConfig } from "@/lib/kline-config";
+import { formatDate, formatDateTime } from "@/lib/time";
 
 interface SpreadDataPoint {
   time: number; // timestamp in ms
@@ -68,7 +69,7 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
   return (
     <div className="bg-background border rounded-lg shadow-lg p-3 text-sm">
       <div className="text-muted-foreground mb-2">
-        {date.toLocaleString("en-US", {
+        {formatDateTime(date, {
           year: "numeric",
           month: "numeric",
           day: "numeric",
@@ -534,7 +535,7 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
                   tick={{ fontSize: 12, fill: "#888888" }}
                   tickFormatter={(value) => {
                     const date = new Date(value);
-                    return date.toLocaleDateString("en-US", {
+                    return formatDate(date, {
                       month: "short",
                       day: "numeric",
                       hour: "2-digit",

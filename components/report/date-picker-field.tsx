@@ -28,6 +28,7 @@ export function DatePickerField({ label, date, onSelect, maxDate }: DatePickerFi
             )}
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
+            {/* Local Y-M-D on purpose: it is the day clicked, which the report reads as a Taipei day (taipeiPickedDayStartMs). */}
             {date ? format(date, "yyyy-MM-dd") : "Select date"}
           </Button>
         </PopoverTrigger>

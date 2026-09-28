@@ -1,10 +1,11 @@
 import type { StrategyRun } from "@/lib/types/database";
+import { taipeiDayKey } from "@/lib/time";
 
 export interface CapitalGroup {
   /** The initial_capital shared by every run in the group. */
   capital: number;
   runCount: number;
-  /** MM-DD of the group's first start and last end, for telling groups apart. */
+  /** Taipei MM-DD of the group's first start and last end, for telling groups apart. */
   span: string;
 }
 
@@ -32,7 +33,7 @@ export function capitalOf(run: StrategyRun): number {
 }
 
 function monthDay(value: string | null | undefined): string {
-  return value ? value.slice(5, 10) : "?";
+  return value ? taipeiDayKey(value).slice(5) : "?";
 }
 
 /**

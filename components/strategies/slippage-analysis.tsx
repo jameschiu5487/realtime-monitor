@@ -25,6 +25,7 @@ import {
   type SlippageStats,
   type SlippageTrade,
 } from "@/lib/slippage";
+import { formatDate } from "@/lib/time";
 
 interface SlippageAnalysisProps {
   trades: SlippageTrade[];
@@ -149,7 +150,7 @@ export function SlippageAnalysis({ trades, recentDays = 7 }: SlippageAnalysisPro
     ]),
   );
 
-  const since = firstTs.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const since = formatDate(firstTs, { month: "short", day: "numeric" });
 
   return (
     <Card>

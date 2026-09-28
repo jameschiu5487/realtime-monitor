@@ -14,6 +14,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { formatDateTime } from "@/lib/time";
 
 export interface PnLBreakdownDataPoint {
   time: string;
@@ -124,7 +125,7 @@ export function PnLBreakdownChart({ data }: PnLBreakdownChartProps) {
               minTickGap={32}
               tickFormatter={(value) => {
                 const date = new Date(value);
-                return date.toLocaleString("en-US", {
+                return formatDateTime(date, {
                   month: "short",
                   day: "numeric",
                   hour: "2-digit",
@@ -145,7 +146,7 @@ export function PnLBreakdownChart({ data }: PnLBreakdownChartProps) {
                   className="w-[200px]"
                   labelFormatter={(value) => {
                     const date = new Date(value);
-                    return date.toLocaleString("en-US", {
+                    return formatDateTime(date, {
                       month: "short",
                       day: "numeric",
                       hour: "2-digit",

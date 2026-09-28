@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/chart";
 import { cn } from "@/lib/utils";
 import type { PolymarketSymbolPnl } from "@/lib/types/database";
+import { formatDate, formatDateTime } from "@/lib/time";
 
 const SYMBOL_COLORS: Record<string, string> = {
   BTC: "#f7931a",
@@ -117,7 +118,7 @@ export function PolymarketSymbolPnlChart({
                   minTickGap={50}
                   tickFormatter={(value) => {
                     const date = new Date(value);
-                    return date.toLocaleDateString("en-US", {
+                    return formatDate(date, {
                       month: "2-digit",
                       day: "2-digit",
                       hour: "2-digit",
@@ -140,7 +141,7 @@ export function PolymarketSymbolPnlChart({
                       className="w-[200px]"
                       labelFormatter={(value) => {
                         const date = new Date(value);
-                        return date.toLocaleString("en-US", {
+                        return formatDateTime(date, {
                           month: "short",
                           day: "numeric",
                           hour: "2-digit",

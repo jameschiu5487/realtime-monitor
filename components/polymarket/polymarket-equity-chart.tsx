@@ -14,6 +14,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { formatDate, formatDateTime } from "@/lib/time";
 
 interface DataPoint {
   time: string;
@@ -99,7 +100,7 @@ export function PolymarketEquityChart({ data }: PolymarketEquityChartProps) {
                 minTickGap={32}
                 tickFormatter={(value) => {
                   const date = new Date(value);
-                  return date.toLocaleDateString("en-US", {
+                  return formatDate(date, {
                     month: "short",
                     day: "numeric",
                     hour: "2-digit",
@@ -120,7 +121,7 @@ export function PolymarketEquityChart({ data }: PolymarketEquityChartProps) {
                     className="w-[180px]"
                     labelFormatter={(value) => {
                       const date = new Date(value);
-                      return date.toLocaleString("en-US", {
+                      return formatDateTime(date, {
                         month: "short",
                         day: "numeric",
                         hour: "2-digit",

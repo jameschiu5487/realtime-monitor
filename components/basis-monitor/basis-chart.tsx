@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceDot, ReferenceLine, XAxis, YAxis } from "recharts";
-import { format } from "date-fns";
 import {
   Card,
   CardContent,
@@ -17,6 +16,13 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import type { BasisPoint } from "@/lib/basis";
+import { taipeiIso } from "@/lib/time";
+
+/** "MM/dd HH:mm" in Taipei time. */
+function shortTime(ms: number): string {
+  const iso = taipeiIso(ms);
+  return `${iso.slice(5, 7)}/${iso.slice(8, 10)} ${iso.slice(11, 16)}`;
+}
 
 // 與 opportunity-spread-modal 同色系：band 紫色由深到淺、MA 橘色、funding 紅色虛線
 const BB_COLORS = ["#a855f7", "#c084fc", "#d8b4fe", "#e9d5ff"];
@@ -232,7 +238,7 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
   const hasFunding1 = fundingTimes1.length > 0;
   const hasFunding2 = fundingTimes2.length > 0;
   const hasFundingPanel = hasFunding1 || hasFunding2;
-  const timeLabel = (value: unknown) => format(new Date(Number(value)), "MM/dd HH:mm");
+  const timeLabel = (value: unknown) => shortTime(Number(value));
 
   // 預估年化：可見區間累計 funding（bp→%）依已經過時間線性外推到一年
   const cumAnnualized = useMemo(() => {
@@ -283,7 +289,7 @@ export function BasisChart({ points, mode, title, bb, displayCount, funding, leg
           <span key={i} className="flex items-center justify-between gap-4" style={{ color: l.color }}>
             <span>{l.legFunding!.label}</span>
             <span className="font-mono tabular-nums">
-              {(l.bp as number).toFixed(2)} bp（{format(new Date(l.time as number), "MM/dd HH:mm")} 結算）
+              {(l.bp as number).toFixed(2)} bp（{shortTime(l.time as number)} 結算）
             </span>
           </span>
         ))}

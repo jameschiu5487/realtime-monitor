@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import type { Trade } from "@/lib/types/database";
+import { formatDateTime as taipeiDateTime } from "@/lib/time";
 
 interface TradesTableProps {
   trades: Trade[];
@@ -17,7 +18,7 @@ interface TradesTableProps {
 
 function formatDateTime(dateString: string) {
   const date = new Date(dateString);
-  return date.toLocaleString("en-US", {
+  return taipeiDateTime(date, {
     year: "numeric",
     month: "numeric",
     day: "numeric",

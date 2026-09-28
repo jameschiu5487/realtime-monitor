@@ -14,6 +14,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { formatDate, formatDateTime } from "@/lib/time";
 
 export interface ExchangeEquityDataPoint {
   time: string;
@@ -93,7 +94,7 @@ export function ExchangeEquityChart({ data }: ExchangeEquityChartProps) {
               minTickGap={32}
               tickFormatter={(value) => {
                 const date = new Date(value);
-                return date.toLocaleDateString("en-US", {
+                return formatDate(date, {
                   month: "short",
                   day: "numeric",
                 });
@@ -112,7 +113,7 @@ export function ExchangeEquityChart({ data }: ExchangeEquityChartProps) {
                   className="w-[180px]"
                   labelFormatter={(value) => {
                     const date = new Date(value);
-                    return date.toLocaleString("en-US", {
+                    return formatDateTime(date, {
                       year: "numeric",
                       month: "numeric",
                       day: "numeric",

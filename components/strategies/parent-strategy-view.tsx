@@ -48,6 +48,7 @@ import {
   type ParentPosition,
 } from "@/lib/parent-strategy";
 import { cn, formatVersion } from "@/lib/utils";
+import { TZ_LABEL, taipeiDayKey, taipeiIso } from "@/lib/time";
 import type {
   FundAccountEquity,
   Json,
@@ -378,7 +379,7 @@ export async function ParentStrategyView({
                       <div className="flex items-center justify-between gap-2 mb-2">
                         <Badge variant={b.mode === "paper" ? "secondary" : "default"}>{b.mode}</Badge>
                         <span className="text-xs text-muted-foreground font-mono">
-                          {b.startTime ? `since ${b.startTime.slice(0, 10)}` : "starting…"}
+                          {b.startTime ? `since ${taipeiDayKey(b.startTime)}` : "starting…"}
                         </span>
                       </div>
                       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
@@ -431,7 +432,7 @@ export async function ParentStrategyView({
               />
               {books.length > 1 && (
                 <p className="text-xs text-muted-foreground -mt-2">
-                  Summed equity starts once every book has data ({aggregate[0].ts.slice(0, 16).replace("T", " ")} UTC);
+                  Summed equity starts once every book has data ({taipeiIso(aggregate[0].ts).slice(0, 16).replace("T", " ")} {TZ_LABEL});
                   each book&apos;s last value is carried forward between its points.
                 </p>
               )}

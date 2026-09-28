@@ -37,6 +37,7 @@ import {
   totalEquityFromLatest,
   upsertFundEquityRow,
 } from "@/lib/utils/fund-equity";
+import { formatDateTime } from "@/lib/time";
 
 const ranges: FundEquityRange[] = ["24h", "7d", "30d"];
 const ROW_RETENTION_MS = rangeToMs("30d") + 60 * 60 * 1000;
@@ -390,7 +391,7 @@ export function FundEquityDashboard({
                 tickMargin={6}
                 minTickGap={48}
                 tickFormatter={(value) =>
-                  new Date(Number(value)).toLocaleString("en-US", {
+                  formatDateTime(Number(value), {
                     month: range === "24h" ? undefined : "short",
                     day: range === "24h" ? undefined : "numeric",
                     hour: "2-digit",
@@ -423,7 +424,7 @@ export function FundEquityDashboard({
                     labelFormatter={(_value, payload) => {
                       const time = payload?.[0]?.payload?.time;
                       return time
-                        ? new Date(time).toLocaleString("en-US", {
+                        ? formatDateTime(time, {
                             month: "short",
                             day: "numeric",
                             hour: "2-digit",

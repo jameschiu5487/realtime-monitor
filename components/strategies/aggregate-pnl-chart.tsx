@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/chart";
 import { cn } from "@/lib/utils";
 import type { PnlPoint } from "@/lib/parent-strategy";
+import { formatDate, formatDateTime } from "@/lib/time";
 
 const chartConfig = {
   pnl: {
@@ -70,7 +71,7 @@ export function AggregatePnlChart({
               tickMargin={8}
               minTickGap={32}
               tickFormatter={(value) =>
-                new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                formatDate(value, { month: "short", day: "numeric" })
               }
             />
             <YAxis
@@ -84,7 +85,7 @@ export function AggregatePnlChart({
                 <ChartTooltipContent
                   className="w-[150px]"
                   labelFormatter={(value) =>
-                    new Date(value).toLocaleString("en-US", {
+                    formatDateTime(value, {
                       year: "numeric",
                       month: "numeric",
                       day: "numeric",

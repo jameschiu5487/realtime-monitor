@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { Exchange } from "@/lib/types/opportunity";
 import { EXCHANGE_COLORS } from "@/lib/exchange-colors";
 import { KLINE_CONFIGS, getKlineConfig } from "@/lib/kline-config";
+import { formatDate, formatDateTime } from "@/lib/time";
 
 interface DataPoint {
   time: number;
@@ -445,7 +446,7 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
     return (
       <div className="bg-background border rounded-lg shadow-lg p-3 text-sm">
         <div className="text-muted-foreground mb-2">
-          {date.toLocaleString("en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+          {formatDateTime(date, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </div>
         <div className={cn("font-bold", spread > 0 ? "text-emerald-600" : "text-red-600")}>
           Spread: {spread.toFixed(2)} bp
@@ -478,7 +479,7 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
     return (
       <div className="bg-background border rounded-lg shadow-lg p-3 text-sm">
         <div className="text-muted-foreground mb-2">
-          {date.toLocaleString("en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+          {formatDateTime(date, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </div>
         {dataA && (
           <div className={textClassA}>
@@ -609,7 +610,7 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
                 tick={{ fontSize: 11, fill: "#888888" }}
                 tickFormatter={(value) => {
                   const date = new Date(value);
-                  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+                  return formatDate(date, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
                 }}
               />
               <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={spreadYDomain} tick={{ fontSize: 11, fill: "#888888" }} tickFormatter={(value) => `${value}bp`} />
@@ -675,7 +676,7 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
                 tick={{ fontSize: 11, fill: "#888888" }}
                 tickFormatter={(value) => {
                   const date = new Date(value);
-                  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+                  return formatDate(date, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
                 }}
               />
               <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={priceYDomain} tick={{ fontSize: 11, fill: "#888888" }} tickFormatter={(value) => `$${formatPrice(value)}`} />

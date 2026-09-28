@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDateTime as taipeiDateTime } from "@/lib/time";
 
 export interface TimeRange {
   start: Date;
@@ -37,12 +38,9 @@ const presetRanges = [
   { label: "1Y", minutes: 525600 },
 ] as const;
 
-/**
- * Renders in the viewer's own timezone, so it can only be produced on the
- * client — see the mount gate below.
- */
+/** Taipei time (lib/time), whatever the viewer's zone. */
 function formatDateTime(date: Date) {
-  return date.toLocaleString("en-US", {
+  return taipeiDateTime(date, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -64,10 +62,9 @@ export function TimeRangeSelector({
 }: TimeRangeSelectorProps) {
   const displayRange = currentRange || { start: dataStartTime, end: dataEndTime };
 
-  // The label below is formatted in the viewer's local timezone against a clock
-  // that keeps moving, so the server cannot produce the same string the browser
-  // will: rendering it during SSR fails hydration, and on Vercel (UTC) it would
-  // briefly show a time hours off from the user's. Hold it back until mounted.
+  // The label below is formatted against a clock that keeps moving, so the
+  // server cannot produce the same string the browser will even though both now
+  // use Taipei time: rendering it during SSR fails hydration. Hold it back until mounted.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 

@@ -48,6 +48,7 @@ import {
   type Period,
 } from "@/lib/model-eval";
 import { COLORS } from "./model-charts";
+import { formatDateTime } from "@/lib/time";
 
 const POS = "#34d399";
 const NEG = "#f87171";
@@ -60,7 +61,7 @@ const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).
 const tone = (v: number | null | undefined) =>
   v == null ? "text-muted-foreground" : v > 0 ? "text-emerald-500" : v < 0 ? "text-red-500" : "";
 const fmtTs = (ms: number) =>
-  new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", hour12: false });
+  formatDateTime(ms, { month: "short", day: "numeric", hour: "2-digit", hour12: false });
 
 export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
   const [feeBp, setFeeBp] = useState(DEFAULT_FEE_BP);

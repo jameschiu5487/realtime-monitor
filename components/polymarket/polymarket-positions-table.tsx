@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { PolymarketPosition } from "@/lib/types/database";
+import { formatDateTime } from "@/lib/time";
 
 interface PolymarketPositionsTableProps {
   positions: PolymarketPosition[];
@@ -84,7 +85,7 @@ function PositionRow({ position: p }: { position: PolymarketPosition }) {
     <tr className={cn("hover:bg-muted/30", isSettled && "opacity-60")}>
       <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
         {p.entry_time
-          ? new Date(p.entry_time).toLocaleString("en-US", {
+          ? formatDateTime(p.entry_time, {
               month: "2-digit",
               day: "2-digit",
               hour: "2-digit",

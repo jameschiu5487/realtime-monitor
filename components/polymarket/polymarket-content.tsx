@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { formatDateTime } from "@/lib/time";
 
 interface PolymarketContentProps {
   run: StrategyRun;
@@ -169,7 +170,7 @@ export function PolymarketContent({
             <SelectContent>
               {allRuns.map((r) => (
                 <SelectItem key={r.run_id} value={r.run_id}>
-                  {new Date(r.start_time).toLocaleString("en-US", {
+                  {formatDateTime(r.start_time, {
                     month: "short",
                     day: "numeric",
                     hour: "2-digit",

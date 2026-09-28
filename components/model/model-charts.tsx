@@ -37,6 +37,7 @@ import {
   type HistogramBin,
   type ScoredRow,
 } from "@/lib/model-metrics";
+import { formatDateTime } from "@/lib/time";
 
 export const COLORS = {
   pred: "#60a5fa",
@@ -46,7 +47,7 @@ export const COLORS = {
 };
 
 const fmtTs = (ms: number) =>
-  new Date(ms).toLocaleString("en-US", {
+  formatDateTime(ms, {
     month: "short",
     day: "numeric",
     hour: "2-digit",

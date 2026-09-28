@@ -25,6 +25,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DistributionChart, IcTrendChart, ScatterCalibration } from "./model-charts";
 import { ModelEvaluation } from "./model-evaluation";
+import { formatDateTime, formatTime } from "@/lib/time";
 
 /** Predictions land at :30 + 5s and outcomes 8m05s after settlement. */
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
@@ -39,7 +40,7 @@ interface ModelMonitorContentProps {
 }
 
 const fmtTs = (ms: number) =>
-  new Date(ms).toLocaleString("en-US", {
+  formatDateTime(ms, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -121,7 +122,8 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
           <Button
             size="icon"
             variant="ghost"
-            title={`Refresh (auto every 5 min; loaded ${new Date(loadedAt).toLocaleTimeString()})`}
+            suppressHydrationWarning
+            title={`Refresh (auto every 5 min; loaded ${formatTime(loadedAt)})`}
             onClick={() => {
               router.refresh();
               setLoadedAt(Date.now());

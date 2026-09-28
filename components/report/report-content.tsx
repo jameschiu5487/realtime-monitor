@@ -42,6 +42,7 @@ import type {
   EquityCurve,
   CombinedTrade,
 } from "@/lib/types/database";
+import { formatDate, formatDateTime, taipeiPickedDayStartMs } from "@/lib/time";
 
 const chartConfig = {
   equity: {
@@ -214,7 +215,7 @@ function EquityChart({ data, transferPoints, height = 300 }: { data: ChartDataPo
           minTickGap={80}
           tickFormatter={(value) => {
             const date = new Date(value);
-            return date.toLocaleDateString("en-US", {
+            return formatDate(date, {
               month: "short",
               day: "numeric",
             });
@@ -232,7 +233,7 @@ function EquityChart({ data, transferPoints, height = 300 }: { data: ChartDataPo
             <ChartTooltipContent
               labelFormatter={(_, payload) => {
                 if (payload?.[0]?.payload?.time) {
-                  return new Date(payload[0].payload.time).toLocaleString("en-US", {
+                  return formatDateTime(payload[0].payload.time, {
                     month: "short",
                     day: "numeric",
                     hour: "2-digit",
@@ -430,8 +431,9 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
     setProgress({ total: strategyIds.length, completed: 0, currentName: "" });
 
     try {
-      const rangeEnd = new Date(endDate);
-      rangeEnd.setHours(23, 59, 59, 999);
+      // The picked dates are Taipei calendar days: [start day 00:00, end day 24:00) UTC+8.
+      const rangeStart = new Date(taipeiPickedDayStartMs(startDate));
+      const rangeEnd = new Date(taipeiPickedDayStartMs(endDate) + 24 * 60 * 60 * 1000 - 1);
 
       const strategyEquity = new Map<string, EquityCurve[]>();
       const strategyCombinedTrades = new Map<string, CombinedTrade[]>();
@@ -440,7 +442,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
       // Process all strategies in parallel with progress tracking
       await Promise.all(
         strategyIds.map(async (strategyId) => {
-          const overlapping = findOverlappingRuns(allRuns, strategyId, startDate, rangeEnd);
+          const overlapping = findOverlappingRuns(allRuns, strategyId, rangeStart, rangeEnd);
           const runIds = overlapping.map((r) => r.run_id);
 
           if (runIds.length === 0) {
@@ -448,14 +450,14 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
             strategyCombinedTrades.set(strategyId, []);
           } else {
             const [equityData, tradesData] = await Promise.all([
-              fetchPaginated<EquityCurve>("equity_curve", runIds, startDate, rangeEnd),
-              fetchPaginated<CombinedTrade>("combined_trades", runIds, startDate, rangeEnd),
+              fetchPaginated<EquityCurve>("equity_curve", runIds, rangeStart, rangeEnd),
+              fetchPaginated<CombinedTrade>("combined_trades", runIds, rangeStart, rangeEnd),
             ]);
 
             // Merge runs (forward-fill between runs, same as overview)
             let merged = mergeStrategyEquity(equityData);
             merged = fillRangeBoundaries(
-              merged, overlapping, startDate, rangeEnd,
+              merged, overlapping, rangeStart, rangeEnd,
               forwardFillIds.has(strategyId)
             );
 
@@ -556,8 +558,9 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
             id: reportId,
             user_id: user.id,
             name: saveName.trim(),
-            start_date: startDate.toISOString(),
-            end_date: endDate.toISOString(),
+            // Taipei midnight of each picked day — the format older saved reports already have.
+            start_date: new Date(taipeiPickedDayStartMs(startDate)).toISOString(),
+            end_date: new Date(taipeiPickedDayStartMs(endDate)).toISOString(),
             selected_strategy_ids: Array.from(selectedStrategyIds),
             forward_fill_ids: Array.from(forwardFillIds),
             max_nav_change: maxNavChange,
@@ -752,7 +755,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                       <>
                         <div className="text-sm font-medium truncate">{r.name}</div>
                         <div className="text-xs text-muted-foreground">
-                          {new Date(r.start_date).toLocaleDateString()} - {new Date(r.end_date).toLocaleDateString()}
+                          {formatDate(r.start_date)} - {formatDate(r.end_date)}
                         </div>
                       </>
                     )}

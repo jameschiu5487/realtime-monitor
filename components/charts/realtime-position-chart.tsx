@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { formatDateTime } from "@/lib/time";
 
 export interface RealtimePositionDataPoint {
   symbol: string;
@@ -86,7 +87,7 @@ function getPnLColor(pnl: number) {
 
 function formatTime(ts: string) {
   const d = new Date(ts);
-  return d.toLocaleString("en-US", {
+  return formatDateTime(d, {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",

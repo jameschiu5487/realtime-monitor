@@ -15,6 +15,7 @@
  */
 
 import type { ScoredRow } from "./model-metrics";
+import { taipeiDayKey, taipeiMonthKey, taipeiWeekKey } from "./time";
 
 /** User's operating point (2026-09-28). Research ADR 0003 used 7.03 / 6. */
 export const DEFAULT_FEE_BP = 4.4;
@@ -64,15 +65,11 @@ export const net = (r: EvalRow, feeBp: number) => r.y + r.expFunding - feeBp;
 /* Periods                                                              */
 /* ------------------------------------------------------------------ */
 
-/** UTC period key: YYYY-MM-DD, the Monday of the ISO week, or YYYY-MM. */
+/** Taipei period key: YYYY-MM-DD, the Monday of the ISO week, or YYYY-MM. */
 export function periodKey(ts: number, period: Period): string {
-  const d = new Date(ts);
-  if (period === "month") return d.toISOString().slice(0, 7);
-  if (period === "week") {
-    const day = (d.getUTCDay() + 6) % 7; // Monday = 0
-    d.setUTCDate(d.getUTCDate() - day);
-  }
-  return d.toISOString().slice(0, 10);
+  if (period === "month") return taipeiMonthKey(ts);
+  if (period === "week") return taipeiWeekKey(ts);
+  return taipeiDayKey(ts);
 }
 
 /* ------------------------------------------------------------------ */

@@ -23,6 +23,7 @@ import {
   totalEquityFromLatest,
 } from "@/lib/utils/fund-equity";
 import type { FundAccountEquity } from "@/lib/types/database";
+import { TZ_LABEL, formatDateTime, taipeiIso } from "@/lib/time";
 
 export const ACCOUNT_EQUITY_RANGES = ["24h", "7d", "30d", "90d"] as const;
 export type AccountEquityRange = (typeof ACCOUNT_EQUITY_RANGES)[number];
@@ -57,9 +58,9 @@ function tone(value: number | null) {
     : "text-red-600 dark:text-red-400";
 }
 
-/** UTC so the server render and the browser agree. */
-function utcMinute(ms: number): string {
-  return `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+/** Taipei minute via lib/time — a fixed zone, so the server render and the browser agree. */
+function taipeiMinute(ms: number): string {
+  return `${taipeiIso(ms).slice(0, 16).replace("T", " ")} ${TZ_LABEL}`;
 }
 
 interface ParentAccountEquityProps {
@@ -178,7 +179,7 @@ export function ParentAccountEquity({
               sub={drawdown && drawdown.amount > 0 ? money(-drawdown.amount) : undefined}
               className={drawdown && drawdown.pct > 0 ? "text-red-600 dark:text-red-400" : ""}
             />
-            <Figure label="Last update" value={utcMinute(lastUpdateMs)} small />
+            <Figure label="Last update" value={taipeiMinute(lastUpdateMs)} small />
           </div>
           <CardContent className="px-2 py-4 sm:px-6">
             <ChartContainer config={chartConfig} className="aspect-auto h-[240px] sm:h-[280px] w-full">
@@ -200,7 +201,7 @@ export function ParentAccountEquity({
                   tickMargin={6}
                   minTickGap={48}
                   tickFormatter={(value) =>
-                    new Date(Number(value)).toLocaleString("en-US", {
+                    formatDateTime(Number(value), {
                       month: range === "24h" ? undefined : "short",
                       day: range === "24h" ? undefined : "numeric",
                       hour: "2-digit",
@@ -229,7 +230,7 @@ export function ParentAccountEquity({
                       labelFormatter={(_value, payload) => {
                         const time = payload?.[0]?.payload?.time;
                         return time
-                          ? new Date(time).toLocaleString("en-US", {
+                          ? formatDateTime(time, {
                               month: "short",
                               day: "numeric",
                               hour: "2-digit",

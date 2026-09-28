@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { OpportunityStats, Exchange, ALL_EXCHANGES } from "@/lib/types/opportunity";
 import { getExchangePairDisplayName } from "@/lib/types/opportunity";
+import { formatTime } from "@/lib/time";
 
 interface OpportunityStatsProps {
   stats: OpportunityStats | null;
@@ -46,7 +47,7 @@ export function OpportunityStatsHeader({
           </div>
           {lastUpdate && (
             <span className="text-sm text-muted-foreground">
-              Last update: {lastUpdate.toLocaleTimeString()}
+              Last update: {formatTime(lastUpdate)}
             </span>
           )}
         </div>

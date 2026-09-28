@@ -24,6 +24,7 @@ import {
   type ChartDataPoint,
 } from "@/lib/utils/equity";
 import type { EquityCurve, CombinedTrade } from "@/lib/types/database";
+import { formatDateTime } from "@/lib/time";
 
 const chartConfig = {
   equity: {
@@ -542,7 +543,7 @@ export function OverviewPerformanceChart({
               // Show date+time if range > 1 day
               const rangeMs = timeRange.end.getTime() - timeRange.start.getTime();
               if (rangeMs > 24 * 60 * 60 * 1000) {
-                return date.toLocaleString("en-US", {
+                return formatDateTime(date, {
                   month: "short",
                   day: "numeric",
                   hour: "2-digit",
@@ -550,7 +551,7 @@ export function OverviewPerformanceChart({
                   hour12: false,
                 });
               }
-              return date.toLocaleString("en-US", {
+              return formatDateTime(date, {
                 hour: "2-digit",
                 minute: "2-digit",
                 hour12: false,
@@ -578,7 +579,7 @@ export function OverviewPerformanceChart({
                   const time = payload?.[0]?.payload?.time;
                   if (!time) return "Invalid Date";
                   const date = new Date(time);
-                  return date.toLocaleString("en-US", {
+                  return formatDateTime(date, {
                     month: "short",
                     day: "numeric",
                     hour: "2-digit",

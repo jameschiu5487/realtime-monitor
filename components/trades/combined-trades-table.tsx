@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CombinedTrade } from "@/lib/types/database";
+import { formatDateTime as taipeiDateTime } from "@/lib/time";
 
 interface CombinedTradesTableProps {
   combinedTrades: CombinedTrade[];
@@ -44,8 +45,8 @@ interface HedgePair {
 
 function formatDateTime(dateString: string) {
   const date = new Date(dateString);
-  // Use fixed locale to avoid hydration mismatch between server and client
-  return date.toLocaleString("en-US", {
+  // Fixed locale and fixed zone (Taipei, via lib/time) so server and client render the same string
+  return taipeiDateTime(date, {
     year: "numeric",
     month: "numeric",
     day: "numeric",

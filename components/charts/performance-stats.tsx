@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { EquityCurve, CombinedTrade } from "@/lib/types/database";
+import { taipeiDayKey } from "@/lib/time";
 
 interface PerformanceStatsProps {
   filteredEquityCurve: EquityCurve[];
@@ -168,10 +169,10 @@ function calculateStats(
     annualizedReturn = totalReturn * (365 / periodDays);
   }
 
-  // Build daily equity snapshots (last equity value per calendar day)
+  // Build daily equity snapshots (last equity value per Taipei calendar day)
   const dailyEquityMap = new Map<string, number>();
   for (const point of sorted) {
-    const day = point.ts.slice(0, 10); // YYYY-MM-DD
+    const day = taipeiDayKey(point.ts); // Taipei YYYY-MM-DD
     dailyEquityMap.set(day, point.total_equity);
   }
   const dailyEquities = Array.from(dailyEquityMap.entries())

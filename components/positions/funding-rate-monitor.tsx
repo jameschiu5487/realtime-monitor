@@ -13,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { formatTime } from "@/lib/time";
 
 interface PositionInfo {
   symbol: string;
@@ -222,8 +223,8 @@ export function FundingRateMonitor({ positions }: FundingRateMonitorProps) {
     <Card>
       <CardHeader>
         <CardTitle>Funding Rate 監控</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          進場時與即時 Funding Rate 對比 • 每分鐘更新 • 最後更新: {lastUpdate.toLocaleTimeString()}
+        <p className="text-sm text-muted-foreground" suppressHydrationWarning>
+          進場時與即時 Funding Rate 對比 • 每分鐘更新 • 最後更新: {formatTime(lastUpdate)}
         </p>
       </CardHeader>
       <CardContent>
@@ -276,7 +277,7 @@ export function FundingRateMonitor({ positions }: FundingRateMonitorProps) {
                     </TableCell>
                     <TableCell className="text-right font-mono text-muted-foreground">
                       {row.nextFundingTime
-                        ? new Date(row.nextFundingTime).toLocaleTimeString()
+                        ? formatTime(row.nextFundingTime)
                         : "-"}
                     </TableCell>
                     <TableCell className="text-right font-mono">

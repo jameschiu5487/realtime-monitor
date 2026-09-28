@@ -14,6 +14,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { formatDate, formatDateTime } from "@/lib/time";
 
 export interface CumulativePnLDataPoint {
   time: string;
@@ -75,7 +76,7 @@ export function CumulativeTradePnLChart({ data }: CumulativeTradePnLChartProps) 
               minTickGap={32}
               tickFormatter={(value) => {
                 const date = new Date(value);
-                return date.toLocaleDateString("en-US", {
+                return formatDate(date, {
                   month: "short",
                   day: "numeric",
                 });
@@ -88,7 +89,7 @@ export function CumulativeTradePnLChart({ data }: CumulativeTradePnLChartProps) 
                   className="w-[150px]"
                   labelFormatter={(value) => {
                     const date = new Date(value);
-                    return date.toLocaleString("en-US", {
+                    return formatDateTime(date, {
                       year: "numeric",
                       month: "numeric",
                       day: "numeric",

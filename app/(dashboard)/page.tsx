@@ -12,6 +12,7 @@ import {
   hourBucket,
 } from "@/lib/overview-queries";
 import type { Strategy, StrategyRun } from "@/lib/types/database";
+import { taipeiDayStartMs } from "@/lib/time";
 import { isParentBookMode } from "@/lib/parent-strategy";
 import { accountIdsFromRunParams } from "@/lib/utils/fund-account-strategy";
 import type { ParentStrategyCard } from "@/components/overview/overview-content";
@@ -176,8 +177,8 @@ export default async function DashboardPage() {
   const since24h = bucketedSince(1);
   const since7d = bucketedSince(7);
   const since30d = bucketedSince(30);
-  const todayStart = new Date(hourBucket());
-  todayStart.setUTCHours(0, 0, 0, 0);
+  // Taipei midnight (lib/time); derived from the hour bucket so it stays stable too.
+  const todayStart = new Date(taipeiDayStartMs(hourBucket()));
 
   // Deliberately not awaited — handed to the client and streamed in behind a
   // Suspense boundary so the heaviest query stops gating the whole page.

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Clock, DollarSign } from "lucide-react";
 import type { Strategy, StrategyRun } from "@/lib/types/database";
+import { formatDateTime } from "@/lib/time";
 
 interface RunDetailsHeaderProps {
   strategy: Strategy;
@@ -66,7 +67,7 @@ export function RunDetailsHeader({ strategy, run, initialCapitalOverride }: RunD
           <div className="space-y-1 min-w-0">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate">{strategy.name}</h1>
             <p className="text-sm text-muted-foreground">
-              Started {new Date(run.start_time).toLocaleString("en-US", {
+              Started {formatDateTime(run.start_time, {
                 month: "short",
                 day: "numeric",
                 year: "numeric",
