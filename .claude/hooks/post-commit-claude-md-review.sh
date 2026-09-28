@@ -56,6 +56,10 @@ subject=$(git -C "$repo" log -1 --pretty=%s 2>/dev/null)
 files=$(git -C "$repo" show --name-only --pretty=format: HEAD 2>/dev/null \
   | sed '/^$/d' | head -40)
 
+# A commit that only touches CLAUDE.md is itself the review; asking again
+# can only produce "no update needed".
+[ "$files" = "CLAUDE.md" ] && exit 0
+
 python3 - "$subject" "$files" <<'PY'
 import json
 import sys

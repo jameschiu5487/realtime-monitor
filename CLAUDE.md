@@ -95,9 +95,9 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   'test-realtime'), status, start_time, end_time, initial_capital, params (jsonb), code_ref, notes。
   **Overview 只認 `realtime` / `test-realtime`**（`app/(dashboard)/page.tsx` 與
   `overview-content.tsx` 各一份判斷）；母策略頁則認 `live` + `realtime`（`lib/parent-strategy.ts`）。
-  非子策略的策略若改用 `live`，會在 Overview 靜默消失 —— Kepler 就是這樣不見的。
+  非子策略的策略若改用 `live`，會在 Overview 靜默消失。
   **`start_time` 實際可能是 null**（引擎會先建 run 再補時間），產生型別卻標 `string`；
-  直接 `.slice()` / `new Date()` 會讓整頁 SSR 崩成 error boundary —— Kepler 頁就這樣掛過。
+  直接 `.slice()` / `new Date()` 會讓整頁 SSR 崩成 error boundary。
 - **trades**: trade_id (PK), run_id (FK), ts, symbol, exchange, action, side ('buy'|'sell'),
   quantity_nominal, quantity_actual, price, fee_amount_usdt, fee_rate_bps,
   funding_rate, interval_hours, status
@@ -119,7 +119,7 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   `backfill` 是啟動回補。authenticated 只有唯讀 policy（`supabase/manual/2026-09-28-shadow-model-read-policy.sql`）。
   **實際損益 = `y_bp + funding_bp − fee`，`funding_bp` 是 `shadow_event_net` 用已結算 rate 算的；
   `exp_funding_bp` 只能用於進場決策**（使用者 2026-09-28 定案，`lib/model-eval.ts`）。拿 exp 算損益會把
-  高 exp 的 event 高估（實測模型交易每筆高估約 3.8 bp，總損益從負翻正）。`shadow_event_net` 是
+  高 exp 的 event 高估，足以讓總損益翻號。`shadow_event_net` 是
   security_invoker，底層 `md_funding_settled` 沒有讀取 policy 時 funding_bp 會**靜默全為 null**。
   ledger 的 `open_volume_*` 也**不是**研究端的 qv_240，別拿來當流動性門檻。
 - **user_strategy_access**: user_id, strategy_id, share_ratio —— 用戶對策略的份額，
@@ -138,7 +138,7 @@ Overview 會靜默顯示錯的金額。要刪就同時處理兩張表，或事�
 - **改 `lib/overview-queries.ts` 任何查詢的輸出欄位時，要把它的 cache keyParts 升版**
   （如 `overview:strategies-and-runs:v2`）。`cachedQuery` 交給 `unstable_cache` 的永遠是同一個
   包裝函式，改 `select` 不會改變 key，而 Vercel data cache 會跨部署保留 —— 新程式碼會一直
-  拿到舊形狀的資料且不報錯。Kepler 上 Overview 時就卡在這裡。
+  拿到舊形狀的資料且不報錯。
 - **跨交易所行情解析前先讀 `lib/services/volume-fetcher.ts` 的檔頭**：七家的 K 線
   欄位順序、排序方向、成交量單位都不一樣（BingX 只給 base、BitMart 給合約張數），
   解析錯不會噴錯、只會讓數字差 1000 倍。那裡記了每一家已實測驗證的對照與交叉驗算法。
@@ -150,44 +150,14 @@ Overview 會靜默顯示錯的金額。要刪就同時處理兩張表，或事�
   結算時點（`lib/services/funding-fetcher.ts`）與純 join key。
 - **兩腿價差一律算 `(B − A) / A`**（opportunity 家族：spread modal 的歷史與即時兩條
   路徑、positions 的 entry spread、opportunity 表的 basis 欄）。直覺容易寫成
-  `(A − B) / B`，寫反了不會壞、只會讓同一筆資料在表格與圖表差一個負號 —— 已經發生過。
+  `(A − B) / B`，寫反了不會壞、只會讓同一筆資料在表格與圖表差一個負號。
   例外：`lib/basis.ts` 是 basis-monitor 子系統，legs 由使用者自選，用 `(leg1 − leg2) / leg2`。
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
-
-### When to use graph tools FIRST
-
-- **Exploring code**: `semantic_search_nodes_tool` or `query_graph_tool` instead of Grep
-- **Understanding impact**: `get_impact_radius_tool` instead of manually tracing imports
-- **Code review**: `detect_changes_tool` + `get_review_context_tool` instead of reading entire files
-- **Finding relationships**: `query_graph_tool` with callers_of/callees_of/imports_of/tests_for
-- **Architecture questions**: `get_architecture_overview_tool` + `list_communities_tool`
-
-Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
-
-### Key Tools
-
-| Tool | Use when |
-| ------ | ---------- |
-| `detect_changes_tool` | Reviewing code changes — gives risk-scored analysis |
-| `get_review_context_tool` | Need source snippets for review — token-efficient |
-| `get_impact_radius_tool` | Understanding blast radius of a change |
-| `get_affected_flows_tool` | Finding which execution paths are impacted |
-| `query_graph_tool` | Tracing callers, callees, imports, tests, dependencies |
-| `semantic_search_nodes_tool` | Finding functions/classes by name or keyword |
-| `get_architecture_overview_tool` | Understanding high-level codebase structure |
-| `refactor_tool` | Planning renames, finding dead code |
-
-### Workflow
-
-1. The graph auto-updates on file changes (via hooks).
-2. Use `detect_changes_tool` for code review.
-3. Use `get_affected_flows_tool` to understand impact.
-4. Use `query_graph_tool` pattern="tests_for" to check coverage.
+This repo has a code-review-graph knowledge graph (`mcp__code-review-graph__*`; hooks keep it
+updated on file changes). It answers structural questions — callers/callees, importers, impact
+radius, affected flows, test coverage — for far fewer tokens than reading the files, so use it
+when the question is about how code relates. Locating a string or reading a known file is still
+Grep/Read.
