@@ -208,11 +208,16 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                       <th className="px-2 py-1.5 text-right font-medium">ypred</th>
                       <th className="px-2 py-1.5 text-right font-medium">y_true</th>
                       <th className="px-2 py-1.5 text-right font-medium">Error</th>
-                      <th className="px-2 py-1.5 text-right font-medium">Exp funding</th>
-                      <th className="px-2 py-1.5 text-right font-medium">Exp total</th>
-                      <th className="px-2 py-1.5 text-right font-medium" title="Realised funding from settled rates">
-                        Settled funding
+                      <th className="px-2 py-1.5 text-right font-medium" title="Expected funding known at entry">
+                        Exp funding (bp)
                       </th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Realised funding from settled rates">
+                        Settled funding (bp)
+                      </th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Settled − exp funding">
+                        Funding diff (bp)
+                      </th>
+                      <th className="px-2 py-1.5 text-right font-medium">Exp total</th>
                       <th className="px-2 py-1.5 text-right font-medium" title="y + settled funding − fee (fee set on the Evaluation tab)">
                         Realised net (fee {feeBp})
                       </th>
@@ -229,6 +234,8 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                       const total = r.expFundingBp == null ? null : r.ypred + r.expFundingBp;
                       const realised =
                         r.yTrue == null || r.settledFundingBp == null ? null : r.yTrue + r.settledFundingBp - feeBp;
+                      const fundingDiff =
+                        r.settledFundingBp == null || r.expFundingBp == null ? null : r.settledFundingBp - r.expFundingBp;
                       return (
                         <tr key={`${r.fundingTs}|${r.symbol}`} className="border-b last:border-0">
                           <td className="px-2 py-1.5 whitespace-nowrap">{fmtTs(r.fundingTs)}</td>
@@ -237,8 +244,9 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                           <td className={cn("px-2 py-1.5 text-right", signClass(r.yTrue))}>{bp(r.yTrue)}</td>
                           <td className="px-2 py-1.5 text-right text-muted-foreground">{bp(err)}</td>
                           <td className="px-2 py-1.5 text-right">{bp(r.expFundingBp)}</td>
-                          <td className={cn("px-2 py-1.5 text-right", signClass(total))}>{bp(total)}</td>
                           <td className="px-2 py-1.5 text-right">{bp(r.settledFundingBp)}</td>
+                          <td className={cn("px-2 py-1.5 text-right", signClass(fundingDiff))}>{bp(fundingDiff)}</td>
+                          <td className={cn("px-2 py-1.5 text-right", signClass(total))}>{bp(total)}</td>
                           <td className={cn("px-2 py-1.5 text-right font-semibold", signClass(realised))}>{bp(realised)}</td>
                           <td className="px-2 py-1.5 whitespace-nowrap">{directionLabel(r.direction)}</td>
                           <td className="px-2 py-1.5">
@@ -259,7 +267,7 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                     })}
                     {tableRows.length === 0 && (
                       <tr>
-                        <td colSpan={12} className="py-8 text-center text-muted-foreground">
+                        <td colSpan={13} className="py-8 text-center text-muted-foreground">
                           No predictions in this window.
                         </td>
                       </tr>
