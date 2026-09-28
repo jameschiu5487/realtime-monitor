@@ -96,12 +96,29 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
     [rows]
   );
 
+  // Predictions-tab only: an exp_funding range, bp. Blank = no bound.
+  const [expMin, setExpMin] = useState("");
+  const [expMax, setExpMax] = useState("");
+  const tableFiltered = useMemo(() => {
+    const lo = expMin.trim() === "" ? null : Number(expMin);
+    const hi = expMax.trim() === "" ? null : Number(expMax);
+    const useLo = lo != null && Number.isFinite(lo);
+    const useHi = hi != null && Number.isFinite(hi);
+    if (!useLo && !useHi) return filtered;
+    return filtered.filter(
+      (r) =>
+        r.expFundingBp != null &&
+        (!useLo || r.expFundingBp >= lo!) &&
+        (!useHi || r.expFundingBp <= hi!)
+    );
+  }, [filtered, expMin, expMax]);
+
   const tableRows = useMemo(
     () =>
-      [...filtered]
+      [...tableFiltered]
         .sort((a, b) => b.fundingTs - a.fundingTs || a.symbol.localeCompare(b.symbol))
         .slice(0, TABLE_LIMIT),
-    [filtered]
+    [tableFiltered]
   );
 
   return (
@@ -194,9 +211,49 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Predictions</CardTitle>
               <CardDescription className="text-xs">
-                Newest first{filtered.length > TABLE_LIMIT ? `, latest ${TABLE_LIMIT} of ${filtered.length}` : ""}.
+                Newest first{tableFiltered.length > TABLE_LIMIT ? `, latest ${TABLE_LIMIT} of ${tableFiltered.length}` : ""}.
                 Open rows are waiting for settlement (y lands 8m05s after).
               </CardDescription>
+              <div className="flex flex-wrap items-center gap-2 pt-2 text-xs">
+                <span className="text-muted-foreground">Exp funding (bp)</span>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  placeholder="min"
+                  value={expMin}
+                  onChange={(e) => setExpMin(e.target.value)}
+                  className="h-7 w-20 text-xs"
+                />
+                <span className="text-muted-foreground">~</span>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  placeholder="max"
+                  value={expMax}
+                  onChange={(e) => setExpMax(e.target.value)}
+                  className="h-7 w-20 text-xs"
+                />
+                {(expMin !== "" || expMax !== "") && (
+                  <>
+                    <span className="font-mono text-muted-foreground">
+                      {tableFiltered.length} / {filtered.length} rows
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => {
+                        setExpMin("");
+                        setExpMax("");
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="px-0 sm:px-6">
               <div className="max-h-[480px] overflow-auto">
