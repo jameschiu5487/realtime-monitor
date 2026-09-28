@@ -91,6 +91,8 @@ export interface ModelSummary {
   bias: number;
   /** Mean y of rows the model predicted positive — what trading its sign would earn. */
   meanTrueWhenPredPositive: number | null;
+  /** 1 − SS_res / SS_tot. Research reports it but does not trust it. */
+  r2: number | null;
 }
 
 export function summarize(rows: ScoredRow[]): ModelSummary | null {
@@ -113,6 +115,7 @@ export function summarize(rows: ScoredRow[]): ModelSummary | null {
   const positive = rows.filter((r) => r.ypred > 0).map((r) => r.yTrue);
   const meanPred = mean(p);
   const meanTrue = mean(y);
+  const ssTot = y.reduce((s, v) => s + (v - meanTrue) ** 2, 0);
   return {
     n: rows.length,
     ic: pearson(p, y),
@@ -124,6 +127,7 @@ export function summarize(rows: ScoredRow[]): ModelSummary | null {
     meanTrue,
     bias: meanPred - meanTrue,
     meanTrueWhenPredPositive: positive.length > 0 ? mean(positive) : null,
+    r2: ssTot > 0 ? 1 - sqErr / ssTot : null,
   };
 }
 

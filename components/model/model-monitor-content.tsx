@@ -22,7 +22,9 @@ import {
   type ModelRow,
   type ModelSummary,
 } from "@/lib/model-metrics";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DistributionChart, IcTrendChart, ScatterCalibration } from "./model-charts";
+import { ModelEvaluation } from "./model-evaluation";
 
 /** Predictions land at :30 + 5s and outcomes 8m05s after settlement. */
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
@@ -156,80 +158,97 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
         )}
       </div>
 
-      <SummaryCards summary={summary} pending={pending} />
-      <IcTrendChart events={events} />
-      <ScatterCalibration rows={scoredRows} bins={bins} />
-      <DistributionChart bins={hist} />
+      <Tabs defaultValue="evaluation" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="evaluation">Evaluation</TabsTrigger>
+          <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
+          <TabsTrigger value="predictions">Predictions</TabsTrigger>
+        </TabsList>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Predictions</CardTitle>
-          <CardDescription className="text-xs">
-            Newest first{filtered.length > TABLE_LIMIT ? `, latest ${TABLE_LIMIT} of ${filtered.length}` : ""}.
-            Open rows are waiting for settlement (y lands 8m05s after).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="px-0 sm:px-6">
-          <div className="max-h-[480px] overflow-auto">
-            <table className="w-full text-xs font-mono">
-              <thead className="sticky top-0 z-10 bg-card text-muted-foreground">
-                <tr className="border-b text-left">
-                  <th className="px-2 py-1.5 font-medium">Settlement</th>
-                  <th className="px-2 py-1.5 font-medium">Symbol</th>
-                  <th className="px-2 py-1.5 text-right font-medium">ypred</th>
-                  <th className="px-2 py-1.5 text-right font-medium">y_true</th>
-                  <th className="px-2 py-1.5 text-right font-medium">Error</th>
-                  <th className="px-2 py-1.5 text-right font-medium">Exp funding</th>
-                  <th className="px-2 py-1.5 text-right font-medium">Exp total</th>
-                  <th className="px-2 py-1.5 font-medium">Direction</th>
-                  <th className="px-2 py-1.5 font-medium">Status</th>
-                  <th className="px-2 py-1.5 text-right font-medium" title="ledger gap / window depth / substituted inputs">
-                    Gap/Win/Sub
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {tableRows.map((r) => {
-                  const err = r.yTrue == null ? null : r.yTrue - r.ypred;
-                  const total = r.expFundingBp == null ? null : r.ypred + r.expFundingBp;
-                  return (
-                    <tr key={`${r.fundingTs}|${r.symbol}`} className="border-b last:border-0">
-                      <td className="px-2 py-1.5 whitespace-nowrap">{fmtTs(r.fundingTs)}</td>
-                      <td className="px-2 py-1.5">{r.symbol}</td>
-                      <td className={cn("px-2 py-1.5 text-right", signClass(r.ypred))}>{bp(r.ypred)}</td>
-                      <td className={cn("px-2 py-1.5 text-right", signClass(r.yTrue))}>{bp(r.yTrue)}</td>
-                      <td className="px-2 py-1.5 text-right text-muted-foreground">{bp(err)}</td>
-                      <td className="px-2 py-1.5 text-right">{bp(r.expFundingBp)}</td>
-                      <td className={cn("px-2 py-1.5 text-right", signClass(total))}>{bp(total)}</td>
-                      <td className="px-2 py-1.5 whitespace-nowrap">{directionLabel(r.direction)}</td>
-                      <td className="px-2 py-1.5">
-                        <Badge variant={r.status === "closed" ? "secondary" : "outline"} className="text-[10px]">
-                          {r.status ?? "pending"}
-                        </Badge>
-                      </td>
-                      <td
-                        className={cn(
-                          "px-2 py-1.5 text-right whitespace-nowrap",
-                          !isClean(r) && "text-amber-500"
-                        )}
-                      >
-                        {r.ledgerGapObs ?? "—"}/{r.windowDepthMin ?? "—"}/{r.substitutedInputs ?? "—"}
-                      </td>
+        {/* Research's own priority order: strategy-level metrics first. */}
+        <TabsContent value="evaluation">
+          <ModelEvaluation rows={scoredRows} />
+        </TabsContent>
+
+        <TabsContent value="diagnostics" className="space-y-4 sm:space-y-6">
+          <SummaryCards summary={summary} pending={pending} />
+          <IcTrendChart events={events} />
+          <ScatterCalibration rows={scoredRows} bins={bins} />
+          <DistributionChart bins={hist} />
+        </TabsContent>
+
+        <TabsContent value="predictions">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Predictions</CardTitle>
+              <CardDescription className="text-xs">
+                Newest first{filtered.length > TABLE_LIMIT ? `, latest ${TABLE_LIMIT} of ${filtered.length}` : ""}.
+                Open rows are waiting for settlement (y lands 8m05s after).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="px-0 sm:px-6">
+              <div className="max-h-[480px] overflow-auto">
+                <table className="w-full text-xs font-mono">
+                  <thead className="sticky top-0 z-10 bg-card text-muted-foreground">
+                    <tr className="border-b text-left">
+                      <th className="px-2 py-1.5 font-medium">Settlement</th>
+                      <th className="px-2 py-1.5 font-medium">Symbol</th>
+                      <th className="px-2 py-1.5 text-right font-medium">ypred</th>
+                      <th className="px-2 py-1.5 text-right font-medium">y_true</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Error</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Exp funding</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Exp total</th>
+                      <th className="px-2 py-1.5 font-medium">Direction</th>
+                      <th className="px-2 py-1.5 font-medium">Status</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="ledger gap / window depth / substituted inputs">
+                        Gap/Win/Sub
+                      </th>
                     </tr>
-                  );
-                })}
-                {tableRows.length === 0 && (
-                  <tr>
-                    <td colSpan={10} className="py-8 text-center text-muted-foreground">
-                      No predictions in this window.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+                  </thead>
+                  <tbody>
+                    {tableRows.map((r) => {
+                      const err = r.yTrue == null ? null : r.yTrue - r.ypred;
+                      const total = r.expFundingBp == null ? null : r.ypred + r.expFundingBp;
+                      return (
+                        <tr key={`${r.fundingTs}|${r.symbol}`} className="border-b last:border-0">
+                          <td className="px-2 py-1.5 whitespace-nowrap">{fmtTs(r.fundingTs)}</td>
+                          <td className="px-2 py-1.5">{r.symbol}</td>
+                          <td className={cn("px-2 py-1.5 text-right", signClass(r.ypred))}>{bp(r.ypred)}</td>
+                          <td className={cn("px-2 py-1.5 text-right", signClass(r.yTrue))}>{bp(r.yTrue)}</td>
+                          <td className="px-2 py-1.5 text-right text-muted-foreground">{bp(err)}</td>
+                          <td className="px-2 py-1.5 text-right">{bp(r.expFundingBp)}</td>
+                          <td className={cn("px-2 py-1.5 text-right", signClass(total))}>{bp(total)}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap">{directionLabel(r.direction)}</td>
+                          <td className="px-2 py-1.5">
+                            <Badge variant={r.status === "closed" ? "secondary" : "outline"} className="text-[10px]">
+                              {r.status ?? "pending"}
+                            </Badge>
+                          </td>
+                          <td
+                            className={cn(
+                              "px-2 py-1.5 text-right whitespace-nowrap",
+                              !isClean(r) && "text-amber-500"
+                            )}
+                          >
+                            {r.ledgerGapObs ?? "—"}/{r.windowDepthMin ?? "—"}/{r.substitutedInputs ?? "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {tableRows.length === 0 && (
+                      <tr>
+                        <td colSpan={10} className="py-8 text-center text-muted-foreground">
+                          No predictions in this window.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -246,7 +265,18 @@ function SummaryCards({ summary, pending }: { summary: ModelSummary | null; pend
   const cards: { label: string; value: string; hint?: string; className?: string }[] = [
     { label: "Scored", value: summary ? String(summary.n) : "0", hint: `${pending} pending` },
     { label: "IC", value: f(summary?.ic), className: signClass(summary?.ic), hint: "Pearson" },
-    { label: "Rank IC", value: f(summary?.rankIc), className: signClass(summary?.rankIc), hint: "Spearman" },
+    {
+      label: "Rank IC (deprecated)",
+      value: f(summary?.rankIc),
+      className: "text-muted-foreground line-through decoration-1",
+      hint: "monthly values run opposite to bp/trade (ρ −0.48)",
+    },
+    {
+      label: "R² (not trusted)",
+      value: f(summary?.r2),
+      className: "text-muted-foreground",
+      hint: "reported only, as in research",
+    },
     {
       label: "Hit rate",
       value: summary?.hitRate == null ? "—" : `${(summary.hitRate * 100).toFixed(1)}%`,
