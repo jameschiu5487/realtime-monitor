@@ -42,7 +42,6 @@ import {
   periodDiff,
   prepare,
   thresholdCalibration,
-  topnCompare,
   type CurveStats,
   type EvalConfig,
   type Period,
@@ -89,7 +88,6 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
   const model = useMemo(() => curveStats(modelTrades(evalRows, cfg), feeBp, period), [evalRows, cfg, feeBp, period]);
   const baseline = useMemo(() => curveStats(baselineTrades(evalRows, cfg), feeBp, period), [evalRows, cfg, feeBp, period]);
   const newtonZ = useMemo(() => curveStats(newtonZTrades(evalRows), feeBp, period), [evalRows, feeBp, period]);
-  const topn = useMemo(() => topnCompare(evalRows, cfg), [evalRows, cfg]);
   const sweep = useMemo(() => marginSweep(evalRows, cfg), [evalRows, cfg]);
   const diff = useMemo(() => periodDiff(model, baseline), [model, baseline]);
   const deciles = useMemo(() => decileLens(evalRows, feeBp), [evalRows, feeBp]);
@@ -211,17 +209,20 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
       {/* 3. Baseline comparisons */}
       <Section
         n={3}
-        title="vs funding-only (topn_compare, margin_sweep)"
-        desc="Good = beating the funding-only baseline both at the same trade count and at the same threshold."
+        title="vs funding-only (margin_sweep)"
+        desc="Good = beating the funding-only baseline at the same threshold, across margins."
       >
-        <div className="text-xs font-medium">Same trade count — top N by signal vs top N by exp_funding</div>
-        {topn.length === 0 ? (
-          <p className="text-xs text-muted-foreground">Fewer than 25 events in scope.</p>
-        ) : (
-          <Table
-            head={["N", "Model total", "Base total", "Δ", "Model win", "Base win", `Model +${period}s`, `Base +${period}s`]}
-            rows={topn.map((r) => [
-              r.key,
+        <div className="text-xs font-medium">
+          Same margin — both rules at fee {feeBp} + margin (current margin {marginBp} in bold)
+        </div>
+        <Table
+          head={["Margin", "Model n", "Base n", "Model total", "Base total", "Δ", "Model win", "Base win", `Model +${period}s`, `Base +${period}s`]}
+          rows={sweep.map((r) => {
+            const current = r.key === marginBp;
+            return [
+              <span key="k" className={cn(current && "font-bold")}>{r.key}</span>,
+              r.model.n,
+              r.baseline.n,
               <span key="m" className={tone(r.model.totalBp)}>{bp(r.model.totalBp, 1)}</span>,
               <span key="b" className={tone(r.baseline.totalBp)}>{bp(r.baseline.totalBp, 1)}</span>,
               <span key="d" className={cn("font-semibold", tone(r.model.totalBp - r.baseline.totalBp))}>
@@ -231,11 +232,11 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
               pct(r.baseline.winRate),
               `${r.model.positivePeriods}/${r.model.periods}`,
               `${r.baseline.positivePeriods}/${r.baseline.periods}`,
-            ])}
-          />
-        )}
+            ];
+          })}
+        />
 
-        <div className="pt-2 text-xs font-medium">Same threshold — margin sweep (fee {feeBp} bp)</div>
+        <div className="pt-2 text-xs font-medium">Total bp across margins</div>
         <ChartContainer
           config={{
             model: { label: "Model total bp", color: COLORS.pred },
@@ -258,21 +259,6 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
             <Line dataKey="baseline" stroke="var(--color-baseline)" strokeDasharray="4 3" dot={{ r: 2 }} isAnimationActive={false} />
           </LineChart>
         </ChartContainer>
-        <details className="text-xs">
-          <summary className="cursor-pointer text-muted-foreground">Margin sweep table</summary>
-          <Table
-            head={["Margin", "Model n", "Model total", "Model / trade", "Base n", "Base total", "Base / trade"]}
-            rows={sweep.map((r) => [
-              r.key,
-              r.model.n,
-              <span key="m" className={tone(r.model.totalBp)}>{bp(r.model.totalBp, 1)}</span>,
-              bp(r.model.perTradeBp),
-              r.baseline.n,
-              <span key="b" className={tone(r.baseline.totalBp)}>{bp(r.baseline.totalBp, 1)}</span>,
-              bp(r.baseline.perTradeBp),
-            ])}
-          />
-        </details>
 
         <div className="pt-2 text-xs font-medium">Per {period}: model − baseline (at margin {marginBp})</div>
         <Table
