@@ -70,7 +70,18 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
     [feeBp, marginBp, period, capOn]
   );
   const evalRows = useMemo(() => prepare(rows, cfg.basisCap), [rows, cfg.basisCap]);
-  const threshold = useMemo(() => thresholdCalibration(evalRows, cfg), [evalRows, cfg]);
+  // Only the traded side (edge ≥ 0) is shown: below the hurdle nothing is
+  // traded, and those buckets' large negative means swamped the scale.
+  const threshold = useMemo(() => {
+    const t = thresholdCalibration(evalRows, cfg);
+    const traded = (b: { lo: number }) => b.lo >= 0;
+    return {
+      bins: t.bins.filter(traded),
+      byPeriod: t.byPeriod
+        .map((p) => ({ ...p, bins: p.bins.filter(traded) }))
+        .filter((p) => p.bins.some((b) => b.n > 0)),
+    };
+  }, [evalRows, cfg]);
   const model = useMemo(() => curveStats(modelTrades(evalRows, cfg), feeBp, period), [evalRows, cfg, feeBp, period]);
   const baseline = useMemo(() => curveStats(baselineTrades(evalRows, cfg), feeBp, period), [evalRows, cfg, feeBp, period]);
   const topn = useMemo(() => topnCompare(evalRows, cfg), [evalRows, cfg]);
@@ -131,7 +142,7 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
       <Section
         n={1}
         title="Threshold calibration"
-        desc={`Events bucketed by edge = ypred + exp_funding − (fee + margin). Edge ≥ 0 is what the model trades; mean net should rise with edge and turn positive at 0.`}
+        desc={`Events bucketed by edge = ypred + exp_funding − (fee + margin). Only edge ≥ 0 (what the model trades) is shown; mean net should be positive and rise with edge.`}
       >
         <ChartContainer config={{ meanNet: { label: "Mean net (bp)", color: POS } }} className="aspect-auto h-[220px] w-full">
           <BarChart data={threshold.bins} margin={{ left: 4, right: 4, top: 8 }}>
@@ -142,7 +153,7 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
             <ChartTooltip content={<ChartTooltipContent />} />
             <Bar dataKey="meanNet" radius={2}>
               {threshold.bins.map((b) => (
-                <Cell key={b.label} fill={(b.meanNet ?? 0) >= 0 ? POS : NEG} opacity={b.lo >= 0 ? 1 : 0.5} />
+                <Cell key={b.label} fill={(b.meanNet ?? 0) >= 0 ? POS : NEG} />
               ))}
             </Bar>
           </BarChart>
@@ -150,7 +161,7 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
         <Table
           head={["Edge (bp)", "n", "Mean net", "Sum net", "Win"]}
           rows={threshold.bins.map((b) => [
-            <span key="l" className={cn(b.lo >= 0 && "font-semibold")}>{b.label}</span>,
+            b.label,
             b.n,
             <span key="m" className={tone(b.meanNet)}>{bp(b.meanNet)}</span>,
             <span key="s" className={tone(b.sumNet)}>{bp(b.sumNet, 1)}</span>,
