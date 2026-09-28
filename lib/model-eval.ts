@@ -139,6 +139,12 @@ export function baselineTrades(rows: EvalRow[], cfg: EvalConfig, marginBp = cfg.
   return rows.filter((r) => r.expFunding > cfg.feeBp + marginBp);
 }
 
+/** newton_z: trade whenever exp_funding > 20 bp, independent of fee and margin. */
+export const NEWTON_Z_MIN_EXP_FUNDING_BP = 20;
+export function newtonZTrades(rows: EvalRow[]) {
+  return rows.filter((r) => r.expFunding > NEWTON_Z_MIN_EXP_FUNDING_BP);
+}
+
 /* ------------------------------------------------------------------ */
 /* 1. Threshold calibration                                             */
 /* ------------------------------------------------------------------ */

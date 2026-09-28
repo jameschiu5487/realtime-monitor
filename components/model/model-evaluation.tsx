@@ -37,6 +37,8 @@ import {
   feeSensitivity,
   marginSweep,
   modelTrades,
+  newtonZTrades,
+  NEWTON_Z_MIN_EXP_FUNDING_BP,
   periodDiff,
   prepare,
   thresholdCalibration,
@@ -50,6 +52,7 @@ import { COLORS } from "./model-charts";
 const POS = "#34d399";
 const NEG = "#f87171";
 const BASE = "#94a3b8";
+const NEWTON_Z = "#f59e0b";
 
 const bp = (v: number | null | undefined, d = 2) =>
   v == null || !Number.isFinite(v) ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(d)}`;
@@ -84,6 +87,7 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
   }, [evalRows, cfg]);
   const model = useMemo(() => curveStats(modelTrades(evalRows, cfg), feeBp, period), [evalRows, cfg, feeBp, period]);
   const baseline = useMemo(() => curveStats(baselineTrades(evalRows, cfg), feeBp, period), [evalRows, cfg, feeBp, period]);
+  const newtonZ = useMemo(() => curveStats(newtonZTrades(evalRows), feeBp, period), [evalRows, feeBp, period]);
   const topn = useMemo(() => topnCompare(evalRows, cfg), [evalRows, cfg]);
   const sweep = useMemo(() => marginSweep(evalRows, cfg), [evalRows, cfg]);
   const diff = useMemo(() => periodDiff(model, baseline), [model, baseline]);
@@ -190,14 +194,15 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
       <Section
         n={2}
         title="Equity curve (curve_stats)"
-        desc="Cumulative net bp of every trade the rule takes, in settlement order, against the funding-only rule at the same threshold."
+        desc={`Cumulative net bp of every trade the rule takes, in settlement order, against the funding-only rule at the same threshold, and newton_z (exp_funding > ${NEWTON_Z_MIN_EXP_FUNDING_BP} bp, regardless of fee and margin).`}
       >
-        <CurveChart model={model} baseline={baseline} timeline={timeline} />
+        <CurveChart model={model} baseline={baseline} newtonZ={newtonZ} timeline={timeline} />
         <Table
           head={["", "Trades", "Total bp", "Per trade", "Win", "Max DD", "Ret / DD", `+${period}s`]}
           rows={[
             statRow("Model", model),
             statRow("Funding-only", baseline),
+            statRow("newton_z", newtonZ),
           ]}
         />
       </Section>
@@ -376,10 +381,12 @@ function statRow(label: string, s: CurveStats): ReactNode[] {
 function CurveChart({
   model,
   baseline,
+  newtonZ,
   timeline,
 }: {
   model: CurveStats;
   baseline: CurveStats;
+  newtonZ: CurveStats;
   timeline: number[];
 }) {
   // A point at every settlement in scope. A settlement with no trade carries
@@ -388,20 +395,24 @@ function CurveChart({
   const data = useMemo(() => {
     const mAt = new Map(model.curve.map((p) => [p.ts, p.cum]));
     const bAt = new Map(baseline.curve.map((p) => [p.ts, p.cum]));
+    const zAt = new Map(newtonZ.curve.map((p) => [p.ts, p.cum]));
+    let z = 0;
     let m = 0;
     let b = 0;
     return timeline.map((ts) => {
       m = mAt.get(ts) ?? m;
       b = bAt.get(ts) ?? b;
-      return { ts, model: m, baseline: b };
+      z = zAt.get(ts) ?? z;
+      return { ts, model: m, baseline: b, newtonZ: z };
     });
-  }, [model, baseline, timeline]);
-  if (model.n === 0 && baseline.n === 0) return <p className="py-6 text-center text-sm text-muted-foreground">No trades pass the threshold.</p>;
+  }, [model, baseline, newtonZ, timeline]);
+  if (model.n === 0 && baseline.n === 0 && newtonZ.n === 0) return <p className="py-6 text-center text-sm text-muted-foreground">No trades pass the threshold.</p>;
   return (
     <ChartContainer
       config={{
         model: { label: "Model (cumulative bp)", color: COLORS.pred },
         baseline: { label: "Funding-only (cumulative bp)", color: BASE },
+        newtonZ: { label: `newton_z (exp_funding > ${NEWTON_Z_MIN_EXP_FUNDING_BP})`, color: NEWTON_Z },
       }}
       className="aspect-auto h-[240px] w-full"
     >
@@ -414,6 +425,7 @@ function CurveChart({
         <ChartLegend content={<ChartLegendContent className="flex-wrap" />} />
         <Line dataKey="model" type="stepAfter" stroke="var(--color-model)" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
         <Line dataKey="baseline" type="stepAfter" stroke="var(--color-baseline)" strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false} />
+        <Line dataKey="newtonZ" type="stepAfter" stroke="var(--color-newtonZ)" strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} />
       </LineChart>
     </ChartContainer>
   );
