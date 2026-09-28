@@ -16,8 +16,9 @@
 
 import type { ScoredRow } from "./model-metrics";
 
-export const DEFAULT_FEE_BP = 7.03;
-export const DEFAULT_MARGIN_BP = 6;
+/** User's operating point (2026-09-28). Research ADR 0003 used 7.03 / 6. */
+export const DEFAULT_FEE_BP = 4.4;
+export const DEFAULT_MARGIN_BP = 3;
 export const DEFAULT_BASIS_CAP = 200;
 
 export type Period = "day" | "week" | "month";
@@ -386,7 +387,7 @@ export function concentration(trades: EvalRow[], feeBp: number): Concentration {
   };
 }
 
-export const FEE_SENSITIVITY = [0, 3, 5, 7.03, 8, 10, 12];
+export const FEE_SENSITIVITY = [0, 3, 4.4, 5, 7.03, 8.8, 10, 12];
 
 /** Re-run the rule at other fees: the threshold moves with the fee too. */
 export function feeSensitivity(rows: EvalRow[], cfg: EvalConfig) {

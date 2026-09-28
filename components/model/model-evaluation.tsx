@@ -123,7 +123,7 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
                   setMarginBp(DEFAULT_MARGIN_BP);
                 }}
               >
-                Reset to ADR 0003 ({DEFAULT_FEE_BP} / {DEFAULT_MARGIN_BP})
+                Reset to default ({DEFAULT_FEE_BP} / {DEFAULT_MARGIN_BP})
               </Button>
             )}
           </div>
