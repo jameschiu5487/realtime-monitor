@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import type { ScoredRow } from "@/lib/model-metrics";
+import { shortModel, type ScoredRow } from "@/lib/model-metrics";
 import {
   DEFAULT_BASIS_CAP,
   DEFAULT_FEE_BP,
@@ -53,6 +53,8 @@ const POS = "#34d399";
 const NEG = "#f87171";
 const BASE = "#94a3b8";
 const NEWTON_Z = "#f59e0b";
+/** Lines for the models the page isn't showing. */
+const OTHER_MODEL_COLORS = ["#f472b6", "#a78bfa", "#22d3ee"];
 
 /** Mean-net bars are coloured per bar by sign, which the chart legend can't express. */
 const NET_SWATCHES = [
@@ -101,10 +103,16 @@ export const DEFAULT_EVAL_SETTINGS: EvalSettings = {
  */
 export function ModelEvaluation({
   rows,
+  modelVersion,
+  otherModels = [],
   settings,
   onSettingsChange,
 }: {
   rows: ScoredRow[];
+  /** The model the page is showing; every section is about it. */
+  modelVersion: string | null;
+  /** Other models, already filtered like `rows`; each adds a line to the equity curve only. */
+  otherModels?: { version: string; rows: ScoredRow[] }[];
   settings: EvalSettings;
   onSettingsChange: (next: EvalSettings) => void;
 }) {
@@ -143,7 +151,33 @@ export function ModelEvaluation({
 
   const hurdle = feeBp + marginBp;
   // Every settlement in scope, traded or not, so both curves span the whole window.
-  const timeline = useMemo(() => [...new Set(evalRows.map((r) => r.ts))].sort((a, b) => a - b), [evalRows]);
+  // Other models run the same rule on their own events.
+  const others = useMemo(
+    () =>
+      otherModels.map((m) => {
+        const r = prepare(m.rows, cfg.basisCap).rows;
+        return { version: m.version, evalRows: r, stats: curveStats(modelTrades(r, cfg), feeBp, period) };
+      }),
+    [otherModels, cfg, feeBp, period]
+  );
+  const timeline = useMemo(
+    () =>
+      [...new Set([...evalRows, ...others.flatMap((o) => o.evalRows)].map((r) => r.ts))].sort((a, b) => a - b),
+    [evalRows, others]
+  );
+  const activeLabel = modelVersion ? shortModel(modelVersion) : "Model";
+  const curveSeries: CurveSeries[] = [
+    { key: "model", label: `${activeLabel} (cumulative bp)`, color: COLORS.pred, stats: model, width: 2 },
+    ...others.map((o, i) => ({
+      key: `other${i}`,
+      label: shortModel(o.version),
+      color: OTHER_MODEL_COLORS[i % OTHER_MODEL_COLORS.length],
+      stats: o.stats,
+      width: 2,
+    })),
+    { key: "baseline", label: "Funding-only (cumulative bp)", color: BASE, stats: baseline, dash: "4 3" },
+    { key: "newtonZ", label: `newton_z (exp_funding > fee + ${NEWTON_Z_MARGIN_BP})`, color: NEWTON_Z, stats: newtonZ },
+  ];
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -243,11 +277,12 @@ export function ModelEvaluation({
         title="Equity curve (curve_stats)"
         desc={`Cumulative net bp of every trade the rule takes, in settlement order, against the funding-only rule at the same threshold, and newton_z (exp_funding > fee + ${NEWTON_Z_MARGIN_BP} = ${(feeBp + NEWTON_Z_MARGIN_BP).toFixed(2)} bp, a fixed margin of its own).`}
       >
-        <CurveChart model={model} baseline={baseline} newtonZ={newtonZ} timeline={timeline} />
+        <CurveChart series={curveSeries} timeline={timeline} />
         <Table
           head={["", "Trades", "Total bp", "Per trade", "Win", "Max DD", "Ret / DD", `+${period}s`]}
           rows={[
-            statRow("Model", model),
+            statRow(activeLabel, model),
+            ...others.map((o) => statRow(shortModel(o.version), o.stats)),
             statRow("Funding-only", baseline),
             statRow("newton_z", newtonZ),
           ]}
@@ -413,42 +448,35 @@ function statRow(label: string, s: CurveStats): ReactNode[] {
   ];
 }
 
-function CurveChart({
-  model,
-  baseline,
-  newtonZ,
-  timeline,
-}: {
-  model: CurveStats;
-  baseline: CurveStats;
-  newtonZ: CurveStats;
-  timeline: number[];
-}) {
+interface CurveSeries {
+  key: string;
+  label: string;
+  color: string;
+  stats: CurveStats;
+  dash?: string;
+  width?: number;
+}
+
+function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: number[] }) {
   // A point at every settlement in scope. A settlement with no trade carries
   // the previous cumulative value forward (0 before the first trade), so a
   // quiet stretch reads as flat rather than as the line ending early.
   const data = useMemo(() => {
-    const mAt = new Map(model.curve.map((p) => [p.ts, p.cum]));
-    const bAt = new Map(baseline.curve.map((p) => [p.ts, p.cum]));
-    const zAt = new Map(newtonZ.curve.map((p) => [p.ts, p.cum]));
-    let z = 0;
-    let m = 0;
-    let b = 0;
+    const at = series.map((s) => new Map(s.stats.curve.map((p) => [p.ts, p.cum])));
+    const last = series.map(() => 0);
     return timeline.map((ts) => {
-      m = mAt.get(ts) ?? m;
-      b = bAt.get(ts) ?? b;
-      z = zAt.get(ts) ?? z;
-      return { ts, model: m, baseline: b, newtonZ: z };
+      const point: Record<string, number> = { ts };
+      series.forEach((s, i) => {
+        last[i] = at[i].get(ts) ?? last[i];
+        point[s.key] = last[i];
+      });
+      return point;
     });
-  }, [model, baseline, newtonZ, timeline]);
-  if (model.n === 0 && baseline.n === 0 && newtonZ.n === 0) return <p className="py-6 text-center text-sm text-muted-foreground">No trades pass the threshold.</p>;
+  }, [series, timeline]);
+  if (series.every((s) => s.stats.n === 0)) return <p className="py-6 text-center text-sm text-muted-foreground">No trades pass the threshold.</p>;
   return (
     <ChartContainer
-      config={{
-        model: { label: "Model (cumulative bp)", color: COLORS.pred },
-        baseline: { label: "Funding-only (cumulative bp)", color: BASE },
-        newtonZ: { label: `newton_z (exp_funding > fee + ${NEWTON_Z_MARGIN_BP})`, color: NEWTON_Z },
-      }}
+      config={Object.fromEntries(series.map((s) => [s.key, { label: s.label, color: s.color }]))}
       className="aspect-auto h-[240px] w-full"
     >
       <LineChart data={data} margin={{ left: 4, right: 4, top: 8 }}>
@@ -458,9 +486,19 @@ function CurveChart({
         <ReferenceLine y={0} stroke="currentColor" opacity={0.3} />
         <ChartTooltip content={<ChartTooltipContent labelFormatter={(_, p) => fmtTs(Number(p?.[0]?.payload?.ts))} />} />
         <ChartLegend content={<ChartLegendContent className="flex-wrap" />} />
-        <Line dataKey="model" type="stepAfter" stroke="var(--color-model)" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
-        <Line dataKey="baseline" type="stepAfter" stroke="var(--color-baseline)" strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false} />
-        <Line dataKey="newtonZ" type="stepAfter" stroke="var(--color-newtonZ)" strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} />
+        {series.map((s) => (
+          <Line
+            key={s.key}
+            dataKey={s.key}
+            type="stepAfter"
+            stroke={`var(--color-${s.key})`}
+            strokeWidth={s.width ?? 1.5}
+            strokeDasharray={s.dash}
+            dot={false}
+            connectNulls
+            isAnimationActive={false}
+          />
+        ))}
       </LineChart>
     </ChartContainer>
   );

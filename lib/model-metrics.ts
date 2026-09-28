@@ -23,12 +23,17 @@ export interface ModelRow {
   windowDepthMin: number | null;
   substitutedInputs: number | null;
   modelVersion: string | null;
+  /** 'live' (real-time) or 'replay' (reproduced offline; shown only where live has no row). */
+  source: string | null;
 }
 
-/** Full 240-minute window and no history gap — the rows the model was built for. */
+/** "model_default-v2-te202607-83c9d320c942" → "v2-te202607-83c9d320c942". */
+export const shortModel = (v: string) => v.replace(/^model_default-/, "");
+
+/** At least a full 240-minute window and no history gap — the rows the model was built for. */
 export const FULL_WINDOW_MIN = 240;
 export function isClean(r: ModelRow): boolean {
-  return r.ledgerGapObs === 0 && r.windowDepthMin === FULL_WINDOW_MIN;
+  return r.ledgerGapObs === 0 && r.windowDepthMin != null && r.windowDepthMin >= FULL_WINDOW_MIN;
 }
 
 export type ScoredRow = ModelRow & { yTrue: number };

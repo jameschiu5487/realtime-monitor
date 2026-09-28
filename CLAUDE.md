@@ -113,10 +113,12 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   `bybit_equity`。要知道某個 run 真正的交易所，查 `trades.exchange`，別看欄位名。
   另外 `total_equity = binance_equity + bybit_equity`、`total_pnl` 同理，精確成立，
   改動任一腿都要一起維持這個關係。
-- **shadow_prediction / shadow_event_ledger**（`/model` 用；外部 shadow 程式寫入）：以
-  `(funding_ts_ms, symbol)` 對接，**兩表間沒有 FK**，PostgREST 不能 embed，要兩次查詢後在
-  程式裡 join（`app/(dashboard)/model/page.tsx`）。只有 ledger `origin = 'live'` 算真實預測，
-  `backfill` 是啟動回補。authenticated 只有唯讀 policy（`supabase/manual/2026-09-28-shadow-model-read-policy.sql`）。
+- **shadow model 表**（`/model` 用；外部 shadow 程式寫入）：頁面只讀 view **`shadow_prediction_all`**
+  —— 每 (event, model_version) 一列，`source` = live 或 replay（replay 只在 reproduced 且 live 無列時出現），
+  已 join 好結果欄（y_bp、funding_bp、status）。它是 security_invoker，底下
+  `shadow_prediction` / `shadow_prediction_replay` / `shadow_event_ledger` / `md_funding_settled`
+  **每張都要有 authenticated 唯讀 policy**（`supabase/manual/2026-09-28-*-read-policy.sql`），
+  少一張就會靜默少掉那部分的列（replay 曾經整批是 0）。多模型並存時頁面一次只看一個 model_version。
   **實際損益 = `y_bp + funding_bp − fee`，`funding_bp` 是 `shadow_event_net` 用已結算 rate 算的；
   `exp_funding_bp` 只能用於進場決策**（使用者 2026-09-28 定案，`lib/model-eval.ts`）。拿 exp 算損益會把
   高 exp 的 event 高估，足以讓總損益翻號。`shadow_event_net` 是

@@ -18,6 +18,7 @@ import {
   isClean,
   perEvent,
   scored,
+  shortModel,
   summarize,
   type ModelRow,
   type ModelSummary,
@@ -54,8 +55,28 @@ const bp = (v: number | null | undefined, digits = 2) =>
 const signClass = (v: number | null | undefined) =>
   v == null ? "text-muted-foreground" : v > 0 ? "text-emerald-500" : v < 0 ? "text-red-500" : "";
 
-export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitorContentProps) {
+export function ModelMonitorContent({ rows: allRows, days, windows, error }: ModelMonitorContentProps) {
   const router = useRouter();
+
+  // Every model in the window, most rows first; the page shows one at a time.
+  const models = useMemo(() => {
+    const m = new Map<string, { live: number; replay: number }>();
+    for (const r of allRows) {
+      if (!r.modelVersion) continue;
+      const c = m.get(r.modelVersion) ?? { live: 0, replay: 0 };
+      if (r.source === "replay") c.replay++;
+      else c.live++;
+      m.set(r.modelVersion, c);
+    }
+    return [...m.entries()]
+      .map(([version, c]) => ({ version, ...c, total: c.live + c.replay }))
+      .sort((a, b) => b.total - a.total || a.version.localeCompare(b.version));
+  }, [allRows]);
+  const [pickedModel, setPickedModel] = useState<string | null>(null);
+  const activeModel =
+    pickedModel && models.some((m) => m.version === pickedModel) ? pickedModel : models[0]?.version ?? null;
+  const rows = useMemo(() => allRows.filter((r) => r.modelVersion === activeModel), [allRows, activeModel]);
+
   const hasClean = useMemo(() => rows.some(isClean), [rows]);
   // Settled rows overall vs the clean subset, shown beside the toggle.
   const settledCounts = useMemo(() => {
@@ -85,16 +106,30 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
     );
   }, [rows, cleanOnly, symbolQuery]);
 
+  // The other models under the same filters, for their lines on the equity curve.
+  const otherModels = useMemo(() => {
+    const q = symbolQuery.trim().toUpperCase();
+    return models
+      .filter((m) => m.version !== activeModel)
+      .map((m) => ({
+        version: m.version,
+        rows: scored(
+          allRows.filter(
+            (r) =>
+              r.modelVersion === m.version &&
+              (!cleanOnly || isClean(r)) &&
+              (q === "" || r.symbol.toUpperCase().includes(q))
+          )
+        ),
+      }));
+  }, [models, activeModel, allRows, cleanOnly, symbolQuery]);
+
   const scoredRows = useMemo(() => scored(filtered), [filtered]);
   const summary = useMemo(() => summarize(scoredRows), [scoredRows]);
   const events = useMemo(() => perEvent(scoredRows), [scoredRows]);
   const bins = useMemo(() => calibration(scoredRows), [scoredRows]);
   const hist = useMemo(() => histograms(scoredRows), [scoredRows]);
   const pending = filtered.length - scoredRows.length;
-  const versions = useMemo(
-    () => [...new Set(rows.map((r) => r.modelVersion).filter(Boolean))] as string[],
-    [rows]
-  );
 
   // Predictions-tab only: an exp_funding range, bp. Blank = no bound.
   const [expMin, setExpMin] = useState("");
@@ -127,13 +162,24 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
         <div className="space-y-1">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Model Monitor</h1>
           <p className="text-sm text-muted-foreground">
-            Shadow predictions (ypred) against realised y, bp. Live ledger rows only.
+            Shadow predictions (ypred) against realised y, bp. Live predictions, plus replay only
+            where live has no row.
           </p>
-          <div className="flex flex-wrap gap-1.5">
-            {versions.map((v) => (
-              <Badge key={v} variant="secondary" className="font-mono text-xs">
-                {v}
-              </Badge>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {models.map((m) => (
+              <Button
+                key={m.version}
+                size="sm"
+                variant={m.version === activeModel ? "default" : "outline"}
+                className="h-auto py-1 font-mono text-xs"
+                title={m.version}
+                onClick={() => setPickedModel(m.version)}
+              >
+                {shortModel(m.version)}
+                <span className="ml-1.5 opacity-70">
+                  {m.live} live{m.replay > 0 ? ` · ${m.replay} replay` : ""}
+                </span>
+              </Button>
             ))}
           </div>
         </div>
@@ -196,7 +242,13 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
 
         {/* Research's own priority order: strategy-level metrics first. */}
         <TabsContent value="evaluation">
-          <ModelEvaluation rows={scoredRows} settings={evalSettings} onSettingsChange={setEvalSettings} />
+          <ModelEvaluation
+            rows={scoredRows}
+            modelVersion={activeModel}
+            otherModels={otherModels}
+            settings={evalSettings}
+            onSettingsChange={setEvalSettings}
+          />
         </TabsContent>
 
         <TabsContent value="diagnostics" className="space-y-4 sm:space-y-6">
@@ -262,6 +314,9 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                     <tr className="border-b text-left">
                       <th className="px-2 py-1.5 font-medium">Settlement</th>
                       <th className="px-2 py-1.5 font-medium">Symbol</th>
+                      <th className="px-2 py-1.5 font-medium" title="live = predicted in real time; replay = reproduced offline where live has no row">
+                        Source
+                      </th>
                       <th className="px-2 py-1.5 text-right font-medium">ypred</th>
                       <th className="px-2 py-1.5 text-right font-medium">y_true</th>
                       <th className="px-2 py-1.5 text-right font-medium">Error</th>
@@ -297,6 +352,7 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                         <tr key={`${r.fundingTs}|${r.symbol}`} className="border-b last:border-0">
                           <td className="px-2 py-1.5 whitespace-nowrap">{fmtTs(r.fundingTs)}</td>
                           <td className="px-2 py-1.5">{r.symbol}</td>
+                          <td className={cn("px-2 py-1.5", r.source === "replay" && "text-amber-500")}>{r.source ?? "—"}</td>
                           <td className={cn("px-2 py-1.5 text-right", signClass(r.ypred))}>{bp(r.ypred)}</td>
                           <td className={cn("px-2 py-1.5 text-right", signClass(r.yTrue))}>{bp(r.yTrue)}</td>
                           <td className="px-2 py-1.5 text-right text-muted-foreground">{bp(err)}</td>
@@ -324,7 +380,7 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                     })}
                     {tableRows.length === 0 && (
                       <tr>
-                        <td colSpan={13} className="py-8 text-center text-muted-foreground">
+                        <td colSpan={14} className="py-8 text-center text-muted-foreground">
                           No predictions in this window.
                         </td>
                       </tr>
