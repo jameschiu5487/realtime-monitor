@@ -154,10 +154,13 @@ export function baselineTrades(rows: EvalRow[], cfg: EvalConfig, marginBp = cfg.
   return rows.filter((r) => r.expFunding > cfg.feeBp + marginBp);
 }
 
-/** newton_z: trade whenever exp_funding > 20 bp, independent of fee and margin. */
-export const NEWTON_Z_MIN_EXP_FUNDING_BP = 20;
-export function newtonZTrades(rows: EvalRow[]) {
-  return rows.filter((r) => r.expFunding > NEWTON_Z_MIN_EXP_FUNDING_BP);
+/**
+ * newton_z: the funding-only rule at its own fixed margin — exp_funding >
+ * fee + 10 bp — whatever margin the page is set to. (Was a flat 20 bp.)
+ */
+export const NEWTON_Z_MARGIN_BP = 10;
+export function newtonZTrades(rows: EvalRow[], feeBp: number) {
+  return rows.filter((r) => r.expFunding > feeBp + NEWTON_Z_MARGIN_BP);
 }
 
 /* ------------------------------------------------------------------ */

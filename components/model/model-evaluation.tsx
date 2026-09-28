@@ -38,7 +38,7 @@ import {
   marginSweep,
   modelTrades,
   newtonZTrades,
-  NEWTON_Z_MIN_EXP_FUNDING_BP,
+  NEWTON_Z_MARGIN_BP,
   periodDiff,
   prepare,
   thresholdCalibration,
@@ -115,7 +115,7 @@ export function ModelEvaluation({
   }, [evalRows, cfg]);
   const model = useMemo(() => curveStats(modelTrades(evalRows, cfg), feeBp, period), [evalRows, cfg, feeBp, period]);
   const baseline = useMemo(() => curveStats(baselineTrades(evalRows, cfg), feeBp, period), [evalRows, cfg, feeBp, period]);
-  const newtonZ = useMemo(() => curveStats(newtonZTrades(evalRows), feeBp, period), [evalRows, feeBp, period]);
+  const newtonZ = useMemo(() => curveStats(newtonZTrades(evalRows, feeBp), feeBp, period), [evalRows, feeBp, period]);
   const sweep = useMemo(() => marginSweep(evalRows, cfg), [evalRows, cfg]);
   const diff = useMemo(() => periodDiff(model, baseline), [model, baseline]);
   const deciles = useMemo(() => decileLens(evalRows, feeBp), [evalRows, feeBp]);
@@ -221,7 +221,7 @@ export function ModelEvaluation({
       <Section
         n={2}
         title="Equity curve (curve_stats)"
-        desc={`Cumulative net bp of every trade the rule takes, in settlement order, against the funding-only rule at the same threshold, and newton_z (exp_funding > ${NEWTON_Z_MIN_EXP_FUNDING_BP} bp, regardless of fee and margin).`}
+        desc={`Cumulative net bp of every trade the rule takes, in settlement order, against the funding-only rule at the same threshold, and newton_z (exp_funding > fee + ${NEWTON_Z_MARGIN_BP} = ${(feeBp + NEWTON_Z_MARGIN_BP).toFixed(2)} bp, a fixed margin of its own).`}
       >
         <CurveChart model={model} baseline={baseline} newtonZ={newtonZ} timeline={timeline} />
         <Table
@@ -427,7 +427,7 @@ function CurveChart({
       config={{
         model: { label: "Model (cumulative bp)", color: COLORS.pred },
         baseline: { label: "Funding-only (cumulative bp)", color: BASE },
-        newtonZ: { label: `newton_z (exp_funding > ${NEWTON_Z_MIN_EXP_FUNDING_BP})`, color: NEWTON_Z },
+        newtonZ: { label: `newton_z (exp_funding > fee + ${NEWTON_Z_MARGIN_BP})`, color: NEWTON_Z },
       }}
       className="aspect-auto h-[240px] w-full"
     >
