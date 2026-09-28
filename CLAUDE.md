@@ -117,6 +117,9 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   `(funding_ts_ms, symbol)` 對接，**兩表間沒有 FK**，PostgREST 不能 embed，要兩次查詢後在
   程式裡 join（`app/(dashboard)/model/page.tsx`）。只有 ledger `origin = 'live'` 算真實預測，
   `backfill` 是啟動回補。authenticated 只有唯讀 policy（`supabase/manual/2026-09-28-shadow-model-read-policy.sql`）。
+  **淨報酬定義是 `y_bp + exp_funding_bp − fee`（使用者定案，`lib/model-eval.ts`）**。別改用 ledger 的
+  兩個 funding rate 自己算：依 direction 算出的 funding 差恰好是 `exp_funding_bp` 的 **2 倍**（corr=1），
+  換過去所有淨報酬都會變。ledger 的 `open_volume_*` 也**不是**研究端的 qv_240，別拿來當流動性門檻。
 - **user_strategy_access**: user_id, strategy_id, share_ratio —— 用戶對策略的份額，
   所有對用戶顯示/推播的金額都要乘 share_ratio
 - **push_subscriptions / notification_preferences**：見 `docs/notifications.md`
