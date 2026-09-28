@@ -29,6 +29,8 @@ type LedgerRow = {
   status: string | null;
   entry_basis: number | null;
   exit_basis: number | null;
+  /** Realised funding from settled rates, bp; null until both legs have settled. */
+  funding_bp: number | null;
 };
 
 /** PostgREST caps a response at 1000 rows, so read page by page. */
@@ -67,10 +69,13 @@ async function loadRows(supabase: SupabaseClient, sinceMs: number) {
   // The ledger covers every symbol, not just the predicted ones — narrow it to
   // those so the read stays proportional to the predictions.
   const symbols = [...new Set(predictions.rows.map((p) => p.symbol))];
-  const ledger = await readAll<LedgerRow>("shadow_event_ledger", (from, to) =>
+  // shadow_event_net = the ledger plus funding_bp from the venues' settled
+  // rates (md_funding_settled). It is security_invoker, so that table needs
+  // its own read policy (supabase/manual/2026-09-28-md-funding-settled-read-policy.sql).
+  const ledger = await readAll<LedgerRow>("shadow_event_net", (from, to) =>
     supabase
-      .from("shadow_event_ledger")
-      .select("funding_ts_ms, symbol, y_bp, direction, status, entry_basis, exit_basis")
+      .from("shadow_event_net")
+      .select("funding_ts_ms, symbol, y_bp, direction, status, entry_basis, exit_basis, funding_bp")
       .eq("origin", "live")
       .in("symbol", symbols)
       .gte("funding_ts_ms", sinceMs)
@@ -96,6 +101,7 @@ async function loadRows(supabase: SupabaseClient, sinceMs: number) {
       status: l?.status ?? null,
       entryBasis: l?.entry_basis ?? null,
       exitBasis: l?.exit_basis ?? null,
+      settledFundingBp: l?.funding_bp ?? null,
       ledgerGapObs: p.ledger_gap_obs,
       windowDepthMin: p.window_depth_min,
       substitutedInputs: p.substituted_inputs,

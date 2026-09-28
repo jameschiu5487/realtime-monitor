@@ -6,7 +6,8 @@
  *   7. auxiliaries: symbols traded, concentration, fee sensitivity.
  *
  * Definitions (agreed 2026-09-28):
- *   net per event   = y_bp + exp_funding_bp − fee
+ *   net per event   = y_bp + settled funding_bp − fee   (realised: shadow_event_net)
+ *   exp_funding_bp is only for decisions — it is what was known at entry.
  *   model trades    when ypred + exp_funding_bp > fee + margin
  *   funding-only    when exp_funding_bp > fee + margin (or top-N by exp_funding)
  * Every trade is equal-sized; capital crowding is ignored, as in research.
@@ -37,15 +38,30 @@ export interface EvalRow {
   symbol: string;
   ypred: number;
   y: number;
+  /** Expected funding known at entry — decisions only. */
   expFunding: number;
+  /** Realised funding from settled rates — P&L only. */
+  settledFunding: number;
   /** ypred + exp_funding: what the model rule compares to fee + margin. */
   signal: number;
 }
 
-export function prepare(rows: ScoredRow[], basisCap: number | null): EvalRow[] {
+/**
+ * Rows the evaluation can score. Events whose funding hasn't settled on both
+ * legs yet have no realised P&L and are left out (counted in `pendingFunding`).
+ */
+export function prepare(
+  rows: ScoredRow[],
+  basisCap: number | null
+): { rows: EvalRow[]; pendingFunding: number } {
   const out: EvalRow[] = [];
+  let pendingFunding = 0;
   for (const r of rows) {
     if (r.expFundingBp == null || !Number.isFinite(r.expFundingBp)) continue;
+    if (r.settledFundingBp == null || !Number.isFinite(r.settledFundingBp)) {
+      pendingFunding++;
+      continue;
+    }
     if (basisCap != null && r.entryBasis != null && Math.abs(r.entryBasis) > basisCap) continue;
     out.push({
       ts: r.fundingTs,
@@ -53,13 +69,15 @@ export function prepare(rows: ScoredRow[], basisCap: number | null): EvalRow[] {
       ypred: r.ypred,
       y: r.yTrue,
       expFunding: r.expFundingBp,
+      settledFunding: r.settledFundingBp,
       signal: r.ypred + r.expFundingBp,
     });
   }
-  return out;
+  return { rows: out, pendingFunding };
 }
 
-export const net = (r: EvalRow, feeBp: number) => r.y + r.expFunding - feeBp;
+/** Realised net: settled funding, never exp_funding (that is decision-time only). */
+export const net = (r: EvalRow, feeBp: number) => r.y + r.settledFunding - feeBp;
 
 /* ------------------------------------------------------------------ */
 /* Periods                                                              */

@@ -17,6 +17,8 @@ export interface ModelRow {
   status: string | null;
   entryBasis: number | null;
   exitBasis: number | null;
+  /** Realised funding from settled rates (shadow_event_net.funding_bp); null until settled. */
+  settledFundingBp: number | null;
   ledgerGapObs: number | null;
   windowDepthMin: number | null;
   substitutedInputs: number | null;

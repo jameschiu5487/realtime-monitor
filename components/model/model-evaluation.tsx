@@ -72,7 +72,8 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
     () => ({ feeBp, marginBp, period, basisCap: capOn ? DEFAULT_BASIS_CAP : null }),
     [feeBp, marginBp, period, capOn]
   );
-  const evalRows = useMemo(() => prepare(rows, cfg.basisCap), [rows, cfg.basisCap]);
+  const prepared = useMemo(() => prepare(rows, cfg.basisCap), [rows, cfg.basisCap]);
+  const evalRows = prepared.rows;
   // Only the traded side (edge ≥ 0) is shown: below the hurdle nothing is
   // traded, and those buckets' large negative means swamped the scale.
   const threshold = useMemo(() => {
@@ -133,12 +134,13 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Net per event = y + exp_funding − fee. Model trades when ypred + exp_funding &gt; {hurdle.toFixed(2)} bp;
+            Net per event = y + settled funding − fee (realised; exp_funding is used only to decide). Model trades when ypred + exp_funding &gt; {hurdle.toFixed(2)} bp;
             the funding-only baseline when exp_funding &gt; {hurdle.toFixed(2)} bp. Equal size per trade.{" "}
             <span className="text-amber-500">
               Liquidity gate (qv_240 &gt; 166,666 on both venues) not applied — the shadow tables have no qv_240.
             </span>{" "}
-            {evalRows.length} events in scope.
+            {evalRows.length} events in scope
+            {prepared.pendingFunding > 0 && `, ${prepared.pendingFunding} left out until their funding settles`}.
           </p>
         </CardContent>
       </Card>
