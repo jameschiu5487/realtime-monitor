@@ -141,6 +141,11 @@ Overview 會靜默顯示錯的金額。要刪就同時處理兩張表，或事�
   欄位順序、排序方向、成交量單位都不一樣（BingX 只給 base、BitMart 給合約張數），
   解析錯不會噴錯、只會讓數字差 1000 倍。那裡記了每一家已實測驗證的對照與交叉驗算法。
   canonical↔native 符號轉換一律用 `lib/exchange-symbols.ts`，不要各自重寫。
+- **時間一律 UTC+8（Asia/Taipei），走 `lib/time.ts`**（使用者 2026-09-28 定案）：顯示用
+  `formatDateTime/formatDate/formatTime`，切日／週／月用 `taipeiDayKey` 等。**不要**直接
+  `toLocaleString()` 不帶 timeZone —— 它在瀏覽器是 UTC+8、在 Vercel server 渲染是 UTC，同一列會出現兩種時間；
+  也不要 `ts.slice(0, 10)` 當日期（那是 UTC 日，台北早上 8 點才換日）。刻意保留 UTC 的只有交易所 funding
+  結算時點（`lib/services/funding-fetcher.ts`）與純 join key。
 - **兩腿價差一律算 `(B − A) / A`**（opportunity 家族：spread modal 的歷史與即時兩條
   路徑、positions 的 entry spread、opportunity 表的 basis 欄）。直覺容易寫成
   `(A − B) / B`，寫反了不會壞、只會讓同一筆資料在表格與圖表差一個負號 —— 已經發生過。
