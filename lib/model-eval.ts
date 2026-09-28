@@ -227,7 +227,7 @@ export function topnCompare(rows: EvalRow[], cfg: EvalConfig): CompareRow[] {
   }));
 }
 
-export const MARGIN_SWEEP = Array.from({ length: 16 }, (_, i) => i);
+export const MARGIN_SWEEP = Array.from({ length: 11 }, (_, i) => i);
 
 /** Same threshold: both rules at fee + m for each margin m. */
 export function marginSweep(rows: EvalRow[], cfg: EvalConfig): CompareRow[] {
