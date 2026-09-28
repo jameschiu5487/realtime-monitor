@@ -54,6 +54,25 @@ const NEG = "#f87171";
 const BASE = "#94a3b8";
 const NEWTON_Z = "#f59e0b";
 
+/** Mean-net bars are coloured per bar by sign, which the chart legend can't express. */
+const NET_SWATCHES = [
+  { color: POS, label: "Mean net ≥ 0 (bp)" },
+  { color: NEG, label: "Mean net < 0 (bp)" },
+];
+
+function SwatchLegend({ items }: { items: { color: string; label: string; opacity?: number }[] }) {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-4 text-xs">
+      {items.map((it) => (
+        <span key={it.label} className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-[2px]" style={{ backgroundColor: it.color, opacity: it.opacity ?? 1 }} />
+          {it.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 const bp = (v: number | null | undefined, d = 2) =>
   v == null || !Number.isFinite(v) ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(d)}`;
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
@@ -191,6 +210,7 @@ export function ModelEvaluation({
             </Bar>
           </BarChart>
         </ChartContainer>
+        <SwatchLegend items={NET_SWATCHES} />
         <Table
           head={["Edge (bp)", "n", "Mean net", "Sum net", "Win"]}
           rows={threshold.bins.map((b) => [
@@ -313,7 +333,7 @@ export function ModelEvaluation({
         desc="ypred deciles. Research cuts at the train set's predictions; the shadow has no train set, so these cut points come from the rows in scope."
       >
         <ChartContainer
-          config={{ meanNet: { label: "Mean net (bp)", color: POS }, meanY: { label: "Mean y (bp)", color: COLORS.truth } }}
+          config={{ meanNet: { label: "Mean net (bp)", color: POS }, meanY: { label: "Mean y (bp)", color: COLORS.pred } }}
           className="aspect-auto h-[200px] w-full"
         >
           <BarChart data={deciles} margin={{ left: 4, right: 4, top: 8 }}>
@@ -322,8 +342,7 @@ export function ModelEvaluation({
             <YAxis tickLine={false} axisLine={false} width={36} className="text-xs" />
             <ReferenceLine y={0} stroke="currentColor" opacity={0.3} />
             <ChartTooltip content={<ChartTooltipContent />} />
-            <ChartLegend content={<ChartLegendContent />} />
-            <Bar dataKey="meanY" fill="var(--color-meanY)" opacity={0.5} radius={2} />
+            <Bar dataKey="meanY" fill="var(--color-meanY)" opacity={0.6} radius={2} />
             <Bar dataKey="meanNet" radius={2}>
               {deciles.map((d) => (
                 <Cell key={d.decile} fill={d.meanNet >= 0 ? POS : NEG} />
@@ -331,6 +350,7 @@ export function ModelEvaluation({
             </Bar>
           </BarChart>
         </ChartContainer>
+        <SwatchLegend items={[{ color: COLORS.pred, label: "Mean y (bp)", opacity: 0.6 }, ...NET_SWATCHES]} />
         <Table
           head={["Decile", "n", "ypred range", "Mean ypred", "Mean y", "Mean net", "Win"]}
           rows={deciles.map((d) => [
