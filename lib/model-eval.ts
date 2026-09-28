@@ -44,6 +44,8 @@ export interface EvalRow {
   settledFunding: number;
   /** ypred + exp_funding: what the model rule compares to fee + margin. */
   signal: number;
+  /** 'live' or 'replay' — lets the equity curve draw live stretches differently. */
+  source: string | null;
 }
 
 /**
@@ -71,6 +73,7 @@ export function prepare(
       expFunding: r.expFundingBp,
       settledFunding: r.settledFundingBp,
       signal: r.ypred + r.expFundingBp,
+      source: r.source,
     });
   }
   return { rows: out, pendingFunding };

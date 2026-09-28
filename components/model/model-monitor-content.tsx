@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
@@ -32,6 +32,9 @@ import { formatDateTime, formatTime } from "@/lib/time";
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
 /** Rendered rows cap; the table scrolls inside a fixed height either way. */
 const TABLE_LIMIT = 1000;
+
+type SourceMode = "live" | "replay" | "all";
+const SOURCE_MODES: SourceMode[] = ["live", "replay", "all"];
 
 interface ModelMonitorContentProps {
   rows: ModelRow[];
@@ -73,9 +76,19 @@ export function ModelMonitorContent({ rows: allRows, days, windows, error }: Mod
       .sort((a, b) => b.total - a.total || a.version.localeCompare(b.version));
   }, [allRows]);
   const [pickedModel, setPickedModel] = useState<string | null>(null);
+  // Which predictions to use: real-time only, reproduced only, or both.
+  const [sourceMode, setSourceMode] = useState<SourceMode>("all");
+  const sourceOk = useCallback(
+    (r: ModelRow) =>
+      sourceMode === "all" || (sourceMode === "replay" ? r.source === "replay" : r.source !== "replay"),
+    [sourceMode]
+  );
   const activeModel =
     pickedModel && models.some((m) => m.version === pickedModel) ? pickedModel : models[0]?.version ?? null;
-  const rows = useMemo(() => allRows.filter((r) => r.modelVersion === activeModel), [allRows, activeModel]);
+  const rows = useMemo(
+    () => allRows.filter((r) => r.modelVersion === activeModel && sourceOk(r)),
+    [allRows, activeModel, sourceOk]
+  );
 
   const hasClean = useMemo(() => rows.some(isClean), [rows]);
   // Settled rows overall vs the clean subset, shown beside the toggle.
@@ -117,12 +130,13 @@ export function ModelMonitorContent({ rows: allRows, days, windows, error }: Mod
           allRows.filter(
             (r) =>
               r.modelVersion === m.version &&
+              sourceOk(r) &&
               (!cleanOnly || isClean(r)) &&
               (q === "" || r.symbol.toUpperCase().includes(q))
           )
         ),
       }));
-  }, [models, activeModel, allRows, cleanOnly, symbolQuery]);
+  }, [models, activeModel, allRows, cleanOnly, symbolQuery, sourceOk]);
 
   const scoredRows = useMemo(() => scored(filtered), [filtered]);
   const summary = useMemo(() => summarize(scoredRows), [scoredRows]);
@@ -165,6 +179,20 @@ export function ModelMonitorContent({ rows: allRows, days, windows, error }: Mod
             Shadow predictions (ypred) against realised y, bp. Live predictions, plus replay only
             where live has no row.
           </p>
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <span className="text-xs text-muted-foreground">Source</span>
+            {SOURCE_MODES.map((mode) => (
+              <Button
+                key={mode}
+                size="sm"
+                variant={mode === sourceMode ? "default" : "outline"}
+                className="h-7 px-2 text-xs"
+                onClick={() => setSourceMode(mode)}
+              >
+                {mode}
+              </Button>
+            ))}
+          </div>
           <div className="flex flex-wrap gap-1.5 pt-1">
             {models.map((m) => (
               <Button
@@ -246,6 +274,7 @@ export function ModelMonitorContent({ rows: allRows, days, windows, error }: Mod
             rows={scoredRows}
             modelVersion={activeModel}
             otherModels={otherModels}
+            splitBySource={sourceMode === "all"}
             settings={evalSettings}
             onSettingsChange={setEvalSettings}
           />

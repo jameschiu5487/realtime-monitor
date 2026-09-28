@@ -105,6 +105,7 @@ export function ModelEvaluation({
   rows,
   modelVersion,
   otherModels = [],
+  splitBySource = false,
   settings,
   onSettingsChange,
 }: {
@@ -113,6 +114,8 @@ export function ModelEvaluation({
   modelVersion: string | null;
   /** Other models, already filtered like `rows`; each adds a line to the equity curve only. */
   otherModels?: { version: string; rows: ScoredRow[] }[];
+  /** Source mode "all": draw each model line solid over replay settlements, dashed over live ones. */
+  splitBySource?: boolean;
   settings: EvalSettings;
   onSettingsChange: (next: EvalSettings) => void;
 }) {
@@ -166,14 +169,20 @@ export function ModelEvaluation({
     [evalRows, others]
   );
   const activeLabel = modelVersion ? shortModel(modelVersion) : "Model";
+  const liveTsActive = useMemo(() => (splitBySource ? liveSettlements(evalRows) : undefined), [splitBySource, evalRows]);
+  const liveTsOthers = useMemo(
+    () => others.map((o) => (splitBySource ? liveSettlements(o.evalRows) : undefined)),
+    [splitBySource, others]
+  );
   const curveSeries: CurveSeries[] = [
-    { key: "model", label: `${activeLabel} (cumulative bp)`, color: COLORS.pred, stats: model, width: 2 },
+    { key: "model", label: `${activeLabel} (cumulative bp)`, color: COLORS.pred, stats: model, width: 2, liveTs: liveTsActive },
     ...others.map((o, i) => ({
       key: `other${i}`,
       label: shortModel(o.version),
       color: OTHER_MODEL_COLORS[i % OTHER_MODEL_COLORS.length],
       stats: o.stats,
       width: 2,
+      liveTs: liveTsOthers[i],
     })),
     { key: "baseline", label: "Funding-only (cumulative bp)", color: BASE, stats: baseline, dash: "4 3" },
     { key: "newtonZ", label: `newton_z (exp_funding > fee + ${NEWTON_Z_MARGIN_BP})`, color: NEWTON_Z, stats: newtonZ },
@@ -455,7 +464,22 @@ interface CurveSeries {
   stats: CurveStats;
   dash?: string;
   width?: number;
+  /**
+   * Settlements whose predictions are live. When set, the line is drawn in two
+   * keys — solid over replay settlements, dashed over live ones — sharing the
+   * point where the source changes so the line stays continuous.
+   */
+  liveTs?: Set<number>;
 }
+
+/** Settlements where live rows are at least half of the rows in scope. */
+function liveSettlements(rows: { ts: number; source: string | null }[]): Set<number> {
+  const counts = new Map<number, number>();
+  for (const r of rows) counts.set(r.ts, (counts.get(r.ts) ?? 0) + (r.source === "replay" ? -1 : 1));
+  return new Set([...counts].filter(([, c]) => c >= 0).map(([ts]) => ts));
+}
+
+const LIVE_DASH = "5 4";
 
 function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: number[] }) {
   // A point at every settlement in scope. A settlement with no trade carries
@@ -464,19 +488,47 @@ function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: num
   const data = useMemo(() => {
     const at = series.map((s) => new Map(s.stats.curve.map((p) => [p.ts, p.cum])));
     const last = series.map(() => 0);
-    return timeline.map((ts) => {
+    const lastSeg: (boolean | null)[] = series.map(() => null);
+    const points: Record<string, number>[] = [];
+    timeline.forEach((ts, t) => {
       const point: Record<string, number> = { ts };
       series.forEach((s, i) => {
         last[i] = at[i].get(ts) ?? last[i];
-        point[s.key] = last[i];
+        if (!s.liveTs) {
+          point[s.key] = last[i];
+          return;
+        }
+        const live = s.liveTs.has(ts);
+        point[live ? `${s.key}_live` : s.key] = last[i];
+        // Start the new segment at the previous point so the two halves join.
+        if (t > 0 && lastSeg[i] !== null && lastSeg[i] !== live) {
+          const prev = points[t - 1];
+          prev[live ? `${s.key}_live` : s.key] = prev[live ? s.key : `${s.key}_live`];
+        }
+        lastSeg[i] = live;
       });
-      return point;
+      points.push(point);
     });
+    return points;
   }, [series, timeline]);
+  // Split series become two lines; a half with no points is left out of the legend.
+  const lines = useMemo(
+    () =>
+      series.flatMap((s) => {
+        if (!s.liveTs) return [{ ...s, split: false }];
+        const hasReplay = data.some((p) => p[s.key] !== undefined);
+        const hasLive = data.some((p) => p[`${s.key}_live`] !== undefined);
+        return [
+          ...(hasReplay ? [{ ...s, label: `${s.label} · replay`, split: true }] : []),
+          ...(hasLive ? [{ ...s, key: `${s.key}_live`, label: `${s.label} · live (dashed)`, dash: LIVE_DASH, split: true }] : []),
+        ];
+      }),
+    [series, data]
+  );
   if (series.every((s) => s.stats.n === 0)) return <p className="py-6 text-center text-sm text-muted-foreground">No trades pass the threshold.</p>;
   return (
     <ChartContainer
-      config={Object.fromEntries(series.map((s) => [s.key, { label: s.label, color: s.color }]))}
+      config={Object.fromEntries(lines.map((s) => [s.key, { label: s.label, color: s.color }]))}
       className="aspect-auto h-[240px] w-full"
     >
       <LineChart data={data} margin={{ left: 4, right: 4, top: 8 }}>
@@ -486,7 +538,7 @@ function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: num
         <ReferenceLine y={0} stroke="currentColor" opacity={0.3} />
         <ChartTooltip content={<ChartTooltipContent labelFormatter={(_, p) => fmtTs(Number(p?.[0]?.payload?.ts))} />} />
         <ChartLegend content={<ChartLegendContent className="flex-wrap" />} />
-        {series.map((s) => (
+        {lines.map((s) => (
           <Line
             key={s.key}
             dataKey={s.key}
@@ -495,7 +547,8 @@ function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: num
             strokeWidth={s.width ?? 1.5}
             strokeDasharray={s.dash}
             dot={false}
-            connectNulls
+            // Split halves must not bridge across the other half's stretch.
+            connectNulls={!s.split}
             isAnimationActive={false}
           />
         ))}
