@@ -62,11 +62,38 @@ const tone = (v: number | null | undefined) =>
 const fmtTs = (ms: number) =>
   formatDateTime(ms, { month: "short", day: "numeric", hour: "2-digit", hour12: false });
 
-export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
-  const [feeBp, setFeeBp] = useState(DEFAULT_FEE_BP);
-  const [marginBp, setMarginBp] = useState(DEFAULT_MARGIN_BP);
-  const [period, setPeriod] = useState<Period>("day");
-  const [capOn, setCapOn] = useState(true);
+export interface EvalSettings {
+  feeBp: number;
+  marginBp: number;
+  period: Period;
+  capOn: boolean;
+}
+
+export const DEFAULT_EVAL_SETTINGS: EvalSettings = {
+  feeBp: DEFAULT_FEE_BP,
+  marginBp: DEFAULT_MARGIN_BP,
+  period: "day",
+  capOn: true,
+};
+
+/**
+ * Settings are owned by the page: the Predictions table uses the same fee, and
+ * Radix Tabs unmounts hidden panels, so state kept here reset on every switch.
+ */
+export function ModelEvaluation({
+  rows,
+  settings,
+  onSettingsChange,
+}: {
+  rows: ScoredRow[];
+  settings: EvalSettings;
+  onSettingsChange: (next: EvalSettings) => void;
+}) {
+  const { feeBp, marginBp, period, capOn } = settings;
+  const setFeeBp = (v: number) => onSettingsChange({ ...settings, feeBp: v });
+  const setMarginBp = (v: number) => onSettingsChange({ ...settings, marginBp: v });
+  const setPeriod = (v: Period) => onSettingsChange({ ...settings, period: v });
+  const setCapOn = (v: boolean) => onSettingsChange({ ...settings, capOn: v });
 
   const cfg: EvalConfig = useMemo(
     () => ({ feeBp, marginBp, period, basisCap: capOn ? DEFAULT_BASIS_CAP : null }),
@@ -124,10 +151,9 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => {
-                  setFeeBp(DEFAULT_FEE_BP);
-                  setMarginBp(DEFAULT_MARGIN_BP);
-                }}
+                onClick={() =>
+                  onSettingsChange({ ...settings, feeBp: DEFAULT_FEE_BP, marginBp: DEFAULT_MARGIN_BP })
+                }
               >
                 Reset to default ({DEFAULT_FEE_BP} / {DEFAULT_MARGIN_BP})
               </Button>

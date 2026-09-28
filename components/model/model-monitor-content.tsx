@@ -24,7 +24,7 @@ import {
 } from "@/lib/model-metrics";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DistributionChart, IcTrendChart, ScatterCalibration } from "./model-charts";
-import { ModelEvaluation } from "./model-evaluation";
+import { DEFAULT_EVAL_SETTINGS, ModelEvaluation, type EvalSettings } from "./model-evaluation";
 import { formatDateTime, formatTime } from "@/lib/time";
 
 /** Predictions land at :30 + 5s and outcomes 8m05s after settlement. */
@@ -66,6 +66,8 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
   // which after the shadow restart silently cut 523 settled rows to 2.
   const [cleanOnly, setCleanOnly] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
+  const [evalSettings, setEvalSettings] = useState<EvalSettings>(DEFAULT_EVAL_SETTINGS);
+  const feeBp = evalSettings.feeBp;
   const [loadedAt, setLoadedAt] = useState(() => Date.now());
 
   useEffect(() => {
@@ -177,7 +179,7 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
 
         {/* Research's own priority order: strategy-level metrics first. */}
         <TabsContent value="evaluation">
-          <ModelEvaluation rows={scoredRows} />
+          <ModelEvaluation rows={scoredRows} settings={evalSettings} onSettingsChange={setEvalSettings} />
         </TabsContent>
 
         <TabsContent value="diagnostics" className="space-y-4 sm:space-y-6">
@@ -208,6 +210,12 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                       <th className="px-2 py-1.5 text-right font-medium">Error</th>
                       <th className="px-2 py-1.5 text-right font-medium">Exp funding</th>
                       <th className="px-2 py-1.5 text-right font-medium">Exp total</th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="Realised funding from settled rates">
+                        Settled funding
+                      </th>
+                      <th className="px-2 py-1.5 text-right font-medium" title="y + settled funding − fee (fee set on the Evaluation tab)">
+                        Realised net (fee {feeBp})
+                      </th>
                       <th className="px-2 py-1.5 font-medium">Direction</th>
                       <th className="px-2 py-1.5 font-medium">Status</th>
                       <th className="px-2 py-1.5 text-right font-medium" title="ledger gap / window depth / substituted inputs">
@@ -219,6 +227,8 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                     {tableRows.map((r) => {
                       const err = r.yTrue == null ? null : r.yTrue - r.ypred;
                       const total = r.expFundingBp == null ? null : r.ypred + r.expFundingBp;
+                      const realised =
+                        r.yTrue == null || r.settledFundingBp == null ? null : r.yTrue + r.settledFundingBp - feeBp;
                       return (
                         <tr key={`${r.fundingTs}|${r.symbol}`} className="border-b last:border-0">
                           <td className="px-2 py-1.5 whitespace-nowrap">{fmtTs(r.fundingTs)}</td>
@@ -228,6 +238,8 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                           <td className="px-2 py-1.5 text-right text-muted-foreground">{bp(err)}</td>
                           <td className="px-2 py-1.5 text-right">{bp(r.expFundingBp)}</td>
                           <td className={cn("px-2 py-1.5 text-right", signClass(total))}>{bp(total)}</td>
+                          <td className="px-2 py-1.5 text-right">{bp(r.settledFundingBp)}</td>
+                          <td className={cn("px-2 py-1.5 text-right font-semibold", signClass(realised))}>{bp(realised)}</td>
                           <td className="px-2 py-1.5 whitespace-nowrap">{directionLabel(r.direction)}</td>
                           <td className="px-2 py-1.5">
                             <Badge variant={r.status === "closed" ? "secondary" : "outline"} className="text-[10px]">
@@ -247,7 +259,7 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
                     })}
                     {tableRows.length === 0 && (
                       <tr>
-                        <td colSpan={10} className="py-8 text-center text-muted-foreground">
+                        <td colSpan={12} className="py-8 text-center text-muted-foreground">
                           No predictions in this window.
                         </td>
                       </tr>
