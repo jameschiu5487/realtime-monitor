@@ -57,9 +57,14 @@ const signClass = (v: number | null | undefined) =>
 export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitorContentProps) {
   const router = useRouter();
   const hasClean = useMemo(() => rows.some(isClean), [rows]);
-  // Default to clean rows once any exist; before then every row has a
-  // ledger gap and "clean only" would show nothing.
-  const [cleanOnly, setCleanOnly] = useState(hasClean);
+  // Settled rows overall vs the clean subset, shown beside the toggle.
+  const settledCounts = useMemo(() => {
+    const settled = scored(rows);
+    return { all: settled.length, clean: settled.filter(isClean).length };
+  }, [rows]);
+  // Off by default: it used to switch on as soon as any clean row existed,
+  // which after the shadow restart silently cut 523 settled rows to 2.
+  const [cleanOnly, setCleanOnly] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
   const [loadedAt, setLoadedAt] = useState(() => Date.now());
 
@@ -146,6 +151,9 @@ export function ModelMonitorContent({ rows, days, windows, error }: ModelMonitor
           <Label htmlFor="clean-only" className="text-sm">
             Clean only (no ledger gap, {FULL_WINDOW_MIN}m window)
           </Label>
+          <span className="text-xs text-muted-foreground font-mono">
+            clean {settledCounts.clean} / {settledCounts.all} settled
+          </span>
         </div>
         <Input
           placeholder="Filter symbol…"
