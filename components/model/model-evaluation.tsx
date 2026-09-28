@@ -92,6 +92,8 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
   const fees = useMemo(() => feeSensitivity(evalRows, cfg), [evalRows, cfg]);
 
   const hurdle = feeBp + marginBp;
+  // Every settlement in scope, traded or not, so both curves span the whole window.
+  const timeline = useMemo(() => [...new Set(evalRows.map((r) => r.ts))].sort((a, b) => a - b), [evalRows]);
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -190,7 +192,7 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
         title="Equity curve (curve_stats)"
         desc="Cumulative net bp of every trade the rule takes, in settlement order, against the funding-only rule at the same threshold."
       >
-        <CurveChart model={model} baseline={baseline} />
+        <CurveChart model={model} baseline={baseline} timeline={timeline} />
         <Table
           head={["", "Trades", "Total bp", "Per trade", "Win", "Max DD", "Ret / DD", `+${period}s`]}
           rows={[
@@ -371,15 +373,30 @@ function statRow(label: string, s: CurveStats): ReactNode[] {
   ];
 }
 
-function CurveChart({ model, baseline }: { model: CurveStats; baseline: CurveStats }) {
-  // One series per rule on a shared time axis; each keeps its own cumulative value.
+function CurveChart({
+  model,
+  baseline,
+  timeline,
+}: {
+  model: CurveStats;
+  baseline: CurveStats;
+  timeline: number[];
+}) {
+  // A point at every settlement in scope. A settlement with no trade carries
+  // the previous cumulative value forward (0 before the first trade), so a
+  // quiet stretch reads as flat rather than as the line ending early.
   const data = useMemo(() => {
-    const m = new Map<number, { ts: number; model?: number; baseline?: number }>();
-    for (const p of model.curve) m.set(p.ts, { ...(m.get(p.ts) ?? { ts: p.ts }), model: p.cum });
-    for (const p of baseline.curve) m.set(p.ts, { ...(m.get(p.ts) ?? { ts: p.ts }), baseline: p.cum });
-    return [...m.values()].sort((a, b) => a.ts - b.ts);
-  }, [model, baseline]);
-  if (data.length === 0) return <p className="py-6 text-center text-sm text-muted-foreground">No trades pass the threshold.</p>;
+    const mAt = new Map(model.curve.map((p) => [p.ts, p.cum]));
+    const bAt = new Map(baseline.curve.map((p) => [p.ts, p.cum]));
+    let m = 0;
+    let b = 0;
+    return timeline.map((ts) => {
+      m = mAt.get(ts) ?? m;
+      b = bAt.get(ts) ?? b;
+      return { ts, model: m, baseline: b };
+    });
+  }, [model, baseline, timeline]);
+  if (model.n === 0 && baseline.n === 0) return <p className="py-6 text-center text-sm text-muted-foreground">No trades pass the threshold.</p>;
   return (
     <ChartContainer
       config={{
