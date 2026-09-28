@@ -212,31 +212,7 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
         title="vs funding-only (margin_sweep)"
         desc="Good = beating the funding-only baseline at the same threshold, across margins."
       >
-        <div className="text-xs font-medium">
-          Same margin — both rules at fee {feeBp} + margin (current margin {marginBp} in bold)
-        </div>
-        <Table
-          head={["Margin", "Model n", "Base n", "Model total", "Base total", "Δ", "Model win", "Base win", `Model +${period}s`, `Base +${period}s`]}
-          rows={sweep.map((r) => {
-            const current = r.key === marginBp;
-            return [
-              <span key="k" className={cn(current && "font-bold")}>{r.key}</span>,
-              r.model.n,
-              r.baseline.n,
-              <span key="m" className={tone(r.model.totalBp)}>{bp(r.model.totalBp, 1)}</span>,
-              <span key="b" className={tone(r.baseline.totalBp)}>{bp(r.baseline.totalBp, 1)}</span>,
-              <span key="d" className={cn("font-semibold", tone(r.model.totalBp - r.baseline.totalBp))}>
-                {bp(r.model.totalBp - r.baseline.totalBp, 1)}
-              </span>,
-              pct(r.model.winRate),
-              pct(r.baseline.winRate),
-              `${r.model.positivePeriods}/${r.model.periods}`,
-              `${r.baseline.positivePeriods}/${r.baseline.periods}`,
-            ];
-          })}
-        />
-
-        <div className="pt-2 text-xs font-medium">Total bp across margins</div>
+        <div className="text-xs font-medium">Total bp across margins</div>
         <ChartContainer
           config={{
             model: { label: "Model total bp", color: COLORS.pred },
@@ -259,6 +235,30 @@ export function ModelEvaluation({ rows }: { rows: ScoredRow[] }) {
             <Line dataKey="baseline" stroke="var(--color-baseline)" strokeDasharray="4 3" dot={{ r: 2 }} isAnimationActive={false} />
           </LineChart>
         </ChartContainer>
+
+        <div className="pt-2 text-xs font-medium">
+          Same margin — both rules at fee {feeBp} + margin (current margin {marginBp} in bold)
+        </div>
+        <Table
+          head={["Margin", "Model n", "Base n", "Model total", "Base total", "Δ", "Model win", "Base win", `Model +${period}s`, `Base +${period}s`]}
+          rows={sweep.map((r) => {
+            const current = r.key === marginBp;
+            return [
+              <span key="k" className={cn(current && "font-bold")}>{r.key}</span>,
+              r.model.n,
+              r.baseline.n,
+              <span key="m" className={tone(r.model.totalBp)}>{bp(r.model.totalBp, 1)}</span>,
+              <span key="b" className={tone(r.baseline.totalBp)}>{bp(r.baseline.totalBp, 1)}</span>,
+              <span key="d" className={cn("font-semibold", tone(r.model.totalBp - r.baseline.totalBp))}>
+                {bp(r.model.totalBp - r.baseline.totalBp, 1)}
+              </span>,
+              pct(r.model.winRate),
+              pct(r.baseline.winRate),
+              `${r.model.positivePeriods}/${r.model.periods}`,
+              `${r.baseline.positivePeriods}/${r.baseline.periods}`,
+            ];
+          })}
+        />
 
         <div className="pt-2 text-xs font-medium">Per {period}: model − baseline (at margin {marginBp})</div>
         <Table
