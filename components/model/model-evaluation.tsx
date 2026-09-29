@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { shortModel, type ScoredRow } from "@/lib/model-metrics";
+import { isLiveSource, shortModel, type ScoredRow } from "@/lib/model-metrics";
 import {
   DEFAULT_BASIS_CAP,
   DEFAULT_FEE_BP,
@@ -475,7 +475,7 @@ interface CurveSeries {
 /** Settlements where live rows are at least half of the rows in scope. */
 function liveSettlements(rows: { ts: number; source: string | null }[]): Set<number> {
   const counts = new Map<number, number>();
-  for (const r of rows) counts.set(r.ts, (counts.get(r.ts) ?? 0) + (r.source === "replay" ? -1 : 1));
+  for (const r of rows) counts.set(r.ts, (counts.get(r.ts) ?? 0) + (isLiveSource(r.source) ? 1 : -1));
   return new Set([...counts].filter(([, c]) => c >= 0).map(([ts]) => ts));
 }
 

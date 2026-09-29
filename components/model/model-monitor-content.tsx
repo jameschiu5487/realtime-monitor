@@ -17,8 +17,11 @@ import {
   histograms,
   isClean,
   perEvent,
+  isLiveSource,
   scored,
   shortModel,
+  unpackRows,
+  type PackedModelRows,
   summarize,
   type ModelRow,
   type ModelSummary,
@@ -37,7 +40,8 @@ type SourceMode = "live" | "replay" | "all";
 const SOURCE_MODES: SourceMode[] = ["live", "replay", "all"];
 
 interface ModelMonitorContentProps {
-  rows: ModelRow[];
+  /** Tuple-encoded rows (lib/model-metrics packRows); unpacked once on the client. */
+  packed: PackedModelRows;
   days: number;
   windows: number[];
   error: string | null;
@@ -58,8 +62,9 @@ const bp = (v: number | null | undefined, digits = 2) =>
 const signClass = (v: number | null | undefined) =>
   v == null ? "text-muted-foreground" : v > 0 ? "text-emerald-500" : v < 0 ? "text-red-500" : "";
 
-export function ModelMonitorContent({ rows: allRows, days, windows, error }: ModelMonitorContentProps) {
+export function ModelMonitorContent({ packed, days, windows, error }: ModelMonitorContentProps) {
   const router = useRouter();
+  const allRows = useMemo(() => unpackRows(packed), [packed]);
 
   // Every model in the window, most rows first; the page shows one at a time.
   const models = useMemo(() => {
@@ -67,8 +72,8 @@ export function ModelMonitorContent({ rows: allRows, days, windows, error }: Mod
     for (const r of allRows) {
       if (!r.modelVersion) continue;
       const c = m.get(r.modelVersion) ?? { live: 0, replay: 0 };
-      if (r.source === "replay") c.replay++;
-      else c.live++;
+      if (isLiveSource(r.source)) c.live++;
+      else c.replay++;
       m.set(r.modelVersion, c);
     }
     return [...m.entries()]
@@ -80,7 +85,7 @@ export function ModelMonitorContent({ rows: allRows, days, windows, error }: Mod
   const [sourceMode, setSourceMode] = useState<SourceMode>("all");
   const sourceOk = useCallback(
     (r: ModelRow) =>
-      sourceMode === "all" || (sourceMode === "replay" ? r.source === "replay" : r.source !== "replay"),
+      sourceMode === "all" || (sourceMode === "live") === isLiveSource(r.source),
     [sourceMode]
   );
   const activeModel =
@@ -176,8 +181,8 @@ export function ModelMonitorContent({ rows: allRows, days, windows, error }: Mod
         <div className="space-y-1">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Model Monitor</h1>
           <p className="text-sm text-muted-foreground">
-            Shadow predictions (ypred) against realised y, bp. Live predictions, plus replay only
-            where live has no row.
+            Shadow predictions (ypred) against realised y, bp. Live predictions, plus replay
+            (recent reference replay and backfilled history) only where live has no row.
           </p>
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
             <span className="text-xs text-muted-foreground">Source</span>
@@ -381,7 +386,7 @@ export function ModelMonitorContent({ rows: allRows, days, windows, error }: Mod
                         <tr key={`${r.fundingTs}|${r.symbol}`} className="border-b last:border-0">
                           <td className="px-2 py-1.5 whitespace-nowrap">{fmtTs(r.fundingTs)}</td>
                           <td className="px-2 py-1.5">{r.symbol}</td>
-                          <td className={cn("px-2 py-1.5", r.source === "replay" && "text-amber-500")}>{r.source ?? "—"}</td>
+                          <td className={cn("px-2 py-1.5", !isLiveSource(r.source) && "text-amber-500")}>{r.source ?? "—"}</td>
                           <td className={cn("px-2 py-1.5 text-right", signClass(r.ypred))}>{bp(r.ypred)}</td>
                           <td className={cn("px-2 py-1.5 text-right", signClass(r.yTrue))}>{bp(r.yTrue)}</td>
                           <td className="px-2 py-1.5 text-right text-muted-foreground">{bp(err)}</td>

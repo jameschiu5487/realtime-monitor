@@ -119,6 +119,9 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   `shadow_prediction` / `shadow_prediction_replay` / `shadow_event_ledger` / `md_funding_settled`
   **每張都要有 authenticated 唯讀 policy**（`supabase/manual/2026-09-28-*-read-policy.sql`），
   少一張就會靜默少掉那部分的列（replay 曾經整批是 0）。多模型並存時頁面一次只看一個 model_version。
+  `source` 不只 live / replay（還有 `replay_historical`，之後可能更多）—— 判斷一律用
+  `isLiveSource()`，別比對字串 `'replay'`。這個 view 每次請求都重算整個 join，**別用 OFFSET 分頁**
+  （30 天每頁 ~1.3 s）；照 `page.tsx` 按時段切塊並行讀。
   **實際損益 = `y_bp + funding_bp − fee`，`funding_bp` 是 `shadow_event_net` 用已結算 rate 算的；
   `exp_funding_bp` 只能用於進場決策**（使用者 2026-09-28 定案，`lib/model-eval.ts`）。拿 exp 算損益會把
   高 exp 的 event 高估，足以讓總損益翻號。`shadow_event_net` 是

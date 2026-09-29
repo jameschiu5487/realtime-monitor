@@ -27,6 +27,99 @@ export interface ModelRow {
   source: string | null;
 }
 
+/**
+ * Anything not 'live' is a reproduction — 'replay' (reference replay of recent
+ * events) or 'replay_historical' (backfilled history). Compare against this,
+ * never against the string 'replay': new replay kinds would otherwise count as live.
+ */
+export const isLiveSource = (source: string | null) => source === "live";
+
+/* ------------------------------------------------------------------ */
+/* Wire format: 30 days is ~35k rows, so the server sends tuples with    */
+/* dictionary-coded strings instead of objects with repeated keys.      */
+/* ------------------------------------------------------------------ */
+
+type Tuple = [
+  fundingTs: number,
+  symbol: number,
+  model: number,
+  source: number,
+  direction: number,
+  status: number,
+  ypred: number,
+  yTrue: number | null,
+  expFundingBp: number | null,
+  settledFundingBp: number | null,
+  entryBasis: number | null,
+  ledgerGapObs: number | null,
+  windowDepthMin: number | null,
+  substitutedInputs: number | null,
+];
+
+export interface PackedModelRows {
+  dict: string[];
+  rows: Tuple[];
+}
+
+/** bp values to 1e-4 bp — far below anything shown — to keep the payload small. */
+const r4 = (v: number | null) => (v == null ? null : Math.round(v * 1e4) / 1e4);
+
+export function packRows(rows: ModelRow[]): PackedModelRows {
+  const dict: string[] = [];
+  const index = new Map<string, number>();
+  const code = (v: string | null) => {
+    if (v == null) return -1;
+    let i = index.get(v);
+    if (i === undefined) {
+      i = dict.length;
+      dict.push(v);
+      index.set(v, i);
+    }
+    return i;
+  };
+  return {
+    dict,
+    rows: rows.map((r) => [
+      r.fundingTs,
+      code(r.symbol),
+      code(r.modelVersion),
+      code(r.source),
+      code(r.direction),
+      code(r.status),
+      r4(r.ypred)!,
+      r4(r.yTrue),
+      r4(r.expFundingBp),
+      r4(r.settledFundingBp),
+      r4(r.entryBasis),
+      r.ledgerGapObs,
+      r.windowDepthMin,
+      r.substitutedInputs,
+    ]),
+  };
+}
+
+export function unpackRows({ dict, rows }: PackedModelRows): ModelRow[] {
+  const str = (i: number) => (i < 0 ? null : dict[i]);
+  return rows.map((t) => ({
+    fundingTs: t[0],
+    symbol: str(t[1]) ?? "",
+    modelVersion: str(t[2]),
+    source: str(t[3]),
+    direction: str(t[4]),
+    status: str(t[5]),
+    ypred: t[6],
+    yTrue: t[7],
+    expFundingBp: t[8],
+    settledFundingBp: t[9],
+    entryBasis: t[10],
+    ledgerGapObs: t[11],
+    windowDepthMin: t[12],
+    substitutedInputs: t[13],
+    obsTs: null,
+    exitBasis: null,
+  }));
+}
+
 /** "model_default-v2-te202607-83c9d320c942" → "v2-te202607-83c9d320c942". */
 export const shortModel = (v: string) => v.replace(/^model_default-/, "");
 

@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { ModelMonitorContent } from "@/components/model/model-monitor-content";
-import type { ModelRow } from "@/lib/model-metrics";
+import { packRows, type ModelRow } from "@/lib/model-metrics";
 
 const WINDOWS = [1, 3, 7, 30] as const;
 const DEFAULT_DAYS = 7;
@@ -54,21 +54,50 @@ async function readAll<T>(
   }
 }
 
-async function loadRows(supabase: SupabaseClient, sinceMs: number) {
-  const { rows: raw, error } = await readAll<PredictionRow>("shadow_prediction_all", (from, to) =>
+/**
+ * The view recomputes its whole join for every request, so OFFSET paging over
+ * 30 days (~35k rows, mostly replay_historical) cost ~1.3 s per page, 35 pages
+ * in a row. Bounded time slices each hit the indexes (~40 ms for 12 h) and run
+ * in parallel; a slice past the 1000-row cap pages within itself.
+ */
+const SLICE_MS = 12 * 60 * 60 * 1000;
+const PARALLEL_SLICES = 8;
+
+async function loadSlice(supabase: SupabaseClient, fromMs: number, toMs: number) {
+  return readAll<PredictionRow>(`shadow_prediction_all ${fromMs}`, (from, to) =>
     supabase
       .from("shadow_prediction_all")
       .select(
         "funding_ts_ms, symbol, obs_ts_ms, model_version, source, ypred, exp_funding_bp, entry_basis, ledger_gap_obs, window_depth_min, substituted_inputs, direction, status, y_bp, funding_bp"
       )
       .not("ypred", "is", null)
-      .gte("funding_ts_ms", sinceMs)
+      .gte("funding_ts_ms", fromMs)
+      .lt("funding_ts_ms", toMs)
       // Unique key, so pages never overlap or skip.
       .order("funding_ts_ms", { ascending: true })
       .order("symbol", { ascending: true })
       .order("model_version", { ascending: true })
       .range(from, to)
   );
+}
+
+async function loadRows(supabase: SupabaseClient, sinceMs: number) {
+  // Up to an hour ahead: predictions are written before their settlement.
+  const endMs = Date.now() + 60 * 60 * 1000;
+  const slices: [number, number][] = [];
+  for (let t = sinceMs; t < endMs; t += SLICE_MS) slices.push([t, Math.min(t + SLICE_MS, endMs)]);
+
+  const raw: PredictionRow[] = [];
+  let error: string | null = null;
+  for (let i = 0; i < slices.length; i += PARALLEL_SLICES) {
+    const wave = await Promise.all(
+      slices.slice(i, i + PARALLEL_SLICES).map(([a, b]) => loadSlice(supabase, a, b))
+    );
+    for (const w of wave) {
+      raw.push(...w.rows);
+      error ??= w.error;
+    }
+  }
 
   const rows: ModelRow[] = raw.map((p) => ({
     fundingTs: Number(p.funding_ts_ms),
@@ -104,6 +133,6 @@ export default async function ModelPage({
   const { rows, error } = await loadRows(supabase, Date.now() - days * 86_400_000);
 
   return (
-    <ModelMonitorContent rows={rows} days={days} windows={[...WINDOWS]} error={error} />
+    <ModelMonitorContent packed={packRows(rows)} days={days} windows={[...WINDOWS]} error={error} />
   );
 }
