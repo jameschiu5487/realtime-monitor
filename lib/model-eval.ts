@@ -170,8 +170,12 @@ export function newtonZTrades(rows: EvalRow[], feeBp: number) {
 /* 1. Threshold calibration                                             */
 /* ------------------------------------------------------------------ */
 
-/** Edges of edge = ypred + exp_funding − (fee + margin), bp. */
-export const THRESHOLD_EDGES = [-10, -5, -2, 0, 2, 5, 10];
+/**
+ * Edges of edge = ypred + exp_funding − (fee + margin), bp. The traded side
+ * (edge ≥ 0, the only side the page shows) is cut every 1 bp up to 10, then
+ * one ≥ 10 bucket; below 0 stays coarse.
+ */
+export const THRESHOLD_EDGES = [-10, -5, -2, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 export interface ThresholdBin {
   label: string;
