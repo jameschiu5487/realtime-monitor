@@ -372,6 +372,8 @@ export function ModelEvaluation({
 
         <div className="pt-2 text-xs font-medium">Per {period}: model − baseline (at margin {marginBp})</div>
         <Table
+          // ~10 rows, then scroll.
+          scroll="max-h-[322px]"
           head={[period, "Model", "Baseline", "Δ"]}
           rows={diff.periods.map((p) => [
             p.period,
@@ -713,9 +715,15 @@ function Section({ n, title, desc, children }: { n: number; title: string; desc:
   );
 }
 
-function Table({ head, rows, scroll = false }: { head: ReactNode[]; rows: ReactNode[][]; scroll?: boolean }) {
+/** `scroll` caps the height (a max-h class, default ~14 rows) and keeps the header visible. */
+function Table({ head, rows, scroll }: { head: ReactNode[]; rows: ReactNode[][]; scroll?: boolean | string }) {
   return (
-    <div className={cn("overflow-x-auto", scroll && "max-h-[420px] overflow-y-auto rounded-md border")}>
+    <div
+      className={cn(
+        "overflow-x-auto",
+        scroll && cn("overflow-y-auto rounded-md border", typeof scroll === "string" ? scroll : "max-h-[420px]")
+      )}
+    >
       <table className="w-full text-xs font-mono">
         <thead className={cn("text-muted-foreground", scroll && "sticky top-0 z-10 bg-card")}>
           <tr className="border-b">
