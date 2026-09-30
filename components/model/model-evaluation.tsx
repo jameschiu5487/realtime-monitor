@@ -511,22 +511,25 @@ function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: num
     });
     return points;
   }, [series, timeline]);
-  // Split series become two lines; a half with no points is left out of the legend.
+  // Split series become two lines but one legend entry: the live half only
+  // shows in the legend when there is no replay half to stand for the model.
   const lines = useMemo(
     () =>
       series.flatMap((s) => {
-        if (!s.liveTs) return [{ ...s, split: false }];
+        if (!s.liveTs) return [{ ...s, split: false, inLegend: true }];
         const hasReplay = data.some((p) => p[s.key] !== undefined);
         const hasLive = data.some((p) => p[`${s.key}_live`] !== undefined);
         return [
-          ...(hasReplay ? [{ ...s, label: `${s.label} · replay`, split: true }] : []),
-          ...(hasLive ? [{ ...s, key: `${s.key}_live`, label: `${s.label} · live (dashed)`, dash: LIVE_DASH, split: true }] : []),
+          ...(hasReplay ? [{ ...s, split: true, inLegend: true }] : []),
+          ...(hasLive ? [{ ...s, key: `${s.key}_live`, dash: LIVE_DASH, split: true, inLegend: !hasReplay }] : []),
         ];
       }),
     [series, data]
   );
+  const hasDashed = lines.some((s) => s.split && s.dash === LIVE_DASH);
   if (series.every((s) => s.stats.n === 0)) return <p className="py-6 text-center text-sm text-muted-foreground">No trades pass the threshold.</p>;
   return (
+    <>
     <ChartContainer
       config={Object.fromEntries(lines.map((s) => [s.key, { label: s.label, color: s.color }]))}
       className="aspect-auto h-[240px] w-full"
@@ -546,6 +549,7 @@ function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: num
             stroke={`var(--color-${s.key})`}
             strokeWidth={s.width ?? 1.5}
             strokeDasharray={s.dash}
+            legendType={s.inLegend ? undefined : "none"}
             dot={false}
             // Split halves must not bridge across the other half's stretch.
             connectNulls={!s.split}
@@ -554,6 +558,8 @@ function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: num
         ))}
       </LineChart>
     </ChartContainer>
+    {hasDashed && <p className="text-center text-xs text-muted-foreground">Solid = replay · dashed = live</p>}
+    </>
   );
 }
 
