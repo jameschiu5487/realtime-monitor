@@ -394,7 +394,7 @@ export function ModelEvaluation({
         title="Compare"
         desc="Pick any two of the models and baselines. The trades both take cancel out, so the whole P&L gap between them is in the trades only one of them takes."
       >
-        <CompareBlock candidates={compareCandidates} feeBp={feeBp} />
+        <CompareBlock candidates={compareCandidates} feeBp={feeBp} period={period} timeline={timeline} />
       </Section>
 
       {/* 7. Auxiliaries */}
@@ -449,7 +449,7 @@ interface CurveSeries {
   key: string;
   label: string;
   color: string;
-  stats: CurveStats;
+  stats: Pick<CurveStats, "n" | "curve">;
   dash?: string;
   width?: number;
   /**
@@ -564,7 +564,17 @@ const ypredMap = (rows: EvalRow[]) => new Map(rows.map((r) => [eventKey(r), r.yp
 /** Longest trade-diff list rendered; the P&L table always covers all of it. */
 const DIFF_ROW_CAP = 1000;
 
-function CompareBlock({ candidates, feeBp }: { candidates: CompareCandidate[]; feeBp: number }) {
+function CompareBlock({
+  candidates,
+  feeBp,
+  period,
+  timeline,
+}: {
+  candidates: CompareCandidate[];
+  feeBp: number;
+  period: Period;
+  timeline: number[];
+}) {
   const [aId, setAId] = useState("model");
   const [bId, setBId] = useState("baseline");
   // A model that left scope (source switch, model switch) falls back to the defaults.
@@ -592,6 +602,28 @@ function CompareBlock({ candidates, feeBp }: { candidates: CompareCandidate[]; f
     pct(s.winRate),
   ];
   const gap = diff.onlyAStats.totalBp - diff.onlyBStats.totalBp;
+  // Cumulative P&L of each side's exclusive trades, and their gap — which is
+  // the gap between the two rules' whole equity curves, shared trades cancelling.
+  const series: CurveSeries[] = useMemo(() => {
+    const onlyA = curveStats(diff.onlyA, feeBp, period);
+    const onlyB = curveStats(diff.onlyB, feeBp, period);
+    const aAt = new Map(onlyA.curve.map((p) => [p.ts, p.cum]));
+    const bAt = new Map(onlyB.curve.map((p) => [p.ts, p.cum]));
+    let ca = 0;
+    let cb = 0;
+    const gapCurve = [...new Set([...aAt.keys(), ...bAt.keys()])]
+      .sort((x, y) => x - y)
+      .map((ts) => {
+        ca = aAt.get(ts) ?? ca;
+        cb = bAt.get(ts) ?? cb;
+        return { ts, cum: ca - cb };
+      });
+    return [
+      { key: "gap", label: "A − B (cumulative bp)", color: COLORS.pred, stats: { n: gapCurve.length, curve: gapCurve }, width: 2 },
+      { key: "onlyA", label: `Only A (${a.label})`, color: "#0ea5e9", stats: onlyA },
+      { key: "onlyB", label: `Only B (${b.label})`, color: NEWTON_Z, stats: onlyB, dash: "4 3" },
+    ];
+  }, [diff, feeBp, period, a.label, b.label]);
 
   return (
     <div className="space-y-3">
@@ -614,6 +646,10 @@ function CompareBlock({ candidates, feeBp }: { candidates: CompareCandidate[]; f
       ) : (
         <>
           <div className="text-xs font-medium">
+            Diff P&amp;L series — A = {a.label}, B = {b.label}
+          </div>
+          <CurveChart series={series} timeline={timeline} />
+          <div className="pt-2 text-xs font-medium">
             P&amp;L of the diff — A = {a.label}, B = {b.label}
           </div>
           <Table
