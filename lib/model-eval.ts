@@ -2,7 +2,7 @@
  * Strategy-level evaluation of the shadow model, mirroring the research
  * pipeline's metrics in its stated priority order:
  *   1. threshold_calibration  2. curve_stats  3. topn_compare / margin_sweep
- *   4. decile_lens  (5. rank IC — deprecated, 6. R² — reported, not trusted)
+ *   4. two-rule trade diff  (5. rank IC — deprecated, 6. R² — reported, not trusted)
  *   7. auxiliaries: symbols traded, concentration, fee sensitivity.
  *
  * Definitions (agreed 2026-09-28):
@@ -342,46 +342,57 @@ export function studentTwoSidedP(t: number, df: number): number {
   return incompleteBeta(df / 2, 0.5, df / (df + t * t));
 }
 
-/* ------------------------------------------------------------------ */
-/* 4. Decile lens                                                       */
+/* 4. Compare two rules                                                */
 /* ------------------------------------------------------------------ */
 
-export interface DecileRow {
-  decile: number;
+/** One event, as the join key between two rules' trade lists. */
+export const eventKey = (r: { ts: number; symbol: string }) => `${r.ts}|${r.symbol}`;
+
+export interface DiffStats {
   n: number;
-  lo: number;
-  hi: number;
-  meanPred: number;
-  meanY: number;
-  meanNet: number;
-  winRate: number;
+  totalBp: number;
+  perTradeBp: number | null;
+  winRate: number | null;
+}
+
+export interface TradeDiff {
+  /** Events only A trades, and only B trades, newest first. */
+  onlyA: EvalRow[];
+  onlyB: EvalRow[];
+  both: DiffStats;
+  onlyAStats: DiffStats;
+  onlyBStats: DiffStats;
+}
+
+function diffStats(trades: EvalRow[], feeBp: number): DiffStats {
+  const nets = trades.map((t) => net(t, feeBp));
+  const total = nets.reduce((a, v) => a + v, 0);
+  return {
+    n: nets.length,
+    totalBp: total,
+    perTradeBp: nets.length ? total / nets.length : null,
+    winRate: nets.length ? nets.filter((v) => v > 0).length / nets.length : null,
+  };
 }
 
 /**
- * Deciles of ypred. Research cuts at the train set's predictions; the shadow
- * has no train set, so the cut points come from these rows themselves.
+ * Where two rules disagree. Net is event-level (y and settled funding don't
+ * depend on the model), so A total − B total = onlyA total − onlyB total:
+ * the trades they share cancel out.
  */
-export function decileLens(rows: EvalRow[], feeBp: number): DecileRow[] {
-  if (rows.length === 0) return [];
-  const sorted = [...rows].sort((a, b) => a.ypred - b.ypred);
-  const k = Math.min(10, sorted.length);
-  const out: DecileRow[] = [];
-  for (let d = 0; d < k; d++) {
-    const s = sorted.slice(Math.floor((d * sorted.length) / k), Math.floor(((d + 1) * sorted.length) / k));
-    if (s.length === 0) continue;
-    const nets = s.map((r) => net(r, feeBp));
-    out.push({
-      decile: d + 1,
-      n: s.length,
-      lo: s[0].ypred,
-      hi: s[s.length - 1].ypred,
-      meanPred: s.reduce((a, r) => a + r.ypred, 0) / s.length,
-      meanY: s.reduce((a, r) => a + r.y, 0) / s.length,
-      meanNet: nets.reduce((a, v) => a + v, 0) / s.length,
-      winRate: nets.filter((v) => v > 0).length / s.length,
-    });
-  }
-  return out;
+export function tradeDiff(a: EvalRow[], b: EvalRow[], feeBp: number): TradeDiff {
+  const aKeys = new Set(a.map(eventKey));
+  const bKeys = new Set(b.map(eventKey));
+  const newestFirst = (x: EvalRow, y: EvalRow) => y.ts - x.ts || x.symbol.localeCompare(y.symbol);
+  const onlyA = a.filter((r) => !bKeys.has(eventKey(r))).sort(newestFirst);
+  const onlyB = b.filter((r) => !aKeys.has(eventKey(r))).sort(newestFirst);
+  return {
+    onlyA,
+    onlyB,
+    both: diffStats(a.filter((r) => bKeys.has(eventKey(r))), feeBp),
+    onlyAStats: diffStats(onlyA, feeBp),
+    onlyBStats: diffStats(onlyB, feeBp),
+  };
 }
 
 /* ------------------------------------------------------------------ */

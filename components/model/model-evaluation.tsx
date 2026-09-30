@@ -33,17 +33,21 @@ import {
   baselineTrades,
   concentration,
   curveStats,
-  decileLens,
+  eventKey,
   feeSensitivity,
   marginSweep,
   modelTrades,
+  net,
   newtonZTrades,
   NEWTON_Z_MARGIN_BP,
   periodDiff,
   prepare,
   thresholdCalibration,
+  tradeDiff,
   type CurveStats,
+  type DiffStats,
   type EvalConfig,
+  type EvalRow,
   type Period,
 } from "@/lib/model-eval";
 import { COLORS } from "./model-charts";
@@ -148,7 +152,6 @@ export function ModelEvaluation({
   const newtonZ = useMemo(() => curveStats(newtonZTrades(evalRows, feeBp), feeBp, period), [evalRows, feeBp, period]);
   const sweep = useMemo(() => marginSweep(evalRows, cfg), [evalRows, cfg]);
   const diff = useMemo(() => periodDiff(model, baseline), [model, baseline]);
-  const deciles = useMemo(() => decileLens(evalRows, feeBp), [evalRows, feeBp]);
   const conc = useMemo(() => concentration(modelTrades(evalRows, cfg), feeBp), [evalRows, cfg, feeBp]);
   const fees = useMemo(() => feeSensitivity(evalRows, cfg), [evalRows, cfg]);
 
@@ -173,6 +176,21 @@ export function ModelEvaluation({
   const liveTsOthers = useMemo(
     () => others.map((o) => (splitBySource ? liveSettlements(o.evalRows) : undefined)),
     [splitBySource, others]
+  );
+  // Baselines run on the page model's events, like their curve lines.
+  const compareCandidates: CompareCandidate[] = useMemo(
+    () => [
+      { id: "model", label: activeLabel, trades: modelTrades(evalRows, cfg), ypredBy: ypredMap(evalRows) },
+      ...others.map((o) => ({
+        id: `model:${o.version}`,
+        label: shortModel(o.version),
+        trades: modelTrades(o.evalRows, cfg),
+        ypredBy: ypredMap(o.evalRows),
+      })),
+      { id: "baseline", label: "Funding-only", trades: baselineTrades(evalRows, cfg) },
+      { id: "newtonZ", label: "newton_z", trades: newtonZTrades(evalRows, feeBp) },
+    ],
+    [activeLabel, evalRows, others, cfg, feeBp]
   );
   const curveSeries: CurveSeries[] = [
     { key: "model", label: `${activeLabel} (cumulative bp)`, color: COLORS.pred, stats: model, width: 2, liveTs: liveTsActive },
@@ -370,43 +388,13 @@ export function ModelEvaluation({
         </p>
       </Section>
 
-      {/* 4. Decile lens */}
+      {/* 4. Compare two rules */}
       <Section
         n={4}
-        title="Decile lens"
-        desc="ypred deciles. Research cuts at the train set's predictions; the shadow has no train set, so these cut points come from the rows in scope."
+        title="Compare"
+        desc="Pick any two of the models and baselines. The trades both take cancel out, so the whole P&L gap between them is in the trades only one of them takes."
       >
-        <ChartContainer
-          config={{ meanNet: { label: "Mean net (bp)", color: POS }, meanY: { label: "Mean y (bp)", color: COLORS.pred } }}
-          className="aspect-auto h-[200px] w-full"
-        >
-          <BarChart data={deciles} margin={{ left: 4, right: 4, top: 8 }}>
-            <CartesianGrid vertical={false} />
-            <XAxis dataKey="decile" tickFormatter={(d) => `D${d}`} tickLine={false} axisLine={false} className="text-xs" />
-            <YAxis tickLine={false} axisLine={false} width={36} className="text-xs" />
-            <ReferenceLine y={0} stroke="currentColor" opacity={0.3} />
-            <ChartTooltip content={<ChartTooltipContent />} />
-            <Bar dataKey="meanY" fill="var(--color-meanY)" opacity={0.6} radius={2} />
-            <Bar dataKey="meanNet" radius={2}>
-              {deciles.map((d) => (
-                <Cell key={d.decile} fill={d.meanNet >= 0 ? POS : NEG} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ChartContainer>
-        <SwatchLegend items={[{ color: COLORS.pred, label: "Mean y (bp)", opacity: 0.6 }, ...NET_SWATCHES]} />
-        <Table
-          head={["Decile", "n", "ypred range", "Mean ypred", "Mean y", "Mean net", "Win"]}
-          rows={deciles.map((d) => [
-            `D${d.decile}`,
-            d.n,
-            `${d.lo.toFixed(2)} ~ ${d.hi.toFixed(2)}`,
-            bp(d.meanPred),
-            <span key="y" className={tone(d.meanY)}>{bp(d.meanY)}</span>,
-            <span key="n" className={tone(d.meanNet)}>{bp(d.meanNet)}</span>,
-            pct(d.winRate),
-          ])}
-        />
+        <CompareBlock candidates={compareCandidates} feeBp={feeBp} />
       </Section>
 
       {/* 7. Auxiliaries */}
@@ -563,6 +551,117 @@ function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: num
   );
 }
 
+interface CompareCandidate {
+  id: string;
+  label: string;
+  trades: EvalRow[];
+  /** A model's ypred for every event it scored (traded or not); baselines have none. */
+  ypredBy?: Map<string, number>;
+}
+
+const ypredMap = (rows: EvalRow[]) => new Map(rows.map((r) => [eventKey(r), r.ypred]));
+
+/** Longest trade-diff list rendered; the P&L table always covers all of it. */
+const DIFF_ROW_CAP = 1000;
+
+function CompareBlock({ candidates, feeBp }: { candidates: CompareCandidate[]; feeBp: number }) {
+  const [aId, setAId] = useState("model");
+  const [bId, setBId] = useState("baseline");
+  // A model that left scope (source switch, model switch) falls back to the defaults.
+  const a = candidates.find((c) => c.id === aId) ?? candidates[0];
+  const b = candidates.find((c) => c.id === bId) ?? candidates.find((c) => c.id === "baseline")!;
+  const diff = useMemo(() => tradeDiff(a.trades, b.trades, feeBp), [a, b, feeBp]);
+  const rows = useMemo(
+    () =>
+      [
+        ...diff.onlyA.map((r) => ({ r, side: "A" as const })),
+        ...diff.onlyB.map((r) => ({ r, side: "B" as const })),
+      ].sort((x, y) => y.r.ts - x.r.ts || x.r.symbol.localeCompare(y.r.symbol)),
+    [diff]
+  );
+  const ypredCell = (c: CompareCandidate, key: string) => {
+    if (!c.ypredBy) return <span className="text-muted-foreground">n/a</span>;
+    const v = c.ypredBy.get(key);
+    return v == null ? <span className="text-muted-foreground">no pred</span> : bp(v);
+  };
+  const pnlRow = (label: ReactNode, s: DiffStats): ReactNode[] => [
+    label,
+    s.n,
+    <span key="t" className={tone(s.totalBp)}>{bp(s.totalBp, 1)}</span>,
+    <span key="p" className={tone(s.perTradeBp)}>{bp(s.perTradeBp)}</span>,
+    pct(s.winRate),
+  ];
+  const gap = diff.onlyAStats.totalBp - diff.onlyBStats.totalBp;
+
+  return (
+    <div className="space-y-3">
+      {(["A", "B"] as const).map((side) => {
+        const current = side === "A" ? a.id : b.id;
+        const set = side === "A" ? setAId : setBId;
+        return (
+          <div key={side} className="flex flex-wrap items-center gap-1">
+            <span className="w-5 text-xs font-semibold">{side}</span>
+            {candidates.map((c) => (
+              <Button key={c.id} size="sm" variant={c.id === current ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => set(c.id)}>
+                {c.label}
+              </Button>
+            ))}
+          </div>
+        );
+      })}
+      {a.id === b.id ? (
+        <p className="py-4 text-center text-sm text-muted-foreground">Pick two different rules.</p>
+      ) : (
+        <>
+          <div className="text-xs font-medium">
+            P&amp;L of the diff — A = {a.label}, B = {b.label}
+          </div>
+          <Table
+            head={["", "Trades", "Total bp", "Per trade", "Win"]}
+            rows={[
+              pnlRow(`Only A (${a.label})`, diff.onlyAStats),
+              pnlRow(`Only B (${b.label})`, diff.onlyBStats),
+              pnlRow("Both", diff.both),
+              [
+                <span key="l" className="font-semibold">A − B</span>,
+                diff.onlyAStats.n - diff.onlyBStats.n,
+                <span key="t" className={cn("font-semibold", tone(gap))}>{bp(gap, 1)}</span>,
+                "",
+                "",
+              ],
+            ]}
+          />
+          <div className="pt-2 text-xs font-medium">
+            Trades only one side takes ({rows.length}
+            {rows.length > DIFF_ROW_CAP && `, newest ${DIFF_ROW_CAP} shown`})
+          </div>
+          <Table
+            scroll
+            head={["Settlement", "Symbol", "Taken by", "A ypred", "B ypred", "Exp funding", "Settled funding", "y", `Net (fee ${feeBp})`]}
+            rows={rows.slice(0, DIFF_ROW_CAP).map(({ r, side }) => {
+              const key = eventKey(r);
+              const v = net(r, feeBp);
+              return [
+                fmtTs(r.ts),
+                <span key="s" className="font-sans">{r.symbol}</span>,
+                <span key="b" className={cn("font-sans", side === "A" ? "text-sky-500" : "text-amber-500")}>
+                  {side} only
+                </span>,
+                ypredCell(a, key),
+                ypredCell(b, key),
+                bp(r.expFunding),
+                bp(r.settledFunding),
+                <span key="y" className={tone(r.y)}>{bp(r.y)}</span>,
+                <span key="n" className={tone(v)}>{bp(v)}</span>,
+              ];
+            })}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
 function Section({ n, title, desc, children }: { n: number; title: string; desc: string; children: ReactNode }) {
   return (
     <Card>
@@ -578,11 +677,11 @@ function Section({ n, title, desc, children }: { n: number; title: string; desc:
   );
 }
 
-function Table({ head, rows }: { head: ReactNode[]; rows: ReactNode[][] }) {
+function Table({ head, rows, scroll = false }: { head: ReactNode[]; rows: ReactNode[][]; scroll?: boolean }) {
   return (
-    <div className="overflow-x-auto">
+    <div className={cn("overflow-x-auto", scroll && "max-h-[420px] overflow-y-auto rounded-md border")}>
       <table className="w-full text-xs font-mono">
-        <thead className="text-muted-foreground">
+        <thead className={cn("text-muted-foreground", scroll && "sticky top-0 z-10 bg-card")}>
           <tr className="border-b">
             {head.map((h, i) => (
               <th key={i} className={cn("px-2 py-1.5 font-medium whitespace-nowrap", i === 0 ? "text-left" : "text-right")}>
