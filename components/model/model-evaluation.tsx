@@ -563,6 +563,8 @@ interface CompareCandidate {
 
 const ypredMap = (rows: EvalRow[]) => new Map(rows.map((r) => [eventKey(r), r.ypred]));
 
+const NO_B = "none";
+
 /** Longest trade-diff list rendered; the P&L table always covers all of it. */
 const DIFF_ROW_CAP = 1000;
 
@@ -581,8 +583,9 @@ function CompareBlock({
   const [bId, setBId] = useState("baseline");
   // A model that left scope (source switch, model switch) falls back to the defaults.
   const a = candidates.find((c) => c.id === aId) ?? candidates[0];
-  const b = candidates.find((c) => c.id === bId) ?? candidates.find((c) => c.id === "baseline")!;
-  const diff = useMemo(() => tradeDiff(a.trades, b.trades, feeBp), [a, b, feeBp]);
+  // B = None: no comparison, the block just lists A's own trades.
+  const b = bId === NO_B ? null : candidates.find((c) => c.id === bId) ?? candidates.find((c) => c.id === "baseline")!;
+  const diff = useMemo(() => tradeDiff(a.trades, b?.trades ?? [], feeBp), [a, b, feeBp]);
   const rows = useMemo(
     () =>
       [
@@ -608,6 +611,7 @@ function CompareBlock({
   // the gap between the two rules' whole equity curves, shared trades cancelling.
   const series: CurveSeries[] = useMemo(() => {
     const onlyA = curveStats(diff.onlyA, feeBp, period);
+    if (!b) return [{ key: "onlyA", label: `${a.label} (cumulative bp)`, color: COLORS.pred, stats: onlyA, width: 2 }];
     const onlyB = curveStats(diff.onlyB, feeBp, period);
     const aAt = new Map(onlyA.curve.map((p) => [p.ts, p.cum]));
     const bAt = new Map(onlyB.curve.map((p) => [p.ts, p.cum]));
@@ -625,16 +629,21 @@ function CompareBlock({
       { key: "onlyA", label: `Only A (${a.label})`, color: "#0ea5e9", stats: onlyA },
       { key: "onlyB", label: `Only B (${b.label})`, color: NEWTON_Z, stats: onlyB, dash: "4 3" },
     ];
-  }, [diff, feeBp, period, a.label, b.label]);
+  }, [diff, feeBp, period, a.label, b]);
 
   return (
     <div className="space-y-3">
       {(["A", "B"] as const).map((side) => {
-        const current = side === "A" ? a.id : b.id;
+        const current = side === "A" ? a.id : (b?.id ?? NO_B);
         const set = side === "A" ? setAId : setBId;
         return (
           <div key={side} className="flex flex-wrap items-center gap-1">
             <span className="w-5 text-xs font-semibold">{side}</span>
+            {side === "B" && (
+              <Button size="sm" variant={current === NO_B ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => set(NO_B)}>
+                None
+              </Button>
+            )}
             {candidates.map((c) => (
               <Button key={c.id} size="sm" variant={c.id === current ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => set(c.id)}>
                 {c.label}
@@ -643,7 +652,33 @@ function CompareBlock({
           </div>
         );
       })}
-      {a.id === b.id ? (
+      {!b ? (
+        <>
+          <div className="text-xs font-medium">P&amp;L series — {a.label}</div>
+          <CurveChart series={series} timeline={timeline} />
+          <Table head={["", "Trades", "Total bp", "Per trade", "Win"]} rows={[pnlRow(a.label, diff.onlyAStats)]} />
+          <div className="pt-2 text-xs font-medium">
+            Trades of {a.label} ({rows.length}
+            {rows.length > DIFF_ROW_CAP && `, newest ${DIFF_ROW_CAP} shown`})
+          </div>
+          <Table
+            scroll
+            head={["Settlement", "Symbol", "ypred", "Exp funding", "Settled funding", "y", `Net (fee ${feeBp})`]}
+            rows={rows.slice(0, DIFF_ROW_CAP).map(({ r }) => {
+              const v = net(r, feeBp);
+              return [
+                fmtTs(r.ts),
+                <span key="s" className="font-sans">{r.symbol}</span>,
+                ypredCell(a, eventKey(r)),
+                bp(r.expFunding),
+                bp(r.settledFunding),
+                <span key="y" className={tone(r.y)}>{bp(r.y)}</span>,
+                <span key="n" className={tone(v)}>{bp(v)}</span>,
+              ];
+            })}
+          />
+        </>
+      ) : a.id === b.id ? (
         <p className="py-4 text-center text-sm text-muted-foreground">Pick two different rules.</p>
       ) : (
         <>
