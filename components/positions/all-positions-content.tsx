@@ -33,6 +33,10 @@ interface AllPositionsContentProps {
   initialPositionCount: number;
   runIds: string[];
   runToStrategyMap: Record<string, { name: string; id: string }>;
+  /** Per run: ms without a write after which a position counts as closed. */
+  staleMsByRun: Record<string, number>;
+  /** Server clock when the page was read; initial ages are measured against it. */
+  loadedAt: number;
 }
 
 // notional_value / unrealized_pnl / leverage / mark_price / liq_price are
@@ -86,6 +90,8 @@ export function AllPositionsContent({
   initialPositionCount,
   runIds,
   runToStrategyMap,
+  staleMsByRun,
+  loadedAt,
 }: AllPositionsContentProps) {
   const [positions, setPositions] = useState<PositionWithStrategy[]>(initialPositions);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
@@ -95,14 +101,17 @@ export function AllPositionsContent({
   const [currentTime, setCurrentTime] = useState(Date.now());
   const lastInsertTimesRef = useRef<Map<string, number>>(new Map());
 
-  // Initialize lastInsertTimes for initial positions
+  // Initialize lastInsertTimes for initial positions from their real age, so a
+  // Kepler position last written 14 min ago doesn't get a fresh 20 min. Age is
+  // taken against the server clock, which cancels any browser clock skew.
   useEffect(() => {
     const now = Date.now();
     for (const pos of initialPositions) {
       const key = `${pos.run_id}-${pos.symbol}-${pos.exchange}`;
-      lastInsertTimesRef.current.set(key, now);
+      const age = Math.max(0, loadedAt - Date.parse(pos.ts));
+      lastInsertTimesRef.current.set(key, now - age);
     }
-  }, [initialPositions]);
+  }, [initialPositions, loadedAt]);
 
   // Tick every second for staleness check
   useEffect(() => {
@@ -251,14 +260,16 @@ export function AllPositionsContent({
     };
   }, [runIds, runToStrategyMap]);
 
-  // Filter out stale positions (no INSERT in 5 seconds)
+  // Engines don't write a flat row on close; they stop writing. A position is
+  // closed after its run's own window passes with no INSERT (5 s for Newtonz,
+  // ~20 min for Kepler, which writes every ~15 min) — see positions/page.tsx.
   const activePositions = useMemo<PositionWithStrategy[]>(() => {
     return positions.filter((pos) => {
       const key = `${pos.run_id}-${pos.symbol}-${pos.exchange}`;
       const lastInsert = lastInsertTimesRef.current.get(key) ?? 0;
-      return currentTime - lastInsert <= 5000;
+      return currentTime - lastInsert <= (staleMsByRun[pos.run_id] ?? 5000);
     });
-  }, [positions, currentTime]);
+  }, [positions, currentTime, staleMsByRun]);
 
   // Calculate summary stats from active positions
   const { totalNotionalValue, totalUnrealizedPnl, positionCount } = useMemo(() => {

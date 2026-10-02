@@ -8,6 +8,13 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // Extended position type with strategy info
+/** Newest rows read per run; Kepler's ~32 rows/h keep 500 rows well over a day. */
+const POSITIONS_PER_RUN = 500;
+/** Floor of the closed-position window, for runs that write every couple of seconds. */
+const MIN_STALE_MS = 5_000;
+/** A position is closed after this many of its run's typical write gaps with no write. */
+const STALE_FACTOR = 1.5;
+
 export interface PositionWithStrategy extends Position {
   strategy_name: string;
   strategy_id: string;
@@ -40,41 +47,58 @@ export default async function PositionsPage() {
     });
   }
 
-  // Fetch latest positions for each running run
-  // We need to get the most recent positions (grouped by run_id, symbol, exchange)
-  let positions: PositionWithStrategy[] = [];
+  // Engines never write a position = 0 row: a position is closed when its run
+  // stops writing it. How long "stopped" means depends on the engine — Newtonz
+  // writes every ~2 s, Kepler every ~15 min — so each run gets its own window,
+  // learned from the gaps between its own rows. One shared 5 s window hid every
+  // Kepler position a few seconds after each write.
+  const positions: PositionWithStrategy[] = [];
+  const staleMsByRun: Record<string, number> = {};
 
-  if (runIds.length > 0) {
-    // Fetch recent positions for all running runs
-    const { data: positionsData, error: positionsError } = await supabase
-      .from("positions")
-      .select("*")
-      .in("run_id", runIds)
-      .order("ts", { ascending: false })
-      .limit(500);
+  // Per run, so a fast writer can't push a slow one out of a shared row limit.
+  const perRun = await Promise.all(
+    runIds.map(async (runId) => {
+      const { data, error } = await supabase
+        .from("positions")
+        .select("*")
+        .eq("run_id", runId)
+        .order("ts", { ascending: false })
+        .limit(POSITIONS_PER_RUN);
+      if (error) console.error("Error fetching positions:", runId, error);
+      return { runId, rows: (data ?? []) as Position[] };
+    })
+  );
 
-    if (positionsError) {
-      console.error("Error fetching positions:", positionsError);
-    }
-
-    // Group by run_id + symbol + exchange and keep only the latest
-    const latestPositionsMap = new Map<string, Position>();
-    for (const pos of (positionsData ?? []) as Position[]) {
+  const now = Date.now();
+  for (const { runId, rows } of perRun) {
+    // Rows are newest first; group by key to get each position's write gaps.
+    const byKey = new Map<string, Position[]>();
+    for (const pos of rows) {
       const key = `${pos.run_id}-${pos.symbol}-${pos.exchange}`;
-      if (!latestPositionsMap.has(key)) {
-        latestPositionsMap.set(key, pos);
-      }
+      const list = byKey.get(key);
+      if (list) list.push(pos);
+      else byKey.set(key, [pos]);
     }
+    const gaps: number[] = [];
+    for (const list of byKey.values()) {
+      for (let i = 1; i < list.length; i++) gaps.push(Date.parse(list[i - 1].ts) - Date.parse(list[i].ts));
+    }
+    gaps.sort((x, y) => x - y);
+    const typical = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+    const staleMs = Math.max(MIN_STALE_MS, typical * STALE_FACTOR);
+    staleMsByRun[runId] = staleMs;
 
-    // Add strategy info to each position
-    positions = Array.from(latestPositionsMap.values()).map((pos) => {
-      const strategyInfo = runToStrategyMap.get(pos.run_id);
-      return {
-        ...pos,
+    const strategyInfo = runToStrategyMap.get(runId);
+    for (const list of byKey.values()) {
+      const latest = list[0];
+      // Already closed when the page loads.
+      if (now - Date.parse(latest.ts) > staleMs) continue;
+      positions.push({
+        ...latest,
         strategy_name: strategyInfo?.name ?? "Unknown",
         strategy_id: strategyInfo?.id ?? "",
-      };
-    });
+      });
+    }
   }
 
   // Calculate summary stats
@@ -90,6 +114,8 @@ export default async function PositionsPage() {
       initialPositionCount={positionCount}
       runIds={runIds}
       runToStrategyMap={Object.fromEntries(runToStrategyMap)}
+      staleMsByRun={staleMsByRun}
+      loadedAt={now}
     />
   );
 }
