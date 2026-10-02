@@ -35,14 +35,19 @@ interface AllPositionsContentProps {
   runToStrategyMap: Record<string, { name: string; id: string }>;
 }
 
-function formatCurrency(value: number): string {
+// notional_value / unrealized_pnl / leverage / mark_price / liq_price are
+// nullable in the table, and Kepler writes liq_price as null on every row —
+// calling toLocaleString on it crashed the whole page.
+function formatCurrency(value: number | null | undefined): string {
+  if (value == null) return "—";
   return value.toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 }
 
-function formatNumber(value: number, decimals: number = 4): string {
+function formatNumber(value: number | null | undefined, decimals: number = 4): string {
+  if (value == null) return "—";
   return value.toLocaleString(undefined, {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -412,7 +417,7 @@ export function AllPositionsContent({
                           {pos.unrealized_pnl >= 0 ? "+" : ""}${formatCurrency(pos.unrealized_pnl)}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm py-2.5 hidden sm:table-cell">
-                          {pos.leverage}x
+                          {pos.leverage == null ? "—" : `${pos.leverage}x`}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm py-2.5 hidden md:table-cell">
                           ${formatNumber(pos.liq_price, 4)}
