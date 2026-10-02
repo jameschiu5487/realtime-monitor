@@ -91,6 +91,8 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   **Kepler 引擎只把成交寫進 `trades`，`combined_trades` 只有零星幾筆**：任何從
   combined_trades 算的指標（turnover、positions 數、勝率）對它都近乎 0。turnover 已改走
   `getFillNotional` + PerformanceStats 的 `turnover` prop，其他指標還沒有。
+  它寫的 `positions.liq_price` 也全是 null（產生型別卻標 `number`），對它 `.toLocaleString()`
+  曾讓 `/positions` 整頁崩掉 —— positions 的數值欄位顯示前一律先判 null。
 - **strategy_runs**: run_id (PK), strategy_id (FK), mode ('backtest'|'paper'|'live'|'realtime'|
   'test-realtime'), status, start_time, end_time, initial_capital, params (jsonb), code_ref, notes。
   **Overview 只認 `realtime` / `test-realtime`**（`app/(dashboard)/page.tsx` 與
