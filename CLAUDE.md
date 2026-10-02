@@ -103,6 +103,9 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
 - **trades**: trade_id (PK), run_id (FK), ts, symbol, exchange, action, side ('buy'|'sell'),
   quantity_nominal, quantity_actual, price, fee_amount_usdt, fee_rate_bps,
   funding_rate, interval_hours, status
+- **positions**（持倉快照）：引擎平倉時**不寫 position = 0 的列，只是停止寫入**，
+  所以「多久沒寫就算平倉」要看各 run 的寫入頻率（Newtonz 每 ~2 s、Kepler 每 ~15 min）。
+  統一用固定秒數會讓慢的引擎持倉閃一下就消失；`/positions` 依每個 run 自己的寫入間隔判斷。
 - **combined_trades**（持倉級 P&L）: combined_trade_id (PK), run_id, ts, symbol, exchange,
   side ('long'|'short'), quantity, entry_price, exit_price, holding_period_hours,
   price_pnl, funding_fee_realized, commission_fee, total_pnl
