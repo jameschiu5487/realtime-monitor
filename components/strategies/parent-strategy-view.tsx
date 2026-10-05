@@ -244,6 +244,14 @@ export async function ParentStrategyView({
   });
   positions.sort((a, b) => b.notional - a.notional);
 
+  // Traded notional per book over the window, across its restarts, scaled.
+  const turnoverByBook: Record<string, number> = {};
+  for (const f of fills) {
+    const book = bookOfRun[f.run_id];
+    if (!book) continue;
+    turnoverByBook[book] = (turnoverByBook[book] ?? 0) + f.notional * (ratioByRun[f.run_id] ?? 1);
+  }
+
   // Summed from the earliest book: each book (current capital + cumulative
   // PnL) is followed across its restarts, and a book that came online later
   // counts flat until it has data, so neither a new book, a restart nor a
@@ -431,6 +439,15 @@ export async function ParentStrategyView({
                         </dd>
                         <dt className="text-muted-foreground">Positions</dt>
                         <dd className="text-right font-mono">{b.positionsCount}</dd>
+                        <dt className="text-muted-foreground">Turnover ({WINDOW_DAYS}d)</dt>
+                        <dd className="text-right font-mono">
+                          {money(turnoverByBook[b.runId] ?? 0)}
+                          {b.initialCapital > 0 && (
+                            <span className="text-xs text-muted-foreground">
+                              {" "}({((turnoverByBook[b.runId] ?? 0) / b.initialCapital).toFixed(1)}×)
+                            </span>
+                          )}
+                        </dd>
                       </dl>
                     </Link>
                   ))
