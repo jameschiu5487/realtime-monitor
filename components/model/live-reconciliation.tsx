@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
+import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { cn } from "@/lib/utils";
 import { DEFAULT_BASIS_CAP, modelTrades, net, prepare, eventKey, type EvalConfig } from "@/lib/model-eval";
 import { LIVE_STRATEGIES, isPreModel, matchTrades, type LiveTrade, type MatchedTrade, type ShadowEvent } from "@/lib/live-recon";
@@ -11,6 +13,18 @@ import { Section, Table, bp, fmtTs, tone, type EvalSettings } from "./model-eval
 /** Live strategy whose entry rule is the page's model rule; Newtonz + model's rule isn't on the page. */
 const RULE_STRATEGY = "Super_Newtonz";
 const DETAIL_ROW_CAP = 1000;
+
+/** Histogram: 2 bp bins across ±20 bp, everything beyond in one tail bin each side. */
+const GAP_BIN_BP = 2;
+const GAP_RANGE_BP = 20;
+const STRATEGY_COLORS: Record<string, string> = { Super_Newtonz: "#0ea5e9", Newtonz: "#f59e0b" };
+type GapKind = "price" | "net";
+
+const quantile = (xs: number[], q: number) => {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.max(0, Math.round(q * (s.length - 1))))];
+};
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, v) => a + v, 0) / xs.length : null);
 const median = (xs: number[]) => {
@@ -116,6 +130,36 @@ export function LiveReconciliation({
     };
   }, [liveWindows, modelRows, matched, cost, settings.marginBp, settings.period, settings.capOn]);
 
+  // One gap per scored trade, per strategy: price gap = measured slippage,
+  // net gap = everything (price + funding + fee).
+  const [gapKind, setGapKind] = useState<GapKind>("price");
+  const gaps = useMemo(
+    () =>
+      LIVE_STRATEGIES.map((s) => ({
+        name: s.name,
+        values: matched
+          .filter((t): t is Scored => t.strategy === s.name && !isPreModel(t) && isScored(t))
+          .map((t) =>
+            gapKind === "price" ? t.priceBp - t.event.y : t.netBp - (t.event.y + t.event.settledFunding - fee)
+          ),
+      })),
+    [matched, gapKind, fee]
+  );
+  const histogram = useMemo(() => {
+    const edges: number[] = [];
+    for (let x = -GAP_RANGE_BP; x < GAP_RANGE_BP; x += GAP_BIN_BP) edges.push(x);
+    const bins = [
+      { label: `< ${-GAP_RANGE_BP}`, lo: -Infinity, hi: -GAP_RANGE_BP },
+      ...edges.map((lo) => ({ label: `${lo}`, lo, hi: lo + GAP_BIN_BP })),
+      { label: `≥ ${GAP_RANGE_BP}`, lo: GAP_RANGE_BP, hi: Infinity },
+    ];
+    return bins.map((b) => {
+      const row: Record<string, number | string> = { label: b.label, range: Number.isFinite(b.lo) && Number.isFinite(b.hi) ? `${b.lo} ~ ${b.hi}` : b.label };
+      for (const g of gaps) row[g.name] = g.values.filter((v) => v >= b.lo && v < b.hi).length;
+      return row;
+    });
+  }, [gaps]);
+
   const detail = useMemo(() => matched.filter((t) => strategy === "all" || t.strategy === strategy), [matched, strategy]);
 
   const gapCell = (v: number | null): ReactNode => <span className={tone(v)}>{bp(v)}</span>;
@@ -157,6 +201,47 @@ export function LiveReconciliation({
 
       <Section
         n={2}
+        title="Gap distribution"
+        desc={`Live − shadow per scored trade, in ${GAP_BIN_BP} bp bins (tails beyond ±${GAP_RANGE_BP} bp pooled). Price gap is the slippage alone; net gap adds the funding and fee gaps, with the shadow at the exchange fee only.`}
+      >
+        <div className="flex gap-1">
+          {(["price", "net"] as const).map((k) => (
+            <Button key={k} size="sm" variant={k === gapKind ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setGapKind(k)}>
+              {k === "price" ? "Price gap" : "Net gap"}
+            </Button>
+          ))}
+        </div>
+        <ChartContainer
+          config={Object.fromEntries(LIVE_STRATEGIES.map((s) => [s.name, { label: s.name, color: STRATEGY_COLORS[s.name] }]))}
+          className="aspect-auto h-[220px] w-full"
+        >
+          <BarChart data={histogram} margin={{ left: 4, right: 4, top: 8 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} className="text-xs" tick={{ fontSize: 10 }} />
+            <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={28} className="text-xs" />
+            <ChartTooltip content={<ChartTooltipContent labelFormatter={(_, p) => `${p?.[0]?.payload?.range} bp`} />} />
+            <ChartLegend content={<ChartLegendContent />} />
+            {LIVE_STRATEGIES.map((s) => (
+              <Bar key={s.name} dataKey={s.name} fill={`var(--color-${s.name})`} radius={2} isAnimationActive={false} />
+            ))}
+          </BarChart>
+        </ChartContainer>
+        <Table
+          head={["", "n", "Mean", "Median", "P10", "P90", "Share < 0"]}
+          rows={gaps.map((g) => [
+            <span key="n" className="font-sans font-medium">{g.name}</span>,
+            g.values.length,
+            gapCell(mean(g.values)),
+            gapCell(median(g.values)),
+            gapCell(quantile(g.values, 0.1)),
+            gapCell(quantile(g.values, 0.9)),
+            g.values.length ? `${((100 * g.values.filter((v) => v < 0).length) / g.values.length).toFixed(0)}%` : "—",
+          ])}
+        />
+      </Section>
+
+      <Section
+        n={3}
         title={`${RULE_STRATEGY} vs the page's model rule`}
         desc={`In the hours ${RULE_STRATEGY} was running: the events the page's model rule (cost ${cost.toFixed(2)} + margin ${settings.marginBp}) trades, against the ones it actually traded. Newtonz + model runs a rule the page doesn't model, so it isn't checked.`}
       >
@@ -183,7 +268,7 @@ export function LiveReconciliation({
         </p>
       </Section>
 
-      <Section n={3} title="Trades" desc="Every live position in the window, newest first.">
+      <Section n={4} title="Trades" desc="Every live position in the window, newest first.">
         <div className="flex flex-wrap gap-1">
           {["all", ...LIVE_STRATEGIES.map((s) => s.name)].map((s) => (
             <Button key={s} size="sm" variant={s === strategy ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setStrategy(s)}>
