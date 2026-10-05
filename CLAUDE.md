@@ -132,6 +132,9 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   高 exp 的 event 高估，足以讓總損益翻號。`shadow_event_net` 是
   security_invoker，底層 `md_funding_settled` 沒有讀取 policy 時 funding_bp 會**靜默全為 null**。
   ledger 的 `open_volume_*` 也**不是**研究端的 qv_240，別拿來當流動性門檻。
+  **shadow 的 bp（y_bp、funding_bp、fee 4.4）分母是兩腿 entry 名目「加總」**：拿實盤
+  `combined_trades` 對帳（`/model` 的 Live vs Shadow 分頁，`lib/live-recon.ts`）時要除以兩腿加總，
+  除以單腿會讓 funding、fee 全部翻倍、看起來差一大截（2026-10-05 逐筆驗證）。
 - **user_strategy_access**: user_id, strategy_id, share_ratio —— 用戶對策略的份額，
   所有對用戶顯示/推播的金額都要乘 share_ratio
 - **push_subscriptions / notification_preferences**：見 `docs/notifications.md`
