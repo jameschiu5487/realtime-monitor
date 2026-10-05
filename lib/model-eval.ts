@@ -22,10 +22,17 @@ import { taipeiDayKey, taipeiMonthKey, taipeiWeekKey } from "./time";
 export const DEFAULT_FEE_BP = 4.4;
 export const DEFAULT_MARGIN_BP = 3;
 export const DEFAULT_BASIS_CAP = 200;
+/**
+ * Per-trade slippage vs the shadow's prices, bp of both legs' notional. The
+ * user's live fills (2026-10-05) came in 1.1–1.5 bp worse per trade; it is a
+ * cost like the fee, so it sits in the threshold as well as in the P&L.
+ */
+export const DEFAULT_SLIPPAGE_BP = 1.5;
 
 export type Period = "day" | "week" | "month";
 
 export interface EvalConfig {
+  /** Per-trade cost: exchange fee + slippage. Every rule and every net uses it. */
   feeBp: number;
   marginBp: number;
   period: Period;
@@ -159,7 +166,7 @@ export function baselineTrades(rows: EvalRow[], cfg: EvalConfig, marginBp = cfg.
 
 /**
  * newton_z: the funding-only rule at its own fixed margin — exp_funding >
- * fee + 10 bp — whatever margin the page is set to. (Was a flat 20 bp.)
+ * cost (fee + slippage) + 10 bp — whatever margin the page is set to. (Was a flat 20 bp.)
  */
 export const NEWTON_Z_MARGIN_BP = 10;
 export function newtonZTrades(rows: EvalRow[], feeBp: number) {
@@ -432,13 +439,14 @@ export function concentration(trades: EvalRow[], feeBp: number): Concentration {
 export const FEE_SENSITIVITY = [0, 3, 4.4, 5, 7.03, 8.8, 10, 12];
 
 /** Re-run the rule at other fees: the threshold moves with the fee too. */
-export function feeSensitivity(rows: EvalRow[], cfg: EvalConfig) {
+/** The exchange fee varies; slippage stays at the page's setting on top of it. */
+export function feeSensitivity(rows: EvalRow[], cfg: EvalConfig, slipBp: number) {
   return FEE_SENSITIVITY.map((fee) => {
-    const c = { ...cfg, feeBp: fee };
+    const c = { ...cfg, feeBp: fee + slipBp };
     return {
       fee,
-      model: curveStats(modelTrades(rows, c), fee, cfg.period),
-      baseline: curveStats(baselineTrades(rows, c), fee, cfg.period),
+      model: curveStats(modelTrades(rows, c), c.feeBp, cfg.period),
+      baseline: curveStats(baselineTrades(rows, c), c.feeBp, cfg.period),
     };
   });
 }

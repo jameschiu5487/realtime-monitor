@@ -106,7 +106,8 @@ export function ModelMonitorContent({ packed, days, windows, error }: ModelMonit
   const [cleanOnly, setCleanOnly] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState("");
   const [evalSettings, setEvalSettings] = useState<EvalSettings>(DEFAULT_EVAL_SETTINGS);
-  const feeBp = evalSettings.feeBp;
+  // Per-trade cost, the same the evaluation tab uses: exchange fee + slippage.
+  const feeBp = evalSettings.feeBp + evalSettings.slipBp;
   const [loadedAt, setLoadedAt] = useState(() => Date.now());
 
   useEffect(() => {
@@ -365,7 +366,7 @@ export function ModelMonitorContent({ packed, days, windows, error }: ModelMonit
                       </th>
                       <th className="px-2 py-1.5 text-right font-medium">Exp total</th>
                       <th className="px-2 py-1.5 text-right font-medium" title="y + settled funding − fee (fee set on the Evaluation tab)">
-                        Realised net (fee {feeBp})
+                        Realised net (cost {feeBp.toFixed(2)})
                       </th>
                       <th className="px-2 py-1.5 font-medium">Direction</th>
                       <th className="px-2 py-1.5 font-medium">Status</th>

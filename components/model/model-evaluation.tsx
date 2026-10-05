@@ -30,6 +30,7 @@ import {
   DEFAULT_BASIS_CAP,
   DEFAULT_FEE_BP,
   DEFAULT_MARGIN_BP,
+  DEFAULT_SLIPPAGE_BP,
   baselineTrades,
   concentration,
   curveStats,
@@ -88,7 +89,9 @@ const fmtTs = (ms: number) =>
   formatDateTime(ms, { month: "short", day: "numeric", hour: "2-digit", hour12: false });
 
 export interface EvalSettings {
+  /** Exchange fee only; the evaluation adds slipBp to get the per-trade cost. */
   feeBp: number;
+  slipBp: number;
   marginBp: number;
   period: Period;
   capOn: boolean;
@@ -96,6 +99,7 @@ export interface EvalSettings {
 
 export const DEFAULT_EVAL_SETTINGS: EvalSettings = {
   feeBp: DEFAULT_FEE_BP,
+  slipBp: DEFAULT_SLIPPAGE_BP,
   marginBp: DEFAULT_MARGIN_BP,
   period: "day",
   capOn: true,
@@ -123,8 +127,11 @@ export function ModelEvaluation({
   settings: EvalSettings;
   onSettingsChange: (next: EvalSettings) => void;
 }) {
-  const { feeBp, marginBp, period, capOn } = settings;
+  const { feeBp: exchangeFeeBp, slipBp, marginBp, period, capOn } = settings;
+  // Everything below runs on the per-trade cost, fee + slippage.
+  const feeBp = exchangeFeeBp + slipBp;
   const setFeeBp = (v: number) => onSettingsChange({ ...settings, feeBp: v });
+  const setSlipBp = (v: number) => onSettingsChange({ ...settings, slipBp: v });
   const setMarginBp = (v: number) => onSettingsChange({ ...settings, marginBp: v });
   const setPeriod = (v: Period) => onSettingsChange({ ...settings, period: v });
   const setCapOn = (v: boolean) => onSettingsChange({ ...settings, capOn: v });
@@ -153,7 +160,7 @@ export function ModelEvaluation({
   const sweep = useMemo(() => marginSweep(evalRows, cfg), [evalRows, cfg]);
   const diff = useMemo(() => periodDiff(model, baseline), [model, baseline]);
   const conc = useMemo(() => concentration(modelTrades(evalRows, cfg), feeBp), [evalRows, cfg, feeBp]);
-  const fees = useMemo(() => feeSensitivity(evalRows, cfg), [evalRows, cfg]);
+  const fees = useMemo(() => feeSensitivity(evalRows, cfg, slipBp), [evalRows, cfg, slipBp]);
 
   const hurdle = feeBp + marginBp;
   // Every settlement in scope, traded or not, so both curves span the whole window.
@@ -203,7 +210,7 @@ export function ModelEvaluation({
       liveTs: liveTsOthers[i],
     })),
     { key: "baseline", label: "Funding-only (cumulative bp)", color: BASE, stats: baseline, dash: "4 3" },
-    { key: "newtonZ", label: `newton_z (exp_funding > fee + ${NEWTON_Z_MARGIN_BP})`, color: NEWTON_Z, stats: newtonZ },
+    { key: "newtonZ", label: `newton_z (exp_funding > cost + ${NEWTON_Z_MARGIN_BP})`, color: NEWTON_Z, stats: newtonZ },
   ];
 
   return (
@@ -211,7 +218,8 @@ export function ModelEvaluation({
       <Card>
         <CardContent className="space-y-3 py-4">
           <div className="flex flex-wrap items-end gap-4">
-            <NumberField label="Fee (bp)" value={feeBp} onChange={setFeeBp} />
+            <NumberField label="Fee (bp)" value={exchangeFeeBp} onChange={setFeeBp} />
+            <NumberField label="Slippage (bp)" value={slipBp} onChange={setSlipBp} />
             <NumberField label="Margin (bp)" value={marginBp} onChange={setMarginBp} />
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Period</Label>
@@ -227,20 +235,20 @@ export function ModelEvaluation({
               <Switch id="basis-cap" checked={capOn} onCheckedChange={setCapOn} />
               <Label htmlFor="basis-cap" className="text-sm">|entry_basis| ≤ {DEFAULT_BASIS_CAP}</Label>
             </div>
-            {(feeBp !== DEFAULT_FEE_BP || marginBp !== DEFAULT_MARGIN_BP) && (
+            {(exchangeFeeBp !== DEFAULT_FEE_BP || slipBp !== DEFAULT_SLIPPAGE_BP || marginBp !== DEFAULT_MARGIN_BP) && (
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() =>
-                  onSettingsChange({ ...settings, feeBp: DEFAULT_FEE_BP, marginBp: DEFAULT_MARGIN_BP })
+                  onSettingsChange({ ...settings, feeBp: DEFAULT_FEE_BP, slipBp: DEFAULT_SLIPPAGE_BP, marginBp: DEFAULT_MARGIN_BP })
                 }
               >
-                Reset to default ({DEFAULT_FEE_BP} / {DEFAULT_MARGIN_BP})
+                Reset to default ({DEFAULT_FEE_BP} / {DEFAULT_SLIPPAGE_BP} / {DEFAULT_MARGIN_BP})
               </Button>
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Net per event = y + settled funding − fee (realised; exp_funding is used only to decide). Model trades when ypred + exp_funding &gt; {hurdle.toFixed(2)} bp;
+            Cost per trade = fee {exchangeFeeBp} + slippage {slipBp} = {feeBp.toFixed(2)} bp. Net per event = y + settled funding − cost (realised; exp_funding is used only to decide). Model trades when ypred + exp_funding &gt; {hurdle.toFixed(2)} bp;
             the funding-only baseline when exp_funding &gt; {hurdle.toFixed(2)} bp. Equal size per trade.{" "}
             <span className="text-amber-500">
               Liquidity gate (qv_240 &gt; 166,666 on both venues) not applied — the shadow tables have no qv_240.
@@ -302,7 +310,7 @@ export function ModelEvaluation({
       <Section
         n={2}
         title="Equity curve (curve_stats)"
-        desc={`Cumulative net bp of every trade the rule takes, in settlement order, against the funding-only rule at the same threshold, and newton_z (exp_funding > fee + ${NEWTON_Z_MARGIN_BP} = ${(feeBp + NEWTON_Z_MARGIN_BP).toFixed(2)} bp, a fixed margin of its own).`}
+        desc={`Cumulative net bp of every trade the rule takes, in settlement order, against the funding-only rule at the same threshold, and newton_z (exp_funding > cost + ${NEWTON_Z_MARGIN_BP} = ${(feeBp + NEWTON_Z_MARGIN_BP).toFixed(2)} bp, a fixed margin of its own).`}
       >
         <CurveChart series={curveSeries} timeline={timeline} />
         <Table
@@ -347,7 +355,7 @@ export function ModelEvaluation({
         </ChartContainer>
 
         <div className="pt-2 text-xs font-medium">
-          Same margin — both rules at fee {feeBp} + margin (current margin {marginBp} in bold)
+          Same margin — both rules at cost {feeBp.toFixed(2)} + margin (current margin {marginBp} in bold)
         </div>
         <Table
           head={["Margin", "Model n", "Base n", "Model total", "Base total", "Δ", "Model win", "Base win", `Model +${period}s`, `Base +${period}s`]}
@@ -417,11 +425,11 @@ export function ModelEvaluation({
             ])}
           />
         </details>
-        <div className="pt-2 text-xs font-medium">Fee sensitivity (margin {marginBp})</div>
+        <div className="pt-2 text-xs font-medium">Fee sensitivity (margin {marginBp}, slippage {slipBp} on top of each fee)</div>
         <Table
           head={["Fee", "Model n", "Model total", "Model / trade", "Base n", "Base total"]}
           rows={fees.map((f) => [
-            <span key="f" className={cn(f.fee === feeBp && "font-semibold")}>{f.fee}</span>,
+            <span key="f" className={cn(f.fee === exchangeFeeBp && "font-semibold")}>{f.fee}</span>,
             f.model.n,
             <span key="m" className={tone(f.model.totalBp)}>{bp(f.model.totalBp, 1)}</span>,
             bp(f.model.perTradeBp),
@@ -663,7 +671,7 @@ function CompareBlock({
           </div>
           <Table
             scroll
-            head={["Settlement", "Symbol", "ypred", "Exp funding", "Settled funding", "y", `Net (fee ${feeBp})`]}
+            head={["Settlement", "Symbol", "ypred", "Exp funding", "Settled funding", "y", `Net (cost ${feeBp.toFixed(2)})`]}
             rows={rows.slice(0, DIFF_ROW_CAP).map(({ r }) => {
               const v = net(r, feeBp);
               return [
@@ -710,7 +718,7 @@ function CompareBlock({
           </div>
           <Table
             scroll
-            head={["Settlement", "Symbol", "Taken by", "A ypred", "B ypred", "Exp funding", "Settled funding", "y", `Net (fee ${feeBp})`]}
+            head={["Settlement", "Symbol", "Taken by", "A ypred", "B ypred", "Exp funding", "Settled funding", "y", `Net (cost ${feeBp.toFixed(2)})`]}
             rows={rows.slice(0, DIFF_ROW_CAP).map(({ r, side }) => {
               const key = eventKey(r);
               const v = net(r, feeBp);
