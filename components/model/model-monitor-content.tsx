@@ -26,6 +26,8 @@ import {
   type ModelRow,
   type ModelSummary,
 } from "@/lib/model-metrics";
+import { LiveReconciliation } from "./live-reconciliation";
+import type { LiveTrade } from "@/lib/live-recon";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DistributionChart, IcTrendChart, ScatterCalibration } from "./model-charts";
 import { DEFAULT_EVAL_SETTINGS, ModelEvaluation, type EvalSettings } from "./model-evaluation";
@@ -45,6 +47,10 @@ interface ModelMonitorContentProps {
   days: number;
   windows: number[];
   error: string | null;
+  /** Live funding-arb positions in the window, for the Live vs Shadow tab. */
+  liveTrades: LiveTrade[];
+  /** When each live strategy was running. */
+  liveWindows: Record<string, [number, number][]>;
 }
 
 const fmtTs = (ms: number) =>
@@ -62,7 +68,7 @@ const bp = (v: number | null | undefined, digits = 2) =>
 const signClass = (v: number | null | undefined) =>
   v == null ? "text-muted-foreground" : v > 0 ? "text-emerald-500" : v < 0 ? "text-red-500" : "";
 
-export function ModelMonitorContent({ packed, days, windows, error }: ModelMonitorContentProps) {
+export function ModelMonitorContent({ packed, days, windows, error, liveTrades, liveWindows }: ModelMonitorContentProps) {
   const router = useRouter();
   const allRows = useMemo(() => unpackRows(packed), [packed]);
 
@@ -272,6 +278,7 @@ export function ModelMonitorContent({ packed, days, windows, error }: ModelMonit
           <TabsTrigger value="evaluation">Evaluation</TabsTrigger>
           <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
           <TabsTrigger value="predictions">Predictions</TabsTrigger>
+          <TabsTrigger value="live">Live vs Shadow</TabsTrigger>
         </TabsList>
 
         {/* Research's own priority order: strategy-level metrics first. */}
@@ -291,6 +298,16 @@ export function ModelMonitorContent({ packed, days, windows, error }: ModelMonit
           <IcTrendChart events={events} />
           <ScatterCalibration rows={scoredRows} bins={bins} />
           <DistributionChart bins={hist} />
+        </TabsContent>
+
+        <TabsContent value="live">
+          <LiveReconciliation
+            liveTrades={liveTrades}
+            liveWindows={liveWindows}
+            allRows={allRows}
+            modelRows={scoredRows}
+            settings={evalSettings}
+          />
         </TabsContent>
 
         <TabsContent value="predictions">

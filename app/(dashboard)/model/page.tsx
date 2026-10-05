@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { ModelMonitorContent } from "@/components/model/model-monitor-content";
 import { packRows, type ModelRow } from "@/lib/model-metrics";
+import { LIVE_STRATEGIES, pairLegs, type LiveLeg, type LiveTrade } from "@/lib/live-recon";
 
 const WINDOWS = [1, 3, 7, 30] as const;
 const DEFAULT_DAYS = 7;
@@ -120,6 +121,52 @@ async function loadRows(supabase: SupabaseClient, sinceMs: number) {
   return { rows, error };
 }
 
+/** When each live strategy was running, so "shadow traded, live didn't" only counts its own hours. */
+export type LiveWindows = Record<string, [number, number][]>;
+
+/** The live strategies' realised trades in the window, legs paired into positions. */
+async function loadLive(
+  supabase: SupabaseClient,
+  sinceMs: number
+): Promise<{ trades: LiveTrade[]; windows: LiveWindows; error: string | null }> {
+  const { data: runs, error: runsError } = await supabase
+    .from("strategy_runs")
+    .select("run_id, strategy_id, start_time, end_time")
+    .in("strategy_id", LIVE_STRATEGIES.map((s) => s.id))
+    .eq("mode", "realtime");
+  if (runsError) {
+    console.error("[model] live runs:", runsError);
+    return { trades: [], windows: {}, error: runsError.message };
+  }
+  const nameOf = new Map<string, string>(LIVE_STRATEGIES.map((s) => [s.id, s.name]));
+  const strategyOfRun = new Map<string, string>();
+  const windows: LiveWindows = {};
+  const now = Date.now();
+  for (const r of runs ?? []) {
+    const name = nameOf.get(r.strategy_id) ?? "Unknown";
+    strategyOfRun.set(r.run_id, name);
+    // start_time can be null while the engine is still creating the run.
+    if (!r.start_time) continue;
+    const end = r.end_time ? Date.parse(r.end_time) : now;
+    if (end < sinceMs) continue;
+    (windows[name] ??= []).push([Date.parse(r.start_time), end]);
+  }
+  const runIds = [...strategyOfRun.keys()];
+  if (runIds.length === 0) return { trades: [], windows, error: null };
+
+  const { rows, error } = await readAll<LiveLeg>("live combined_trades", (from, to) =>
+    supabase
+      .from("combined_trades")
+      .select("run_id, symbol, ts, quantity, entry_price, holding_period_hours, price_pnl, funding_fee_realized, commission_fee")
+      .in("run_id", runIds)
+      .gte("ts", new Date(sinceMs).toISOString())
+      .order("ts", { ascending: true })
+      .order("combined_trade_id", { ascending: true })
+      .range(from, to)
+  );
+  return { trades: pairLegs(rows, strategyOfRun), windows, error };
+}
+
 export default async function ModelPage({
   searchParams,
 }: {
@@ -130,9 +177,17 @@ export default async function ModelPage({
   const days = (WINDOWS as readonly number[]).includes(parsed) ? parsed : DEFAULT_DAYS;
 
   const supabase = await createClient();
-  const { rows, error } = await loadRows(supabase, Date.now() - days * 86_400_000);
+  const sinceMs = Date.now() - days * 86_400_000;
+  const [{ rows, error }, live] = await Promise.all([loadRows(supabase, sinceMs), loadLive(supabase, sinceMs)]);
 
   return (
-    <ModelMonitorContent packed={packRows(rows)} days={days} windows={[...WINDOWS]} error={error} />
+    <ModelMonitorContent
+      packed={packRows(rows)}
+      days={days}
+      windows={[...WINDOWS]}
+      error={error ?? live.error}
+      liveTrades={live.trades}
+      liveWindows={live.windows}
+    />
   );
 }

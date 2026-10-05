@@ -80,12 +80,12 @@ function SwatchLegend({ items }: { items: { color: string; label: string; opacit
   );
 }
 
-const bp = (v: number | null | undefined, d = 2) =>
+export const bp = (v: number | null | undefined, d = 2) =>
   v == null || !Number.isFinite(v) ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(d)}`;
-const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
-const tone = (v: number | null | undefined) =>
+export const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+export const tone = (v: number | null | undefined) =>
   v == null ? "text-muted-foreground" : v > 0 ? "text-emerald-500" : v < 0 ? "text-red-500" : "";
-const fmtTs = (ms: number) =>
+export const fmtTs = (ms: number) =>
   formatDateTime(ms, { month: "short", day: "numeric", hour: "2-digit", hour12: false });
 
 export interface EvalSettings {
@@ -743,7 +743,7 @@ function CompareBlock({
   );
 }
 
-function Section({ n, title, desc, children }: { n: number; title: string; desc: string; children: ReactNode }) {
+export function Section({ n, title, desc, children }: { n: number; title: string; desc: string; children: ReactNode }) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -759,7 +759,7 @@ function Section({ n, title, desc, children }: { n: number; title: string; desc:
 }
 
 /** `scroll` caps the height (a max-h class, default ~14 rows) and keeps the header visible. */
-function Table({ head, rows, scroll }: { head: ReactNode[]; rows: ReactNode[][]; scroll?: boolean | string }) {
+export function Table({ head, rows, scroll }: { head: ReactNode[]; rows: ReactNode[][]; scroll?: boolean | string }) {
   return (
     <div
       className={cn(
