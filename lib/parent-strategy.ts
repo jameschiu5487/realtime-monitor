@@ -226,3 +226,92 @@ export function scaleCombinedTrades(
     };
   });
 }
+
+/**
+ * Each book's equity series across its runs.
+ *
+ * A child restarted inside the window has several runs; its cumulative PnL
+ * carries over from one run to the next (the engine persists the book's
+ * totals), so the runs' rows concatenated in time order are one continuous PnL
+ * series (equity is not: it jumps when the book's capital changes between
+ * runs). `bookOfRun` maps every run (current and earlier) to the book key, the
+ * current run's id.
+ */
+export function chainBookSeries(
+  seriesByRun: Map<string, EquityCurve[]>,
+  bookOfRun: Record<string, string>
+): Map<string, EquityCurve[]> {
+  const map = new Map<string, EquityCurve[]>();
+  for (const [runId, series] of seriesByRun) {
+    const book = bookOfRun[runId];
+    if (!book) continue;
+    map.set(book, [...(map.get(book) ?? []), ...series]);
+  }
+  for (const list of map.values()) list.sort((a, b) => time(a.ts) - time(b.ts));
+  return map;
+}
+
+/**
+ * Summed book equity from the earliest book, for the parent's stats and charts.
+ *
+ * Each book counts as its current capital plus its cumulative PnL, so a
+ * capital change between runs (e.g. 2000 -> 6000) is not read as profit. A
+ * book with no data yet counts at its first recorded PnL (flat, no position),
+ * so a book coming online later neither shifts the start of the curve nor
+ * adds a deposit-shaped jump; restarts don't reset it either (see
+ * chainBookSeries). Each book's last value is carried forward between its
+ * points. Fields are scaled by the book's share ratio.
+ */
+export function buildBookStatsCurve(
+  seriesByBook: Map<string, EquityCurve[]>,
+  ratioByBook: Record<string, number>,
+  capitalByBook: Record<string, number>
+): EquityCurve[] {
+  const books = Array.from(seriesByBook.entries()).filter(([, s]) => s.length > 0);
+  if (books.length === 0) return [];
+
+  const stamps = new Map<number, string>();
+  for (const [, series] of books) for (const p of series) stamps.set(time(p.ts), p.ts);
+  const sorted = Array.from(stamps.keys()).sort((a, b) => a - b);
+
+  const idx = new Map<string, number>();
+  const last = new Map<string, EquityCurve>();
+  const result: EquityCurve[] = [];
+  let peak = 0;
+
+  for (const t of sorted) {
+    let equity = 0;
+    let pnl = 0;
+    let positionValue = 0;
+    for (const [book, series] of books) {
+      let i = idx.get(book) ?? 0;
+      while (i < series.length && time(series[i].ts) <= t) {
+        last.set(book, series[i]);
+        i++;
+      }
+      idx.set(book, i);
+      const ratio = ratioByBook[book] ?? 1;
+      const rec = last.get(book);
+      const bookPnl = num((rec ?? series[0]).total_pnl);
+      equity += (num(capitalByBook[book]) + bookPnl) * ratio;
+      pnl += bookPnl * ratio;
+      if (rec) positionValue += num(rec.total_position_value) * ratio;
+    }
+    peak = Math.max(peak, equity);
+    result.push({
+      run_id: "combined",
+      ts: stamps.get(t) ?? new Date(t).toISOString(),
+      total_equity: equity,
+      total_pnl: pnl,
+      total_position_value: positionValue,
+      binance_equity: 0,
+      binance_pnl: 0,
+      binance_position_value: 0,
+      bybit_equity: 0,
+      bybit_pnl: 0,
+      bybit_position_value: 0,
+      drawdown_pct: peak > 0 ? ((peak - equity) / peak) * 100 : 0,
+    });
+  }
+  return result;
+}

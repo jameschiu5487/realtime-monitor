@@ -35,9 +35,10 @@ import {
   getFundAccountEquity,
   getFundAccountEquityHourly,
 } from "@/lib/overview-queries";
-import { buildCombinedEquityCurve } from "@/lib/utils/equity";
 import { accountIdsFromRunParams } from "@/lib/utils/fund-account-strategy";
 import {
+  buildBookStatsCurve,
+  chainBookSeries,
   currentPositions,
   equityByRun,
   isParentBookMode,
@@ -183,10 +184,33 @@ export async function ParentStrategyView({
   for (const r of runs) ratioByRun[r.run_id] = shareRatioByChild[r.strategy_id] ?? 1;
 
   const since = bucketedSince(WINDOW_DAYS);
+
+  // Earlier runs of the same books (a child restarted inside the window): the
+  // stats and charts follow each book across its restarts.
+  const bookOfRun: Record<string, string> = {};
+  for (const r of runs) bookOfRun[r.run_id] = r.run_id;
+  if (runs.length > 0) {
+    const bookKey = new Map(runs.map((r) => [`${r.strategy_id}|${r.mode}`, r.run_id]));
+    const { data, error } = await supabase
+      .from("strategy_runs")
+      .select("run_id, strategy_id, mode")
+      .in("strategy_id", Array.from(new Set(runs.map((r) => r.strategy_id))))
+      .neq("status", "running")
+      .gte("end_time", since);
+    if (error) console.error("Error fetching earlier child runs:", error);
+    for (const r of (data ?? []) as Pick<StrategyRun, "run_id" | "strategy_id" | "mode">[]) {
+      const book = bookKey.get(`${r.strategy_id}|${r.mode}`);
+      if (!book) continue;
+      bookOfRun[r.run_id] = book;
+      ratioByRun[r.run_id] = ratioByRun[book];
+    }
+  }
+  const historyRunIds = Object.keys(bookOfRun);
+
   const [accountEquity, equityRows, combinedTrades, positionRows, fills] = await Promise.all([
     loadAccountEquity(supabase, accountIds),
-    getEquityCurve(supabase, runIds, since, bucketedSince(1)),
-    getCombinedTrades(supabase, runIds, since),
+    getEquityCurve(supabase, historyRunIds, since, bucketedSince(1)),
+    getCombinedTrades(supabase, historyRunIds, since),
     Promise.all(
       runIds.map(async (runId) => {
         const { data, error } = await supabase
@@ -199,7 +223,7 @@ export async function ParentStrategyView({
         return (data ?? []) as Position[];
       })
     ),
-    getFillNotional(supabase, runIds, since),
+    getFillNotional(supabase, historyRunIds, since),
   ]);
 
   const seriesByRun = equityByRun(equityRows);
@@ -220,12 +244,21 @@ export async function ParentStrategyView({
   });
   positions.sort((a, b) => b.notional - a.notional);
 
-  // Equity is summed only where every book has data (buildCombinedEquityCurve
-  // starts at the latest first point), so a book coming online later shows up
-  // as a new starting point rather than as a deposit-shaped jump. PnL has no
-  // such problem and starts at the earliest book.
-  const aggregate = buildCombinedEquityCurve(seriesByRun, ratioByRun);
-  const pnlSeries = sumPnlSeries(seriesByRun, ratioByRun);
+  // Summed from the earliest book: each book (current capital + cumulative
+  // PnL) is followed across its restarts, and a book that came online later
+  // counts flat until it has data, so neither a new book, a restart nor a
+  // capital change resets the stats or adds a deposit-shaped jump.
+  const seriesByBook = chainBookSeries(seriesByRun, bookOfRun);
+  const capitalByBook: Record<string, number> = {};
+  for (const r of runs) {
+    const own = seriesByRun.get(r.run_id) ?? [];
+    const latest = own.length > 0 ? own[own.length - 1] : null;
+    capitalByBook[r.run_id] =
+      Number(r.initial_capital) ||
+      (latest ? latest.total_equity - latest.total_pnl : 0);
+  }
+  const aggregate = buildBookStatsCurve(seriesByBook, ratioByRun, capitalByBook);
+  const pnlSeries = sumPnlSeries(seriesByBook, ratioByRun);
   const aggregateStart = aggregate.length > 0 ? new Date(aggregate[0].ts).getTime() : 0;
   const statsTrades = scaleCombinedTrades(
     combinedTrades.filter((t) => new Date(t.ts).getTime() >= aggregateStart),
@@ -432,8 +465,8 @@ export async function ParentStrategyView({
               />
               {books.length > 1 && (
                 <p className="text-xs text-muted-foreground -mt-2">
-                  Summed equity starts once every book has data ({taipeiIso(aggregate[0].ts).slice(0, 16).replace("T", " ")} {TZ_LABEL});
-                  each book&apos;s last value is carried forward between its points.
+                  Summed from the earliest book ({taipeiIso(aggregate[0].ts).slice(0, 16).replace("T", " ")} {TZ_LABEL}), across restarts;
+                  each book counts as its current capital plus cumulative PnL (flat before it has data), and its last value is carried forward between its points.
                 </p>
               )}
               <DrawdownChart
