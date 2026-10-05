@@ -24,10 +24,23 @@ export const LIVE_STRATEGIES: { id: string; name: string; note: string; modelSin
   },
 ];
 
-/** True when the live trade ran without the model (before its strategy's modelSince). */
-export function isPreModel(t: { strategy: string; entryMs: number }): boolean {
+/**
+ * Exits that aren't the one-settlement funding trade the shadow models:
+ * ZReverted is Super_Newtonz's basis leg closing when the z-score reverts,
+ * almost always before the settlement; MaxHoldingTime is a basis hold timing
+ * out after hours, across several settlements.
+ */
+const NON_FUNDING_EXITS = new Set(["ZReverted", "MaxHoldingTime"]);
+
+/**
+ * Why a live trade is kept out of the comparison (it still shows in the trade
+ * list), or null: it ran before the model, or it exited for a non-funding reason.
+ */
+export function excludedReason(t: { strategy: string; entryMs: number; exitType: string | null }): string | null {
   const since = LIVE_STRATEGIES.find((s) => s.name === t.strategy)?.modelSince;
-  return since != null && t.entryMs < since;
+  if (since != null && t.entryMs < since) return "pre-model";
+  if (t.exitType && NON_FUNDING_EXITS.has(t.exitType)) return t.exitType;
+  return null;
 }
 
 /** One combined_trades leg as the page reads it. */
@@ -41,6 +54,7 @@ export interface LiveLeg {
   price_pnl: number | null;
   funding_fee_realized: number | null;
   commission_fee: number | null;
+  exit_type: string | null;
 }
 
 /** Both legs of one live position, in bp of their summed entry notional. */
@@ -56,6 +70,7 @@ export interface LiveTrade {
   /** Commission, negative. */
   feeBp: number;
   netBp: number;
+  exitType: string | null;
 }
 
 /** Legs of one position are written a few ms apart. */
@@ -89,6 +104,7 @@ export function pairLegs(legs: LiveLeg[], strategyOfRun: Map<string, string>): L
         fundingBp,
         feeBp,
         netBp: priceBp + fundingBp + feeBp,
+        exitType: group.find((l) => l.exit_type)?.exit_type ?? null,
       });
     }
     group = [];

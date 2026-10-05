@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { cn } from "@/lib/utils";
 import { DEFAULT_BASIS_CAP, modelTrades, net, prepare, eventKey, type EvalConfig } from "@/lib/model-eval";
-import { LIVE_STRATEGIES, isPreModel, matchTrades, type LiveTrade, type MatchedTrade, type ShadowEvent } from "@/lib/live-recon";
+import { LIVE_STRATEGIES, excludedReason, matchTrades, type LiveTrade, type MatchedTrade, type ShadowEvent } from "@/lib/live-recon";
 import type { ModelRow, ScoredRow } from "@/lib/model-metrics";
 import { Section, Table, bp, fmtTs, tone, type EvalSettings } from "./model-evaluation";
 
@@ -82,7 +82,7 @@ export function LiveReconciliation({
   const summary = useMemo(
     () =>
       LIVE_STRATEGIES.map((s) => {
-        const all = matched.filter((t) => t.strategy === s.name && !isPreModel(t));
+        const all = matched.filter((t) => t.strategy === s.name && !excludedReason(t));
         const ok = all.filter(isScored);
         const priceGaps = ok.map((t) => t.priceBp - t.event.y);
         return {
@@ -116,7 +116,7 @@ export function LiveReconciliation({
     };
     const rule = modelTrades(prepare(modelRows, cfg.basisCap).rows, cfg).filter((r) => inWindow(r.ts));
     const ruleKeys = new Set(rule.map(eventKey));
-    const live = matched.filter((t) => t.strategy === RULE_STRATEGY && t.settleTs != null);
+    const live = matched.filter((t) => t.strategy === RULE_STRATEGY && t.settleTs != null && !excludedReason(t));
     const liveKeys = new Set(live.map((t) => `${t.settleTs}|${t.symbol}`));
     const shadowOnly = rule.filter((r) => !liveKeys.has(eventKey(r)));
     const liveOnly = live.filter((t) => !ruleKeys.has(`${t.settleTs}|${t.symbol}`));
@@ -138,7 +138,7 @@ export function LiveReconciliation({
       LIVE_STRATEGIES.map((s) => ({
         name: s.name,
         values: matched
-          .filter((t): t is Scored => t.strategy === s.name && !isPreModel(t) && isScored(t))
+          .filter((t): t is Scored => t.strategy === s.name && !excludedReason(t) && isScored(t))
           .map((t) =>
             gapKind === "price" ? t.priceBp - t.event.y : t.netBp - (t.event.y + t.event.settledFunding - fee)
           ),
@@ -194,7 +194,9 @@ export function LiveReconciliation({
         <p className="text-xs text-muted-foreground">
           Per-trade means over scored trades: one settlement held, shadow y closed and funding settled.{" "}
           {summary.map((s) => `${s.name}: ${s.noSettlement} closed before any settlement, ${s.pending} still pending, ${s.multi} held across several (not comparable)`).join(" · ")}.
-          Trades from before a strategy ran the model (Newtonz before {fmtTs(LIVE_STRATEGIES.find((s) => s.name === "Newtonz")?.modelSince ?? 0)}) are left out everywhere but the trade list.
+          Left out everywhere but the trade list: trades from before a strategy ran the model (Newtonz before{" "}
+          {fmtTs(LIVE_STRATEGIES.find((s) => s.name === "Newtonz")?.modelSince ?? 0)}) and basis exits — ZReverted (z-score
+          reverted, almost always before the settlement) and MaxHoldingTime (held for hours, across several settlements).
           Live total covers every trade, scored or not.
         </p>
       </Section>
@@ -308,7 +310,7 @@ export function LiveReconciliation({
               ),
               <span key="s" className="font-sans">
                 {t.strategy}
-                {isPreModel(t) && <span className="text-muted-foreground"> · pre-model</span>}
+                {excludedReason(t) && <span className="text-muted-foreground"> · {excludedReason(t)}</span>}
               </span>,
               <span key="y" className="font-sans">{t.symbol}</span>,
               Math.round(t.grossUsd).toLocaleString("en-US"),

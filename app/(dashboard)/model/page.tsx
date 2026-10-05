@@ -160,7 +160,7 @@ async function loadLive(
   const { rows, error } = await readAll<LiveLeg>("live combined_trades", (from, to) =>
     supabase
       .from("combined_trades")
-      .select("run_id, symbol, ts, quantity, entry_price, holding_period_hours, price_pnl, funding_fee_realized, commission_fee")
+      .select("run_id, symbol, ts, quantity, entry_price, holding_period_hours, price_pnl, funding_fee_realized, commission_fee, exit_type")
       .in("run_id", runIds)
       .gte("ts", new Date(sinceMs).toISOString())
       .order("ts", { ascending: true })
