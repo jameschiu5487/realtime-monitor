@@ -139,6 +139,7 @@ async function loadLive(
     return { trades: [], windows: {}, error: runsError.message };
   }
   const nameOf = new Map<string, string>(LIVE_STRATEGIES.map((s) => [s.id, s.name]));
+  const modelSinceOf = new Map(LIVE_STRATEGIES.map((s) => [s.name, s.modelSince ?? 0]));
   const strategyOfRun = new Map<string, string>();
   const windows: LiveWindows = {};
   const now = Date.now();
@@ -148,8 +149,10 @@ async function loadLive(
     // start_time can be null while the engine is still creating the run.
     if (!r.start_time) continue;
     const end = r.end_time ? Date.parse(r.end_time) : now;
-    if (end < sinceMs) continue;
-    (windows[name] ??= []).push([Date.parse(r.start_time), end]);
+    // Only the hours it ran the model count.
+    const start = Math.max(Date.parse(r.start_time), modelSinceOf.get(name) ?? 0);
+    if (end < sinceMs || end <= start) continue;
+    (windows[name] ??= []).push([start, end]);
   }
   const runIds = [...strategyOfRun.keys()];
   if (runIds.length === 0) return { trades: [], windows, error: null };

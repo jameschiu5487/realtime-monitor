@@ -8,11 +8,27 @@
  * on the shadow's funding_bp and on 4.4 bp. Dividing by one leg doubles them.
  */
 
-/** Live strategies that trade the shadow's events. Both run the model now. */
-export const LIVE_STRATEGIES = [
-  { id: "9b07876d-710a-4d59-9589-fba3a89f4841", name: "Super_Newtonz", note: "basis funding + model" },
-  { id: "b2c3d4e5-f6a7-8901-bcde-f12345678901", name: "Newtonz", note: "newton_z + model" },
-] as const;
+/**
+ * Live strategies that trade the shadow's events. `modelSince`: trades entered
+ * before it ran without the model and are left out of the comparison.
+ * Newtonz took the model with run dc11b2b9 (2026-10-03 00:33 Taipei); its
+ * previous run still traded at 00:00, so a Taipei-midnight cut would be wrong.
+ */
+export const LIVE_STRATEGIES: { id: string; name: string; note: string; modelSince: number | null }[] = [
+  { id: "9b07876d-710a-4d59-9589-fba3a89f4841", name: "Super_Newtonz", note: "basis funding + model", modelSince: null },
+  {
+    id: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+    name: "Newtonz",
+    note: "newton_z + model",
+    modelSince: Date.parse("2026-10-02T16:33:26Z"),
+  },
+];
+
+/** True when the live trade ran without the model (before its strategy's modelSince). */
+export function isPreModel(t: { strategy: string; entryMs: number }): boolean {
+  const since = LIVE_STRATEGIES.find((s) => s.name === t.strategy)?.modelSince;
+  return since != null && t.entryMs < since;
+}
 
 /** One combined_trades leg as the page reads it. */
 export interface LiveLeg {

@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DEFAULT_BASIS_CAP, modelTrades, net, prepare, eventKey, type EvalConfig } from "@/lib/model-eval";
-import { LIVE_STRATEGIES, matchTrades, type LiveTrade, type MatchedTrade, type ShadowEvent } from "@/lib/live-recon";
+import { LIVE_STRATEGIES, isPreModel, matchTrades, type LiveTrade, type MatchedTrade, type ShadowEvent } from "@/lib/live-recon";
 import type { ModelRow, ScoredRow } from "@/lib/model-metrics";
 import { Section, Table, bp, fmtTs, tone, type EvalSettings } from "./model-evaluation";
 
@@ -68,7 +68,7 @@ export function LiveReconciliation({
   const summary = useMemo(
     () =>
       LIVE_STRATEGIES.map((s) => {
-        const all = matched.filter((t) => t.strategy === s.name);
+        const all = matched.filter((t) => t.strategy === s.name && !isPreModel(t));
         const ok = all.filter(isScored);
         const priceGaps = ok.map((t) => t.priceBp - t.event.y);
         return {
@@ -150,6 +150,7 @@ export function LiveReconciliation({
         <p className="text-xs text-muted-foreground">
           Per-trade means over scored trades: one settlement held, shadow y closed and funding settled.{" "}
           {summary.map((s) => `${s.name}: ${s.noSettlement} closed before any settlement, ${s.pending} still pending, ${s.multi} held across several (not comparable)`).join(" · ")}.
+          Trades from before a strategy ran the model (Newtonz before {fmtTs(LIVE_STRATEGIES.find((s) => s.name === "Newtonz")?.modelSince ?? 0)}) are left out everywhere but the trade list.
           Live total covers every trade, scored or not.
         </p>
       </Section>
@@ -220,7 +221,10 @@ export function LiveReconciliation({
               ) : (
                 <span key="t" className="text-amber-500">exit {fmtTs(t.exitMs)} · no settlement</span>
               ),
-              <span key="s" className="font-sans">{t.strategy}</span>,
+              <span key="s" className="font-sans">
+                {t.strategy}
+                {isPreModel(t) && <span className="text-muted-foreground"> · pre-model</span>}
+              </span>,
               <span key="y" className="font-sans">{t.symbol}</span>,
               Math.round(t.grossUsd).toLocaleString("en-US"),
               bp(t.priceBp),
