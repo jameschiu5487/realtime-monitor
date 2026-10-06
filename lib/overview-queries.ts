@@ -448,11 +448,13 @@ export async function getCombinedTrades(
   );
 }
 
-/** One fill's traded notional (|quantity_actual × price|), unscaled. */
+/** One fill's traded notional (|quantity_actual × price|) and fee, unscaled. */
 export interface FillNotional {
   run_id: string;
   ts: string;
   notional: number;
+  /** fee_amount_usdt, USDT (positive = paid). */
+  fee: number;
 }
 
 /**
@@ -466,15 +468,21 @@ export async function getFillNotional(
 ): Promise<FillNotional[]> {
   if (runIds.length === 0) return [];
 
-  type Row = { run_id: string; ts: string; quantity_actual: number | null; price: number | null };
+  type Row = {
+    run_id: string;
+    ts: string;
+    quantity_actual: number | null;
+    price: number | null;
+    fee_amount_usdt: number | null;
+  };
   return cachedQuery(
     "fill-notional",
-    ["overview:fill-notional:v1"],
+    ["overview:fill-notional:v2"],
     async (ids: string[], sinceIso: string) => {
       const rows = await fetchAllPages<Row>("trades", (from, to) =>
         supabase
           .from("trades")
-          .select("run_id, ts, quantity_actual, price")
+          .select("run_id, ts, quantity_actual, price, fee_amount_usdt")
           .in("run_id", ids)
           .gte("ts", sinceIso)
           .order("ts", { ascending: true })
@@ -484,6 +492,7 @@ export async function getFillNotional(
         run_id: r.run_id,
         ts: r.ts,
         notional: Math.abs(Number(r.quantity_actual ?? 0) * Number(r.price ?? 0)),
+        fee: Number(r.fee_amount_usdt ?? 0) || 0,
       }));
     },
     runIds,

@@ -242,12 +242,15 @@ export async function ParentStrategyView({
     getFillNotional(supabase, historyRunIds, since),
     getFillNotional(supabase, accountRunIds, accountSince),
   ]);
-  const volumeByHourMap = new Map<number, number>();
+  const tradingByHourMap = new Map<number, [number, number]>();
   for (const f of accountFills) {
     const hour = Math.floor(new Date(f.ts).getTime() / 3_600_000) * 3_600_000;
-    volumeByHourMap.set(hour, (volumeByHourMap.get(hour) ?? 0) + f.notional);
+    const [notional, fee] = tradingByHourMap.get(hour) ?? [0, 0];
+    tradingByHourMap.set(hour, [notional + f.notional, fee + f.fee]);
   }
-  const volumeByHour = Array.from(volumeByHourMap.entries()).sort((a, b) => a[0] - b[0]);
+  const tradingByHour: [number, number, number][] = Array.from(tradingByHourMap.entries())
+    .map(([hour, [notional, fee]]): [number, number, number] => [hour, notional, fee])
+    .sort((a, b) => a[0] - b[0]);
 
   const seriesByRun = equityByRun(equityRows);
 
@@ -359,7 +362,7 @@ export async function ParentStrategyView({
         nowMs={accountEquity.nowMs}
         parentShareRatio={parentShareRatio}
         fetchError={accountEquity.error}
-        volumeByHour={volumeByHour}
+        tradingByHour={tradingByHour}
       />
 
       {/* Everything below is derived from the children's virtual books */}

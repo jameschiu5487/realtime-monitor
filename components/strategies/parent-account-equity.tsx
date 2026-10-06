@@ -75,11 +75,11 @@ interface ParentAccountEquityProps {
   parentShareRatio: number | null;
   fetchError: string | null;
   /**
-   * Traded notional of the children's live runs per hour, `[hour start ms, USDT]`,
-   * unscaled (fund-level, like the equity). Covers the books' own fills only: a
-   * manual trade on the account is not in it.
+   * The children's live runs per hour, `[hour start ms, traded notional USDT, fees
+   * USDT]`, unscaled (fund-level, like the equity). Covers the books' own fills only:
+   * a manual trade on the account is not in it.
    */
-  volumeByHour?: [number, number][];
+  tradingByHour?: [number, number, number][];
 }
 
 /**
@@ -95,7 +95,7 @@ export function ParentAccountEquity({
   nowMs,
   parentShareRatio,
   fetchError,
-  volumeByHour = [],
+  tradingByHour = [],
 }: ParentAccountEquityProps) {
   const [range, setRange] = useState<AccountEquityRange>("7d");
 
@@ -112,14 +112,26 @@ export function ParentAccountEquity({
   );
   const { delta, deltaPct } = useMemo(() => computeRangeDelta(curve, total), [curve, total]);
   const drawdown = useMemo(() => maxDrawdown(curve), [curve]);
-  // Volume in the range as a multiple of the account equity at the range start.
+  // Volume in the range as a multiple of the account equity at the range start,
+  // and the fees paid on it.
   const volume = useMemo(() => {
     const from = nowMs - RANGE_MS[range];
     let notional = 0;
-    for (const [t, v] of volumeByHour) if (t >= from) notional += v;
+    let fees = 0;
+    for (const [t, v, fee] of tradingByHour) {
+      if (t < from) continue;
+      notional += v;
+      fees += fee;
+    }
     const base = curve.length > 0 ? curve[0].equity : total;
-    return { notional, multiple: base > 0 ? notional / base : null };
-  }, [volumeByHour, nowMs, range, curve, total]);
+    return {
+      notional,
+      multiple: base > 0 ? notional / base : null,
+      fees,
+      feeBps: notional > 0 ? (fees / notional) * 1e4 : null,
+      feePctOfEquity: base > 0 ? (fees / base) * 100 : null,
+    };
+  }, [tradingByHour, nowMs, range, curve, total]);
   const yDomain = useMemo<[number, number]>(() => {
     if (curve.length === 0) return [0, 1];
     const values = curve.map((p) => p.equity);
@@ -180,7 +192,7 @@ export function ParentAccountEquity({
         </Card>
       ) : (
         <Card className="gap-0 py-0">
-          <div className="grid grid-cols-2 sm:grid-cols-5 border-b">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 border-b">
             <Figure label="Current account equity" value={money(total)} />
             <Figure
               label={`${range} change`}
@@ -200,11 +212,18 @@ export function ParentAccountEquity({
               sub={volume.multiple === null ? undefined : `${volume.multiple.toFixed(1)}× equity`}
             />
             <Figure
-              label="Last update"
-              value={taipeiMinute(lastUpdateMs)}
-              small
-              wrapperClassName="col-span-2 sm:col-span-1"
+              label={`${range} fees`}
+              value={money(-volume.fees)}
+              sub={
+                volume.feeBps === null
+                  ? undefined
+                  : `${volume.feeBps.toFixed(1)} bp of volume${
+                      volume.feePctOfEquity === null ? "" : ` · ${volume.feePctOfEquity.toFixed(2)}% equity`
+                    }`
+              }
+              className={volume.fees > 0 ? "text-red-600 dark:text-red-400" : ""}
             />
+            <Figure label="Last update" value={taipeiMinute(lastUpdateMs)} small />
           </div>
           <CardContent className="px-2 py-4 sm:px-6">
             <ChartContainer config={chartConfig} className="aspect-auto h-[240px] sm:h-[280px] w-full">
@@ -311,22 +330,15 @@ function Figure({
   sub,
   className,
   small,
-  wrapperClassName,
 }: {
   label: string;
   value: string;
   sub?: string;
   className?: string;
   small?: boolean;
-  wrapperClassName?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "flex flex-col items-center justify-center gap-0.5 p-3 sm:p-4 text-center",
-        wrapperClassName
-      )}
-    >
+    <div className="flex flex-col items-center justify-center gap-0.5 p-3 sm:p-4 text-center">
       <span
         className={cn(
           "font-bold font-mono",
