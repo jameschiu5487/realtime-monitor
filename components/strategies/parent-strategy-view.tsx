@@ -270,6 +270,27 @@ export async function ParentStrategyView({
   });
   positions.sort((a, b) => b.notional - a.notional);
 
+  // Real-account exposure: the live books' positions netted per symbol (what the exchange
+  // holds), unscaled like the account equity. Gross = sum of |net per symbol|.
+  const liveRunIds = new Set(runs.filter((r) => isParentBookMode(r.mode as string, false)).map((r) => r.run_id));
+  const netBySymbol = new Map<string, number>();
+  for (const p of positions) {
+    if (!liveRunIds.has(p.runId)) continue;
+    const ratio = ratioByRun[p.runId] || 1;
+    const signed = (Math.sign(p.quantity) * p.notional) / ratio;
+    netBySymbol.set(p.symbol, (netBySymbol.get(p.symbol) ?? 0) + signed);
+  }
+  let exposureGross = 0;
+  let exposureNet = 0;
+  for (const v of netBySymbol.values()) {
+    exposureGross += Math.abs(v);
+    exposureNet += v;
+  }
+  const exposureAsOf = positions.reduce<string | null>(
+    (latest, p) => (liveRunIds.has(p.runId) && (latest === null || p.ts > latest) ? p.ts : latest),
+    null
+  );
+
   // Traded notional per book over the window, across its restarts, scaled.
   const turnoverByBook: Record<string, number> = {};
   for (const f of fills) {
@@ -363,6 +384,7 @@ export async function ParentStrategyView({
         parentShareRatio={parentShareRatio}
         fetchError={accountEquity.error}
         tradingByHour={tradingByHour}
+        exposure={{ gross: exposureGross, net: exposureNet, symbols: netBySymbol.size, asOf: exposureAsOf }}
       />
 
       {/* Everything below is derived from the children's virtual books */}

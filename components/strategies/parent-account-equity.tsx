@@ -80,6 +80,11 @@ interface ParentAccountEquityProps {
    * a manual trade on the account is not in it.
    */
   tradingByHour?: [number, number, number][];
+  /**
+   * Current exposure of the children's live books netted per symbol (USDT, unscaled):
+   * `gross` = sum of |net notional per symbol|, `net` = signed sum (long minus short).
+   */
+  exposure?: { gross: number; net: number; symbols: number; asOf: string | null };
 }
 
 /**
@@ -96,6 +101,7 @@ export function ParentAccountEquity({
   parentShareRatio,
   fetchError,
   tradingByHour = [],
+  exposure,
 }: ParentAccountEquityProps) {
   const [range, setRange] = useState<AccountEquityRange>("7d");
 
@@ -192,8 +198,29 @@ export function ParentAccountEquity({
         </Card>
       ) : (
         <Card className="gap-0 py-0">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 border-b">
+          <div className="grid grid-cols-2 sm:grid-cols-4 border-b">
             <Figure label="Current account equity" value={money(total)} />
+            <Figure
+              label="Gross exposure"
+              value={exposure ? money(exposure.gross) : "—"}
+              sub={
+                exposure && total > 0
+                  ? `${(exposure.gross / total).toFixed(1)}× equity · ${exposure.symbols} symbols`
+                  : undefined
+              }
+            />
+            <Figure
+              label="Net exposure"
+              value={exposure ? money(exposure.net, true) : "—"}
+              sub={
+                exposure && total > 0
+                  ? `${(exposure.net / total).toFixed(2)}× equity${
+                      exposure.asOf ? ` · ${taipeiMinute(new Date(exposure.asOf).getTime())}` : ""
+                    }`
+                  : undefined
+              }
+              className={tone(exposure ? exposure.net : null)}
+            />
             <Figure
               label={`${range} change`}
               value={money(delta, true)}
