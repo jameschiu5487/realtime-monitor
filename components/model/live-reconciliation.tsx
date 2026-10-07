@@ -173,6 +173,7 @@ export function LiveReconciliation({
   const curves = useMemo(() => {
     const scale = (t: Scored) => (curveUnit === "usd" ? t.grossUsd / 1e4 : 1);
     const series: CurveSeries[] = [];
+    const diffs: CurveSeries[] = [];
     const ts = new Set<number>();
     for (const s of shown) {
       const trades = matched
@@ -190,12 +191,14 @@ export function LiveReconciliation({
         return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([t, v]) => ({ ts: t, cum: (c += v) }));
       };
       const color = STRATEGY_COLORS[s.name];
+      const gap = new Map([...live].map(([t, v]) => [t, v - (shadow.get(t) ?? 0)]));
+      diffs.push({ key: `${s.name}_diff`, label: `${s.name} live − shadow`, color, stats: { n: trades.length, curve: cumulate(gap) }, width: 2 });
       series.push(
         { key: `${s.name}_live`, label: `${s.name} live`, color, stats: { n: trades.length, curve: cumulate(live) }, width: 2 },
         { key: `${s.name}_shadow`, label: `${s.name} shadow`, color, stats: { n: trades.length, curve: cumulate(shadow) }, dash: "4 3" }
       );
     }
-    return { series, timeline: [...ts].sort((a, b) => a - b) };
+    return { series, diffs, timeline: [...ts].sort((a, b) => a - b) };
   }, [matched, fee, curveUnit, shown]);
 
   const detail = useMemo(() => matched.filter((t) => strategy === "all" || t.strategy === strategy), [matched, strategy]);
@@ -262,6 +265,8 @@ export function LiveReconciliation({
           ))}
         </div>
         <CurveChart series={curves.series} timeline={curves.timeline} />
+        <div className="text-xs font-medium">Cumulative diff (live − shadow)</div>
+        <CurveChart series={curves.diffs} timeline={curves.timeline} height={160} />
       </Section>
 
       <Section

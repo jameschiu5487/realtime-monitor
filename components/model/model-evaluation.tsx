@@ -479,7 +479,15 @@ function liveSettlements(rows: { ts: number; source: string | null }[]): Set<num
 
 const LIVE_DASH = "5 4";
 
-export function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: number[] }) {
+export function CurveChart({
+  series,
+  timeline,
+  height = 240,
+}: {
+  series: CurveSeries[];
+  timeline: number[];
+  height?: number;
+}) {
   // A point at every settlement in scope. A settlement with no trade carries
   // the previous cumulative value forward (0 before the first trade), so a
   // quiet stretch reads as flat rather than as the line ending early.
@@ -530,7 +538,8 @@ export function CurveChart({ series, timeline }: { series: CurveSeries[]; timeli
     <>
     <ChartContainer
       config={Object.fromEntries(lines.map((s) => [s.key, { label: s.label, color: s.color }]))}
-      className="aspect-auto h-[240px] w-full"
+      className="aspect-auto w-full"
+      style={{ height }}
     >
       <LineChart data={data} margin={{ left: 4, right: 4, top: 8 }}>
         <CartesianGrid vertical={false} />
