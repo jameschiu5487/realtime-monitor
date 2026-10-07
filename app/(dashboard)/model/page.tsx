@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { ModelMonitorContent } from "@/components/model/model-monitor-content";
 import { packRows, type ModelRow } from "@/lib/model-metrics";
-import { LIVE_STRATEGIES, pairLegs, type LiveLeg, type LiveTrade } from "@/lib/live-recon";
+import { LIVE_STRATEGIES, attachSlippage, pairLegs, type LiveFill, type LiveLeg, type LiveTrade } from "@/lib/live-recon";
 
 const WINDOWS = [1, 3, 7, 30] as const;
 const DEFAULT_DAYS = 7;
@@ -157,17 +157,35 @@ async function loadLive(
   const runIds = [...strategyOfRun.keys()];
   if (runIds.length === 0) return { trades: [], windows, error: null };
 
-  const { rows, error } = await readAll<LiveLeg>("live combined_trades", (from, to) =>
-    supabase
-      .from("combined_trades")
-      .select("run_id, symbol, ts, quantity, entry_price, holding_period_hours, price_pnl, funding_fee_realized, commission_fee, exit_type")
-      .in("run_id", runIds)
-      .gte("ts", new Date(sinceMs).toISOString())
-      .order("ts", { ascending: true })
-      .order("combined_trade_id", { ascending: true })
-      .range(from, to)
-  );
-  return { trades: pairLegs(rows, strategyOfRun), windows, error };
+  const since = new Date(sinceMs - 24 * 60 * 60 * 1000).toISOString();
+  const [legs, fills] = await Promise.all([
+    readAll<LiveLeg>("live combined_trades", (from, to) =>
+      supabase
+        .from("combined_trades")
+        .select("run_id, symbol, ts, quantity, entry_price, holding_period_hours, price_pnl, funding_fee_realized, commission_fee, exit_type")
+        .in("run_id", runIds)
+        .gte("ts", new Date(sinceMs).toISOString())
+        .order("ts", { ascending: true })
+        .order("combined_trade_id", { ascending: true })
+        .range(from, to)
+    ),
+    // From a day earlier: a position's opening fills precede its exit row.
+    readAll<LiveFill>("live trades", (from, to) =>
+      supabase
+        .from("trades")
+        .select("run_id, symbol, ts, action, quantity_actual, price, exec_slippage_bps")
+        .in("run_id", runIds)
+        .gte("ts", since)
+        .order("ts", { ascending: true })
+        .order("trade_id", { ascending: true })
+        .range(from, to)
+    ),
+  ]);
+  return {
+    trades: attachSlippage(pairLegs(legs.rows, strategyOfRun), fills.rows),
+    windows,
+    error: legs.error ?? fills.error,
+  };
 }
 
 export default async function ModelPage({

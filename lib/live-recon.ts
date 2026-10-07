@@ -57,8 +57,21 @@ export interface LiveLeg {
   exit_type: string | null;
 }
 
+/** One fill from `trades`, for its measured execution slippage. */
+export interface LiveFill {
+  run_id: string;
+  symbol: string;
+  ts: string;
+  action: string | null;
+  quantity_actual: number | null;
+  price: number | null;
+  /** bp of the fill's price vs the engine's reference quote; positive = paid. Mostly only the zoomex leg has it. */
+  exec_slippage_bps: number | null;
+}
+
 /** Both legs of one live position, in bp of their summed entry notional. */
 export interface LiveTrade {
+  runId: string;
   strategy: string;
   symbol: string;
   entryMs: number;
@@ -71,6 +84,15 @@ export interface LiveTrade {
   feeBp: number;
   netBp: number;
   exitType: string | null;
+  /**
+   * Measured execution slippage of the position's fills (open and close, both
+   * legs), bp of both legs' notional, positive = cost; null when none was
+   * measured. Only fills that carry a value count — mostly the zoomex leg.
+   */
+  execSlipBp: number | null;
+  /** Fills with a measured slippage / fills found. */
+  slipFills: number;
+  fills: number;
 }
 
 /** Legs of one position are written a few ms apart. */
@@ -94,6 +116,7 @@ export function pairLegs(legs: LiveLeg[], strategyOfRun: Map<string, string>): L
       const fundingBp = (1e4 * sum((l) => l.funding_fee_realized)) / gross;
       const feeBp = (1e4 * sum((l) => l.commission_fee)) / gross;
       out.push({
+        runId: group[0].run_id,
         strategy: strategyOfRun.get(group[0].run_id) ?? "Unknown",
         symbol: group[0].symbol,
         entryMs: exitMs - holdH * HOUR_MS,
@@ -105,6 +128,9 @@ export function pairLegs(legs: LiveLeg[], strategyOfRun: Map<string, string>): L
         feeBp,
         netBp: priceBp + fundingBp + feeBp,
         exitType: group.find((l) => l.exit_type)?.exit_type ?? null,
+        execSlipBp: null,
+        slipFills: 0,
+        fills: 0,
       });
     }
     group = [];
@@ -116,6 +142,35 @@ export function pairLegs(legs: LiveLeg[], strategyOfRun: Map<string, string>): L
   }
   flush();
   return out.sort((a, b) => b.exitMs - a.exitMs);
+}
+
+/** A fill belongs to a position when it is this close to the position's entry (Open) or exit (Close). */
+const FILL_WINDOW_MS = 2 * 60_000;
+
+/** Attach each position's measured execution slippage from its fills. */
+export function attachSlippage(trades: LiveTrade[], fills: LiveFill[]): LiveTrade[] {
+  const byKey = new Map<string, LiveFill[]>();
+  for (const f of fills) {
+    const k = `${f.run_id}|${f.symbol}`;
+    const list = byKey.get(k);
+    if (list) list.push(f);
+    else byKey.set(k, [f]);
+  }
+  return trades.map((t) => {
+    const mine = (byKey.get(`${t.runId}|${t.symbol}`) ?? []).filter((f) => {
+      const ms = Date.parse(f.ts);
+      const at = f.action === "Open" ? t.entryMs : f.action === "Close" ? t.exitMs : null;
+      return at != null && Math.abs(ms - at) <= FILL_WINDOW_MS;
+    });
+    let usdBp = 0;
+    let measured = 0;
+    for (const f of mine) {
+      if (f.exec_slippage_bps == null || f.quantity_actual == null || f.price == null) continue;
+      usdBp += Number(f.exec_slippage_bps) * Math.abs(Number(f.quantity_actual) * Number(f.price));
+      measured++;
+    }
+    return { ...t, execSlipBp: measured ? usdBp / t.grossUsd : null, slipFills: measured, fills: mine.length };
+  });
 }
 
 /** Event-level shadow facts; y and settled funding don't depend on the model. */

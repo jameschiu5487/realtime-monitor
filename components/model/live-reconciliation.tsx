@@ -18,7 +18,13 @@ const DETAIL_ROW_CAP = 1000;
 const GAP_BIN_BP = 2;
 const GAP_RANGE_BP = 20;
 const STRATEGY_COLORS: Record<string, string> = { Super_Newtonz: "#0ea5e9", Newtonz: "#f59e0b" };
-type GapKind = "price" | "net";
+type GapKind = "price" | "slip" | "other" | "net";
+const GAP_KINDS: { key: GapKind; label: string }[] = [
+  { key: "price", label: "Price gap" },
+  { key: "slip", label: "Exec slippage" },
+  { key: "other", label: "Price gap ex-slippage" },
+  { key: "net", label: "Net gap" },
+];
 
 const quantile = (xs: number[], q: number) => {
   if (!xs.length) return null;
@@ -104,6 +110,22 @@ export function LiveReconciliation({
           fundingGap: mean(ok.map((t) => t.fundingBp - t.event.settledFunding)),
           feeGap: mean(ok.map((t) => t.feeBp + fee)),
           liveTotal: all.reduce((a, t) => a + t.netBp, 0),
+          // Price gap = −execution slippage + the rest, over the trades whose
+          // slippage was measured (the same subset for all three).
+          ...(() => {
+            const m = ok.filter((t) => t.execSlipBp != null);
+            const pg = mean(m.map((t) => t.priceBp - t.event.y));
+            const slip = mean(m.map((t) => -(t.execSlipBp as number)));
+            return {
+              slipN: m.length,
+              slipPriceGap: pg,
+              slipGap: slip,
+              otherGap: pg != null && slip != null ? pg - slip : null,
+              slipShare: pg != null && slip != null && pg < 0 ? slip / pg : null,
+              slipFills: m.reduce((a, t) => a + t.slipFills, 0),
+              fills: m.reduce((a, t) => a + t.fills, 0),
+            };
+          })(),
         };
       }),
     [matched, fee, shown]
@@ -145,9 +167,14 @@ export function LiveReconciliation({
         name: s.name,
         values: matched
           .filter((t): t is Scored => t.strategy === s.name && !excludedReason(t) && isScored(t))
-          .map((t) =>
-            gapKind === "price" ? t.priceBp - t.event.y : t.netBp - (t.event.y + t.event.settledFunding - fee)
-          ),
+          .filter((t) => (gapKind === "slip" || gapKind === "other" ? t.execSlipBp != null : true))
+          .map((t) => {
+            const priceGap = t.priceBp - t.event.y;
+            if (gapKind === "price") return priceGap;
+            if (gapKind === "slip") return -(t.execSlipBp as number);
+            if (gapKind === "other") return priceGap + (t.execSlipBp as number);
+            return t.netBp - (t.event.y + t.event.settledFunding - fee);
+          }),
       })),
     [matched, gapKind, fee, shown]
   );
@@ -219,7 +246,7 @@ export function LiveReconciliation({
       <Section
         n={++n}
         title="Live vs shadow, per trade"
-        desc={`Each live position (both legs) matched to the shadow event it traded: the settlement hour inside its hold. All bp are of both legs' entry notional added together, the shadow's unit. Gap = live − shadow, with the shadow at the exchange fee only (${fee} bp): the price gap is the measured slippage, which the page's Slippage setting (${settings.slipBp} bp) stands in for.`}
+        desc={`Each live position (both legs) matched to the shadow event it was entered for: the first settlement after entry. All bp are of both legs' entry notional added together, the shadow's unit. Gap = live − shadow, with the shadow at the exchange fee only (${fee} bp), so the price gap is what the page's Slippage setting (${settings.slipBp} bp) stands in for.`}
       >
         <Table
           head={["", "Trades", "Scored", "Live net", "Shadow net", "Gap", "Price gap", "Price gap (median)", "Funding gap", "Fee gap", "Live total"]}
@@ -250,6 +277,27 @@ export function LiveReconciliation({
           reverted, almost always before the settlement) and MaxHoldingTime (held for hours, across several settlements).
           Live total covers every trade, scored or not.
         </p>
+
+        <div className="pt-2 text-xs font-medium">How much of the price gap is execution slippage</div>
+        <Table
+          head={["", "Trades", "Price gap", "= Exec slippage", "+ Other", "Slippage share", "Measured fills"]}
+          rows={summary.map((s) => [
+            <span key="n" className="font-sans font-medium">{s.name}</span>,
+            s.slipN,
+            gapCell(s.slipPriceGap),
+            gapCell(s.slipGap),
+            gapCell(s.otherGap),
+            s.slipShare == null ? "—" : `${(100 * s.slipShare).toFixed(0)}%`,
+            `${s.slipFills} / ${s.fills}`,
+          ])}
+        />
+        <p className="text-xs text-muted-foreground">
+          Exec slippage is the engine&apos;s own measure per fill (trades.exec_slippage_bps: fill price vs its reference quote, positive = paid),
+          summed over the position&apos;s open and close fills and put on the shadow&apos;s unit; shown as a negative gap. Other is what
+          remains of the price gap: reference quotes and timing that differ from the shadow&apos;s prices, and the legs that carry no
+          measurement — mostly only the zoomex leg is measured, so the binance leg&apos;s slippage sits in Other. Per-trade means over
+          scored trades with at least one measured fill.
+        </p>
       </Section>
 
       <Section
@@ -272,12 +320,12 @@ export function LiveReconciliation({
       <Section
         n={++n}
         title="Gap distribution"
-        desc={`Live − shadow per scored trade, in ${GAP_BIN_BP} bp bins (tails beyond ±${GAP_RANGE_BP} bp pooled). Price gap is the slippage alone; net gap adds the funding and fee gaps, with the shadow at the exchange fee only.`}
+        desc={`Live − shadow per scored trade, in ${GAP_BIN_BP} bp bins (tails beyond ±${GAP_RANGE_BP} bp pooled). Price gap = exec slippage (measured, as a negative gap) + price gap ex-slippage; net gap adds the funding and fee gaps, with the shadow at the exchange fee only. The slippage views only count trades with a measured fill.`}
       >
-        <div className="flex gap-1">
-          {(["price", "net"] as const).map((k) => (
-            <Button key={k} size="sm" variant={k === gapKind ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setGapKind(k)}>
-              {k === "price" ? "Price gap" : "Net gap"}
+        <div className="flex flex-wrap gap-1">
+          {GAP_KINDS.map((k) => (
+            <Button key={k.key} size="sm" variant={k.key === gapKind ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setGapKind(k.key)}>
+              {k.label}
             </Button>
           ))}
         </div>
@@ -352,6 +400,7 @@ export function LiveReconciliation({
             "Live price",
             "Shadow y",
             "Price gap",
+            "Exec slip",
             "Live funding",
             "Shadow funding",
             "Funding gap",
@@ -382,6 +431,10 @@ export function LiveReconciliation({
               bp(t.priceBp),
               bp(e?.y),
               gapCell(e?.y != null ? t.priceBp - e.y : null),
+              <span key="x" className={tone(t.execSlipBp == null ? null : -t.execSlipBp)}>
+                {t.execSlipBp == null ? "—" : bp(-t.execSlipBp)}
+                <span className="text-muted-foreground"> ({t.slipFills}/{t.fills})</span>
+              </span>,
               bp(t.fundingBp),
               bp(e?.settledFunding),
               gapCell(e?.settledFunding != null ? t.fundingBp - e.settledFunding : null),
