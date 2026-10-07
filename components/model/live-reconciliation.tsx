@@ -206,9 +206,12 @@ export function LiveReconciliation({
         .sort((a, b) => a.event.ts - b.event.ts);
       const live = new Map<number, number>();
       const shadow = new Map<number, number>();
+      // Execution slippage alone, as a gap (negative = cost); fills not found add 0.
+      const slip = new Map<number, number>();
       for (const t of trades) {
         ts.add(t.event.ts);
         live.set(t.event.ts, (live.get(t.event.ts) ?? 0) + t.netBp * scale(t));
+        slip.set(t.event.ts, (slip.get(t.event.ts) ?? 0) - (t.execSlipBp ?? 0) * scale(t));
         shadow.set(t.event.ts, (shadow.get(t.event.ts) ?? 0) + (t.event.y + t.event.settledFunding - fee) * scale(t));
       }
       const cumulate = (m: Map<number, number>) => {
@@ -217,7 +220,10 @@ export function LiveReconciliation({
       };
       const color = STRATEGY_COLORS[s.name];
       const gap = new Map([...live].map(([t, v]) => [t, v - (shadow.get(t) ?? 0)]));
-      diffs.push({ key: `${s.name}_diff`, label: `${s.name} live − shadow`, color, stats: { n: trades.length, curve: cumulate(gap) }, width: 2 });
+      diffs.push(
+        { key: `${s.name}_diff`, label: `${s.name} live − shadow`, color, stats: { n: trades.length, curve: cumulate(gap) }, width: 2 },
+        { key: `${s.name}_slip`, label: `${s.name} exec slippage`, color, stats: { n: trades.length, curve: cumulate(slip) }, dash: "4 3" }
+      );
       series.push(
         { key: `${s.name}_live`, label: `${s.name} live`, color, stats: { n: trades.length, curve: cumulate(live) }, width: 2 },
         { key: `${s.name}_shadow`, label: `${s.name} shadow`, color, stats: { n: trades.length, curve: cumulate(shadow) }, dash: "4 3" }
@@ -310,7 +316,7 @@ export function LiveReconciliation({
           ))}
         </div>
         <CurveChart series={curves.series} timeline={curves.timeline} />
-        <div className="text-xs font-medium">Cumulative diff (live − shadow)</div>
+        <div className="text-xs font-medium">Cumulative diff (live − shadow), with the execution slippage part dashed</div>
         <CurveChart series={curves.diffs} timeline={curves.timeline} height={160} />
       </Section>
 
