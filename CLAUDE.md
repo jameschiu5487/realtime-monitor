@@ -128,7 +128,9 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   `isLiveSource()`，別比對字串 `'replay'`。這個 view 每次請求都重算整個 join，**別用 OFFSET 分頁**
   （30 天每頁 ~1.3 s）；照 `page.tsx` 按時段切塊並行讀。
   **實際損益 = `y_bp + funding_bp − fee`，`funding_bp` 是 `shadow_event_net` 用已結算 rate 算的；
-  `exp_funding_bp` 只能用於進場決策**（使用者 2026-09-28 定案，`lib/model-eval.ts`）。拿 exp 算損益會把
+  `exp_funding_bp` 只能用於進場決策**（使用者 2026-09-28 定案，`lib/model-eval.ts`）。
+  滑價（預設 1.5 bp）**只扣在損益、不進進場門檻**：門檻是 fee + margin，因為實盤引擎就是這樣進場
+  （使用者 2026-10-07 定案；`EvalConfig.feeBp` 管門檻、`costOf(cfg)` = fee + slip 管損益）。拿 exp 算損益會把
   高 exp 的 event 高估，足以讓總損益翻號。`shadow_event_net` 是
   security_invoker，底層 `md_funding_settled` 沒有讀取 policy 時 funding_bp 會**靜默全為 null**。
   ledger 的 `open_volume_*` 也**不是**研究端的 qv_240，別拿來當流動性門檻。
