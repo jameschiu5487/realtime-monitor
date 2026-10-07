@@ -18,6 +18,8 @@ const DETAIL_ROW_CAP = 1000;
 const GAP_BIN_BP = 2;
 const GAP_RANGE_BP = 20;
 const STRATEGY_COLORS: Record<string, string> = { Super_Newtonz: "#0ea5e9", Newtonz: "#f59e0b" };
+/** Execution-slippage lines are red; two shades so both strategies stay apart in "Both". */
+const SLIP_COLORS: Record<string, string> = { Super_Newtonz: "#ef4444", Newtonz: "#fca5a5" };
 type GapKind = "price" | "slip" | "other" | "net";
 const GAP_KINDS: { key: GapKind; label: string }[] = [
   { key: "price", label: "Price gap" },
@@ -222,7 +224,7 @@ export function LiveReconciliation({
       const gap = new Map([...live].map(([t, v]) => [t, v - (shadow.get(t) ?? 0)]));
       diffs.push(
         { key: `${s.name}_diff`, label: `${s.name} live − shadow`, color, stats: { n: trades.length, curve: cumulate(gap) }, width: 2 },
-        { key: `${s.name}_slip`, label: `${s.name} exec slippage`, color, stats: { n: trades.length, curve: cumulate(slip) }, dash: "4 3" }
+        { key: `${s.name}_slip`, label: `${s.name} exec slippage`, color: SLIP_COLORS[s.name] ?? "#ef4444", stats: { n: trades.length, curve: cumulate(slip) }, dash: "4 3" }
       );
       series.push(
         { key: `${s.name}_live`, label: `${s.name} live`, color, stats: { n: trades.length, curve: cumulate(live) }, width: 2 },
