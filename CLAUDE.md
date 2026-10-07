@@ -102,7 +102,9 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   直接 `.slice()` / `new Date()` 會讓整頁 SSR 崩成 error boundary。
 - **trades**: trade_id (PK), run_id (FK), ts, symbol, exchange, action, side ('buy'|'sell'),
   quantity_nominal, quantity_actual, price, fee_amount_usdt, fee_rate_bps,
-  funding_rate, interval_hours, status
+  funding_rate, interval_hours, status, exit_type, exec_slippage_bps。
+  `exec_slippage_bps` 在 binance 腿多半是 null：那腿用 maker 掛限價成交，**null 代表 0 滑價、不是沒量到**
+  （使用者 2026-10-07）；別把它當缺資料而把滑價只算一半。
 - **positions**（持倉快照）：引擎平倉時**不寫 position = 0 的列，只是停止寫入**，
   所以「多久沒寫就算平倉」要看各 run 的寫入頻率（Newtonz 每 ~2 s、Kepler 每 ~15 min）。
   統一用固定秒數會讓慢的引擎持倉閃一下就消失；`/positions` 依每個 run 自己的寫入間隔判斷。
