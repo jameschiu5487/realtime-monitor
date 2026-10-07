@@ -20,6 +20,8 @@ export function exchangeBadgeClass(exchangeOrAccountId: string): string {
       return "bg-orange-500/15 text-orange-700 dark:text-orange-400";
     case "zoomex":
       return "bg-sky-500/15 text-sky-700 dark:text-sky-400";
+    case "dexless":
+      return "bg-violet-500/15 text-violet-700 dark:text-violet-400";
     default:
       return "bg-muted text-muted-foreground";
   }
@@ -34,17 +36,29 @@ export function exchangeCardClass(exchangeOrAccountId: string): string {
       return "border-orange-500/40 bg-orange-500/5";
     case "zoomex":
       return "border-sky-500/40 bg-sky-500/5";
+    case "dexless":
+      return "border-violet-500/40 bg-violet-500/5";
     default:
       return "";
   }
 }
 
+/** Display name for an exchange stored lower-cased in fund_account_equity.exchange. */
+export function formatExchangeName(exchange: string): string {
+  // DEXLESS is an acronym-styled brand; title-casing would read "Dexless".
+  if (exchange.toLowerCase() === "dexless") return "DEXLESS";
+  return exchange.length > 0
+    ? `${exchange[0].toUpperCase()}${exchange.slice(1)}`
+    : exchange;
+}
+
 /**
  * Map API key env names to fund_account_equity.account_id.
- * BINANCE_API_KEY_4 → binance_4; ZOOMEX_API_KEY → zoomex_1.
+ * BINANCE_API_KEY_4 → binance_4; ZOOMEX_API_KEY → zoomex_1;
+ * DEXLESS_ORDERLY_KEY → dexless_1 (Orderly-based venues name their key that way).
  */
 export function envNameToAccountId(envName: string): string | null {
-  const match = envName.match(/^([A-Z]+)_API_KEY(?:_(\d+))?$/);
+  const match = envName.match(/^([A-Z]+)_(?:API|ORDERLY)_KEY(?:_(\d+))?$/);
   if (!match) return null;
   const exchange = match[1].toLowerCase();
   const index = match[2] ?? "1";

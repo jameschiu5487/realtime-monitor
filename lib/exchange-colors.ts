@@ -18,6 +18,14 @@ export const EXCHANGE_COLORS: Record<Exchange, string> = {
   BitMart: "#ec4899",
 };
 
+/**
+ * Venues the strategies trade on that aren't part of the opportunity Exchange
+ * type (lower-cased key → display name and colour).
+ */
+const EXTRA_VENUES = new Map<string, { label: string; color: string }>([
+  ["dexless", { label: "DEXLESS", color: "#8b5cf6" }],
+]);
+
 /** Used when a venue has no assigned colour, so an unknown name still plots. */
 const FALLBACK_COLORS = ["#64748b", "#0ea5e9", "#d946ef", "#14b8a6", "#f43f5e"];
 
@@ -30,7 +38,7 @@ const BY_LOWER = new Map(
  * derived from the name, so the same venue keeps the same one between renders.
  */
 export function exchangeColor(exchange: string): string {
-  const known = BY_LOWER.get(exchange.toLowerCase());
+  const known = BY_LOWER.get(exchange.toLowerCase()) ?? EXTRA_VENUES.get(exchange.toLowerCase())?.color;
   if (known) return known;
   let hash = 0;
   for (let i = 0; i < exchange.length; i++) hash = (hash * 31 + exchange.charCodeAt(i)) | 0;
@@ -39,6 +47,8 @@ export function exchangeColor(exchange: string): string {
 
 /** Title-cases a stored venue name for display: "zoomex" -> "Zoomex". */
 export function exchangeLabel(exchange: string): string {
+  const extra = EXTRA_VENUES.get(exchange.toLowerCase());
+  if (extra) return extra.label;
   for (const name of Object.keys(EXCHANGE_COLORS)) {
     if (name.toLowerCase() === exchange.toLowerCase()) return name;
   }

@@ -15,6 +15,7 @@ import { StrategyRunsTable } from "@/components/strategies/strategy-runs-table";
 import { SlippageAnalysis } from "@/components/strategies/slippage-analysis";
 import { ParentStrategyView } from "@/components/strategies/parent-strategy-view";
 import { fetchChildStrategies, fetchParentRef } from "@/lib/strategy-hierarchy";
+import { canViewStrategyPage } from "@/lib/strategy-visibility";
 import {
   SimulatedEquityBadge,
   SimulatedEquityNote,
@@ -93,6 +94,12 @@ export default async function StrategyDetailPage({
         includePaper={paper === "1"}
       />
     );
+  }
+
+  // A child of a parent needs the viewer's own access, even by direct URL
+  // (lib/strategy-visibility.ts). Ordinary strategies are unchanged.
+  if (!(await canViewStrategyPage(supabase, strategy))) {
+    return notFound();
   }
 
   // Child strategy: resolve the parent for the breadcrumb and the

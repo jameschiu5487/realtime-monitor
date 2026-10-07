@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   Area,
@@ -26,7 +26,10 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import type { FundAccountEquity } from "@/lib/types/database";
 import { downsample } from "@/lib/utils/equity";
-import { exchangeCardClass } from "@/lib/utils/fund-account-strategy";
+import {
+  exchangeCardClass,
+  formatExchangeName,
+} from "@/lib/utils/fund-account-strategy";
 import { cn } from "@/lib/utils";
 import {
   buildFundEquityCurve,
@@ -58,12 +61,6 @@ function formatMoney(value: number): string {
   });
 }
 
-function formatExchangeName(exchange: string): string {
-  return exchange.length > 0
-    ? `${exchange[0].toUpperCase()}${exchange.slice(1)}`
-    : exchange;
-}
-
 function pruneOldRows(
   rows: FundAccountEquity[],
   nowMs: number
@@ -77,6 +74,7 @@ export function FundEquityDashboard({
   fetchError,
   shareRatio = 1,
   accountStrategies = {},
+  hiddenAccountIds,
   onSummaryChange,
 }: {
   initialData: FundAccountEquity[];
@@ -85,15 +83,28 @@ export function FundEquityDashboard({
   shareRatio?: number;
   /** account_id → strategy names for running realtime / test-realtime runs. */
   accountStrategies?: Record<string, string[]>;
+  /**
+   * Accounts the viewer may not see (only linked to parents they can't access).
+   * initialData is already filtered server-side; this drops live INSERTs for them.
+   */
+  hiddenAccountIds?: string[];
   onSummaryChange?: (summary: { total: number; accountCount: number }) => void;
 }) {
   const [rows, setRows] = useState(initialData);
+  // Read through a ref so the realtime channel isn't torn down on every render.
+  const hiddenAccountsRef = useRef<ReadonlySet<string>>(
+    new Set(hiddenAccountIds ?? [])
+  );
+  useEffect(() => {
+    hiddenAccountsRef.current = new Set(hiddenAccountIds ?? []);
+  }, [hiddenAccountIds]);
   const [range, setRange] = useState<FundEquityRange>("24h");
   const exchangesWithStrategies = useMemo(() => {
     const set = new Set<string>();
     for (const [accountId, names] of Object.entries(accountStrategies)) {
       if (names.length === 0) continue;
-      const exchange = accountId.split("_")[0];
+      // Lower-cased so a venue stored in another casing still auto-expands.
+      const exchange = accountId.split("_")[0]?.toLowerCase();
       if (exchange) set.add(exchange);
     }
     return set;
@@ -134,6 +145,7 @@ export function FundEquityDashboard({
         },
         (payload) => {
           const row = payload.new as FundAccountEquity;
+          if (hiddenAccountsRef.current.has(row.account_id)) return;
           setRows((prev) =>
             pruneOldRows(upsertFundEquityRow(prev, row), Date.now())
           );
@@ -267,7 +279,8 @@ export function FundEquityDashboard({
 
       <div className="grid gap-4 sm:grid-cols-3">
         {exchanges.map(({ exchange, total: exchangeTotal, accounts }) => {
-          const expanded = expandedExchanges.has(exchange);
+          const exchangeKey = exchange.toLowerCase();
+          const expanded = expandedExchanges.has(exchangeKey);
 
           return (
             <Card
@@ -278,7 +291,7 @@ export function FundEquityDashboard({
                 type="button"
                 className="w-full rounded-xl text-left outline-none transition-colors hover:bg-background/40 focus-visible:ring-2 focus-visible:ring-ring"
                 aria-expanded={expanded}
-                onClick={() => toggleExchange(exchange)}
+                onClick={() => toggleExchange(exchangeKey)}
               >
                 <CardHeader className="grid-cols-[1fr_auto] items-center gap-3 py-5">
                   <div className="space-y-1.5">

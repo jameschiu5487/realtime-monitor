@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { AllPositionsContent } from "@/components/positions/all-positions-content";
+import { fetchHiddenFamilyIds } from "@/lib/strategy-visibility";
 import type { Strategy, StrategyRun, Position } from "@/lib/types/database";
 
 // Disable caching to ensure fresh data on every page load
@@ -25,17 +26,23 @@ export default async function PositionsPage() {
 
   const supabase = await createClient();
 
-  // Fetch all running strategy runs with their strategy info
-  const { data: runningRuns, error: runsError } = await supabase
-    .from("strategy_runs")
-    .select("*, strategies(*)")
-    .eq("status", "running");
+  // Fetch all running strategy runs with their strategy info, plus the parent
+  // families this user may not see (lib/strategy-visibility.ts).
+  const [{ data: runningRuns, error: runsError }, hiddenStrategyIds] = await Promise.all([
+    supabase
+      .from("strategy_runs")
+      .select("*, strategies(*)")
+      .eq("status", "running"),
+    fetchHiddenFamilyIds(supabase),
+  ]);
 
   if (runsError) {
     console.error("Error fetching running runs:", runsError);
   }
 
-  const runs = (runningRuns ?? []) as (StrategyRun & { strategies: Strategy })[];
+  const runs = ((runningRuns ?? []) as (StrategyRun & { strategies: Strategy })[]).filter(
+    (r) => !hiddenStrategyIds.has(r.strategy_id)
+  );
   const runIds = runs.map((r) => r.run_id);
 
   // Create a map from run_id to strategy info

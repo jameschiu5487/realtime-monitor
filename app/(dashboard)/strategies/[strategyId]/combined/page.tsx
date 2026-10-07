@@ -8,6 +8,7 @@ import { CombinedStrategyContent } from "@/components/combined-strategy-content"
 import { CapitalSelector } from "@/components/strategies/capital-selector";
 import { selectCapitalGroup } from "@/lib/capital-groups";
 import { fetchParentRef } from "@/lib/strategy-hierarchy";
+import { canViewStrategyPage } from "@/lib/strategy-visibility";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Strategy,
@@ -129,6 +130,12 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
     .single();
 
   if (strategyError || !strategy) {
+    return notFound();
+  }
+
+  // A child of a parent needs the viewer's own access, even by direct URL
+  // (lib/strategy-visibility.ts). Ordinary strategies are unchanged.
+  if (!(await canViewStrategyPage(supabase, strategy as Strategy))) {
     return notFound();
   }
 

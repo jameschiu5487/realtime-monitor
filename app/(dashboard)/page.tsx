@@ -15,6 +15,7 @@ import type { Strategy, StrategyRun } from "@/lib/types/database";
 import { taipeiDayStartMs } from "@/lib/time";
 import { isParentBookMode } from "@/lib/parent-strategy";
 import { accountIdsFromRunParams } from "@/lib/utils/fund-account-strategy";
+import { hiddenAccountIds, hiddenFamilyIds } from "@/lib/strategy-visibility";
 import type { ParentStrategyCard } from "@/components/overview/overview-content";
 
 // NOTE: no `export const revalidate` here — reading cookies for auth makes this
@@ -29,16 +30,41 @@ function isOverviewLiveMode(mode: string): boolean {
 export default async function DashboardPage() {
   const supabase = await createClient();
 
-  const [{ strategies: allStrategiesRaw, runs: allRunsRaw }, accessResult] =
-    await Promise.all([
-      getStrategiesAndRuns(supabase),
-      // Per-user, so deliberately outside the shared cache.
-      supabase
-        .from("user_strategy_access")
-        .select("strategy_id, share_ratio") as unknown as Promise<{
-        data: { strategy_id: string; share_ratio: number }[] | null;
-      }>,
-    ]);
+  const [
+    { strategies: sharedStrategies, runs: sharedRuns },
+    accessResult,
+    {
+      data: { user },
+    },
+  ] = await Promise.all([
+    getStrategiesAndRuns(supabase),
+    // Per-user, so deliberately outside the shared cache.
+    supabase
+      .from("user_strategy_access")
+      .select("user_id, strategy_id, share_ratio") as unknown as Promise<{
+      data: { user_id: string; strategy_id: string; share_ratio: number }[] | null;
+    }>,
+    supabase.auth.getUser(),
+  ]);
+
+  // Per-user visibility, applied to the shared cached rows here (request-scoped)
+  // — see lib/strategy-visibility.ts. A parent family (e.g. Kepler DX) the user
+  // has no access to, neither on the parent nor on any child, is removed with
+  // all its children and runs; fund accounts linked only to such children are
+  // removed from the fund dashboard. Everything else is untouched.
+  const accessibleIds = new Set(
+    (accessResult.data ?? [])
+      .filter((row) => row.user_id === user?.id)
+      .map((row) => row.strategy_id)
+  );
+  const hiddenStrategyIds = hiddenFamilyIds(sharedStrategies, accessibleIds);
+  const hiddenAccounts = hiddenAccountIds(sharedRuns, hiddenStrategyIds);
+  const allStrategiesRaw = sharedStrategies.filter(
+    (s) => !hiddenStrategyIds.has(s.strategy_id)
+  );
+  const allRunsRaw = sharedRuns.filter(
+    (r) => !hiddenStrategyIds.has(r.strategy_id)
+  );
 
   // Filter to crypto-futures strategies only for the overview
   const cryptoFuturesStrategyIds = new Set(
@@ -183,7 +209,17 @@ export default async function DashboardPage() {
   // Deliberately not awaited — handed to the client and streamed in behind a
   // Suspense boundary so the heaviest query stops gating the whole page.
   // 30d window, but only the last 24h is kept at full per-minute resolution.
-  const fundEquityPromise = getFundAccountEquity(supabase, since30d, since24h);
+  // The cached payload is shared by every user; hidden accounts are dropped
+  // after it, per request, so totals, exchange cards and the chart all agree.
+  const fundEquityPromise = getFundAccountEquity(supabase, since30d, since24h).then(
+    (result) =>
+      hiddenAccounts.size === 0
+        ? result
+        : {
+            ...result,
+            data: result.data.filter((row) => !hiddenAccounts.has(row.account_id)),
+          }
+  );
 
   const [
     { latest: latestEquities, dayAgo: equities24hAgo },
@@ -226,6 +262,7 @@ export default async function DashboardPage() {
       strategyRunIds={strategyRunIds}
       fundEquityPromise={fundEquityPromise}
       parentFills={parentFills}
+      hiddenAccountIds={[...hiddenAccounts].sort()}
     />
   );
 }

@@ -126,6 +126,11 @@ interface OverviewContentProps {
     data: FundAccountEquity[];
     error: string | null;
   }>;
+  /**
+   * Accounts linked only to parents this viewer can't see. Already removed
+   * from fundEquityPromise; passed down so live inserts for them are dropped too.
+   */
+  hiddenAccountIds?: string[];
 }
 
 type FundSummary = { total: number; accountCount: number };
@@ -135,12 +140,14 @@ function FundEquitySection({
   promise,
   shareRatio,
   accountStrategies,
+  hiddenAccountIds,
   onSummaryChange,
   onRowsChange,
 }: {
   promise: Promise<{ data: FundAccountEquity[]; error: string | null }>;
   shareRatio: number;
   accountStrategies: ReturnType<typeof buildAccountStrategyMap>;
+  hiddenAccountIds?: string[];
   onSummaryChange: (summary: FundSummary) => void;
   /** Hands the resolved rows up, so the equity curve can plot parents' accounts without refetching. */
   onRowsChange?: (rows: FundAccountEquity[]) => void;
@@ -155,6 +162,7 @@ function FundEquitySection({
       fetchError={error}
       shareRatio={shareRatio}
       accountStrategies={accountStrategies}
+      hiddenAccountIds={hiddenAccountIds}
       onSummaryChange={onSummaryChange}
     />
   );
@@ -238,6 +246,7 @@ export function OverviewContent({
   strategyRunIds,
   fundEquityPromise,
   parentFills,
+  hiddenAccountIds,
 }: OverviewContentProps) {
   const selectableIds = useMemo(
     () => [
@@ -555,6 +564,7 @@ export function OverviewContent({
           promise={fundEquityPromise}
           shareRatio={fundShareRatio}
           accountStrategies={accountStrategies}
+          hiddenAccountIds={hiddenAccountIds}
           onSummaryChange={handleFundSummaryChange}
           onRowsChange={setFundRows}
         />

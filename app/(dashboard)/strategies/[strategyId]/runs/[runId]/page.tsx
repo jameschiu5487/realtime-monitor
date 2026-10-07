@@ -6,6 +6,7 @@ import { RunDetailsContent } from "@/components/run-details-content";
 import { PolymarketRunContent } from "@/components/polymarket/polymarket-run-content";
 import { GriffinRunContent } from "@/components/griffin/griffin-run-content";
 import { fetchParentRef } from "@/lib/strategy-hierarchy";
+import { canViewStrategyPage } from "@/lib/strategy-visibility";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Strategy,
@@ -135,6 +136,12 @@ export default async function RunDetailsPage({ params, searchParams }: RunDetail
   const run = runResult.data as RunWithStrategy | null;
 
   if (runResult.error || !run) {
+    return notFound();
+  }
+
+  // A child of a parent needs the viewer's own access, even by direct URL
+  // (lib/strategy-visibility.ts). Ordinary strategies are unchanged.
+  if (run.strategies && !(await canViewStrategyPage(supabase, run.strategies))) {
     return notFound();
   }
 
