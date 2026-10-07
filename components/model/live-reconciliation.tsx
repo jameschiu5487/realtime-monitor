@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_BASIS_CAP, modelTrades, net, prepare, eventKey, type EvalConfig } from "@/lib/model-eval";
 import { LIVE_STRATEGIES, excludedReason, matchTrades, type LiveTrade, type MatchedTrade, type ShadowEvent } from "@/lib/live-recon";
 import type { ModelRow, ScoredRow } from "@/lib/model-metrics";
-import { Section, Table, bp, fmtTs, tone, type EvalSettings } from "./model-evaluation";
+import { CurveChart, Section, Table, bp, fmtTs, tone, type CurveSeries, type EvalSettings } from "./model-evaluation";
 
 /** Live strategy whose entry rule is the page's model rule; Newtonz + model's rule isn't on the page. */
 const RULE_STRATEGY = "Super_Newtonz";
@@ -161,6 +161,38 @@ export function LiveReconciliation({
     });
   }, [gaps]);
 
+  // Cumulative live vs shadow over the same scored trades, settlement order.
+  // Shadow at the exchange fee only, as in the tables, so the gap between a
+  // strategy's two lines is the cumulative slippage + funding + fee gap.
+  const [curveUnit, setCurveUnit] = useState<"bp" | "usd">("bp");
+  const curves = useMemo(() => {
+    const scale = (t: Scored) => (curveUnit === "usd" ? t.grossUsd / 1e4 : 1);
+    const series: CurveSeries[] = [];
+    const ts = new Set<number>();
+    for (const s of LIVE_STRATEGIES) {
+      const trades = matched
+        .filter((t): t is Scored => t.strategy === s.name && !excludedReason(t) && isScored(t))
+        .sort((a, b) => a.event.ts - b.event.ts);
+      const live = new Map<number, number>();
+      const shadow = new Map<number, number>();
+      for (const t of trades) {
+        ts.add(t.event.ts);
+        live.set(t.event.ts, (live.get(t.event.ts) ?? 0) + t.netBp * scale(t));
+        shadow.set(t.event.ts, (shadow.get(t.event.ts) ?? 0) + (t.event.y + t.event.settledFunding - fee) * scale(t));
+      }
+      const cumulate = (m: Map<number, number>) => {
+        let c = 0;
+        return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([t, v]) => ({ ts: t, cum: (c += v) }));
+      };
+      const color = STRATEGY_COLORS[s.name];
+      series.push(
+        { key: `${s.name}_live`, label: `${s.name} live`, color, stats: { n: trades.length, curve: cumulate(live) }, width: 2 },
+        { key: `${s.name}_shadow`, label: `${s.name} shadow`, color, stats: { n: trades.length, curve: cumulate(shadow) }, dash: "4 3" }
+      );
+    }
+    return { series, timeline: [...ts].sort((a, b) => a - b) };
+  }, [matched, fee, curveUnit]);
+
   const detail = useMemo(() => matched.filter((t) => strategy === "all" || t.strategy === strategy), [matched, strategy]);
 
   const gapCell = (v: number | null): ReactNode => <span className={tone(v)}>{bp(v)}</span>;
@@ -204,6 +236,21 @@ export function LiveReconciliation({
 
       <Section
         n={2}
+        title="Equity curve: live vs shadow"
+        desc={`Cumulative net of the scored trades above, per strategy: live solid, shadow dashed (at the exchange fee ${fee} bp, no slippage). The space between a strategy's two lines is its cumulative gap. bp adds each trade's bp; USD weights by its notional.`}
+      >
+        <div className="flex gap-1">
+          {(["bp", "usd"] as const).map((u) => (
+            <Button key={u} size="sm" variant={u === curveUnit ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setCurveUnit(u)}>
+              {u === "bp" ? "bp" : "USD"}
+            </Button>
+          ))}
+        </div>
+        <CurveChart series={curves.series} timeline={curves.timeline} />
+      </Section>
+
+      <Section
+        n={3}
         title="Gap distribution"
         desc={`Live − shadow per scored trade, in ${GAP_BIN_BP} bp bins (tails beyond ±${GAP_RANGE_BP} bp pooled). Price gap is the slippage alone; net gap adds the funding and fee gaps, with the shadow at the exchange fee only.`}
       >
@@ -244,7 +291,7 @@ export function LiveReconciliation({
       </Section>
 
       <Section
-        n={3}
+        n={4}
         title={`${RULE_STRATEGY} vs the page's model rule`}
         desc={`In the hours ${RULE_STRATEGY} was running: the events the page's model rule (fee ${fee} + margin ${settings.marginBp}) trades, against the ones it actually traded. Newtonz + model runs a rule the page doesn't model, so it isn't checked.`}
       >
@@ -271,7 +318,7 @@ export function LiveReconciliation({
         </p>
       </Section>
 
-      <Section n={4} title="Trades" desc="Every live position in the window, newest first.">
+      <Section n={5} title="Trades" desc="Every live position in the window, newest first.">
         <div className="flex flex-wrap gap-1">
           {["all", ...LIVE_STRATEGIES.map((s) => s.name)].map((s) => (
             <Button key={s} size="sm" variant={s === strategy ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setStrategy(s)}>

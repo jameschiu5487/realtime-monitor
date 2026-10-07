@@ -455,7 +455,7 @@ function statRow(label: string, s: CurveStats): ReactNode[] {
   ];
 }
 
-interface CurveSeries {
+export interface CurveSeries {
   key: string;
   label: string;
   color: string;
@@ -479,7 +479,7 @@ function liveSettlements(rows: { ts: number; source: string | null }[]): Set<num
 
 const LIVE_DASH = "5 4";
 
-function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: number[] }) {
+export function CurveChart({ series, timeline }: { series: CurveSeries[]; timeline: number[] }) {
   // A point at every settlement in scope. A settlement with no trade carries
   // the previous cumulative value forward (0 before the first trade), so a
   // quiet stretch reads as flat rather than as the line ending early.
