@@ -370,7 +370,7 @@ export function DistributionChart({ rows }: { rows: ScoredRow[] }) {
         {bins.length === 0 ? (
           <Empty />
         ) : (
-          <ChartContainer config={histConfig} className="aspect-auto h-[240px] w-full">
+          <ChartContainer config={histConfig} className="aspect-auto h-[380px] w-full">
             <AreaChart data={bins} margin={{ left: 4, right: 4, top: 8 }}>
               <CartesianGrid vertical={false} />
               <XAxis
