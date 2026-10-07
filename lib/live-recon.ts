@@ -128,27 +128,38 @@ export interface ShadowEvent {
 }
 
 export interface MatchedTrade extends LiveTrade {
-  /** Settlement the trade was matched to; null when it crossed none with a shadow event. */
+  /** Settlement the trade was entered for; null when no shadow event follows its entry. */
   settleTs: number | null;
-  /** Whole-hour settlements inside the hold that have a shadow event. */
+  /**
+   * Shadow-event settlements actually held through: 0 = exited before the one
+   * it was entered for (e.g. FundingReversal), 1 = the normal case, more = a
+   * long hold not comparable to one event.
+   */
   settlementsCrossed: number;
   event: ShadowEvent | null;
 }
 
+/** How far after entry to look for the settlement a trade was entered for. */
+const LOOKAHEAD_MS = 8 * HOUR_MS;
+
 /**
- * The settlement a position traded is a whole hour inside (entry, exit]. A
- * position can close before any (stopped out) or straddle several (a 4 h
- * hold); the latest hour with a shadow event for the symbol is the one taken.
+ * A trade is matched to the settlement it was entered for: the first whole
+ * hour after entry with a shadow event for the symbol. Not the one inside the
+ * hold — a FundingReversal exit leaves before it, and those trades are the
+ * model's call too (NMRUSDT 2026-10-07 lost 51–58 bp that way, and the shadow
+ * event, held through, lost about the same).
  */
 export function matchTrades(trades: LiveTrade[], events: Map<string, ShadowEvent>): MatchedTrade[] {
   return trades.map((t) => {
     let event: ShadowEvent | null = null;
     let crossed = 0;
-    for (let h = Math.floor(t.exitMs / HOUR_MS) * HOUR_MS; h > t.entryMs; h -= HOUR_MS) {
+    const first = Math.floor(t.entryMs / HOUR_MS) * HOUR_MS + HOUR_MS;
+    for (let h = first; h <= t.entryMs + LOOKAHEAD_MS; h += HOUR_MS) {
       const e = events.get(`${h}|${t.symbol}`);
       if (!e) continue;
-      crossed++;
       event ??= e;
+      if (h <= t.exitMs) crossed++;
+      else break;
     }
     return { ...t, settleTs: event?.ts ?? null, settlementsCrossed: crossed, event };
   });

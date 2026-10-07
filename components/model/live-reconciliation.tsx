@@ -36,14 +36,15 @@ const median = (xs: number[]) => {
 
 /**
  * A trade comparable to one shadow event: its outcome is in (y closed, funding
- * settled) and it held through exactly one settlement. A hold across several
- * collects several fundings and several hours of price drift against a
+ * settled) and it held through at most one settlement. An early exit (0, e.g.
+ * FundingReversal) counts — it is the live result of the model's entry. A hold
+ * across several collects several fundings and hours of price drift against a
  * single-event shadow — one 4 h SANDUSDT hold alone moved the funding gap by
  * −3.6 bp per trade (2026-10-05) — so those are counted, not averaged.
  */
 type Scored = MatchedTrade & { event: ShadowEvent & { y: number; settledFunding: number } };
 const isScored = (t: MatchedTrade): t is Scored =>
-  t.settlementsCrossed === 1 && t.event?.y != null && t.event.settledFunding != null;
+  t.settlementsCrossed <= 1 && t.event?.y != null && t.event.settledFunding != null;
 
 export function LiveReconciliation({
   liveTrades,
@@ -89,8 +90,9 @@ export function LiveReconciliation({
           ...s,
           trades: all.length,
           scored: ok.length,
-          noSettlement: all.filter((t) => t.settlementsCrossed === 0).length,
-          pending: all.filter((t) => t.settlementsCrossed === 1 && !isScored(t)).length,
+          noEvent: all.filter((t) => t.event == null).length,
+          earlyExit: all.filter((t) => t.event && t.settlementsCrossed === 0).length,
+          pending: all.filter((t) => t.event && t.settlementsCrossed <= 1 && !isScored(t)).length,
           multi: all.filter((t) => t.settlementsCrossed > 1).length,
           liveNet: mean(ok.map((t) => t.netBp)),
           shadowNet: mean(ok.map((t) => t.event.y + t.event.settledFunding - fee)),
@@ -225,8 +227,9 @@ export function LiveReconciliation({
           ])}
         />
         <p className="text-xs text-muted-foreground">
-          Per-trade means over scored trades: one settlement held, shadow y closed and funding settled.{" "}
-          {summary.map((s) => `${s.name}: ${s.noSettlement} closed before any settlement, ${s.pending} still pending, ${s.multi} held across several (not comparable)`).join(" · ")}.
+          Per-trade means over scored trades: matched to the settlement they were entered for, shadow y closed and funding settled.
+          Early exits (left before that settlement, e.g. FundingReversal) are scored against the shadow holding through it.{" "}
+          {summary.map((s) => `${s.name}: ${s.earlyExit} early exits, ${s.pending} still pending, ${s.multi} held across several (not comparable), ${s.noEvent} with no shadow event`).join(" · ")}.
           Left out everywhere but the trade list: trades from before a strategy ran the model (Newtonz before{" "}
           {fmtTs(LIVE_STRATEGIES.find((s) => s.name === "Newtonz")?.modelSince ?? 0)}) and basis exits — ZReverted (z-score
           reverted, almost always before the settlement) and MaxHoldingTime (held for hours, across several settlements).
@@ -349,12 +352,13 @@ export function LiveReconciliation({
             const shadowNet = e?.y != null && e.settledFunding != null ? e.y + e.settledFunding - fee : null;
             return [
               t.settleTs != null ? (
-                <span key="t" className={cn(t.settlementsCrossed > 1 && "text-amber-500")}>
+                <span key="t" className={cn(t.settlementsCrossed !== 1 && "text-amber-500")}>
                   {fmtTs(t.settleTs)}
                   {t.settlementsCrossed > 1 && ` · ${t.settlementsCrossed} settlements`}
+                  {t.settlementsCrossed === 0 && ` · exit ${fmtTs(t.exitMs)}, early`}
                 </span>
               ) : (
-                <span key="t" className="text-amber-500">exit {fmtTs(t.exitMs)} · no settlement</span>
+                <span key="t" className="text-amber-500">exit {fmtTs(t.exitMs)} · no shadow event</span>
               ),
               <span key="s" className="font-sans">
                 {t.strategy}
