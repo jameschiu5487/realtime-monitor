@@ -328,6 +328,11 @@ export function DistributionChart({ rows }: { rows: ScoredRow[] }) {
   const [binCount, setBinCount] = useState<number>(80);
   const bins: HistogramBin[] = useMemo(() => histograms(rows, binCount), [rows, binCount]);
   const width = bins.length > 1 ? bins[1].x - bins[0].x : null;
+  const means = useMemo(() => {
+    if (rows.length === 0) return null;
+    const avg = (f: (r: ScoredRow) => number) => rows.reduce((a, r) => a + f(r), 0) / rows.length;
+    return { pred: avg((r) => r.ypred), truth: avg((r) => r.yTrue) };
+  }, [rows]);
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -347,6 +352,21 @@ export function DistributionChart({ rows }: { rows: ScoredRow[] }) {
           ))}
           {width != null && <span className="ml-1">≈ {width.toFixed(2)} bp each</span>}
         </div>
+        {means && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-0.5" style={{ backgroundColor: COLORS.pred }} />
+              Mean ypred <span className="font-mono">{means.pred.toFixed(2)} bp</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-0.5" style={{ backgroundColor: COLORS.truth }} />
+              Mean y_true <span className="font-mono">{means.truth.toFixed(2)} bp</span>
+            </span>
+            <span className="text-muted-foreground">
+              (bias {(means.truth - means.pred >= 0 ? "+" : "") + (means.truth - means.pred).toFixed(2)} bp)
+            </span>
+          </div>
+        )}
         {bins.length === 0 ? (
           <Empty />
         ) : (
@@ -365,6 +385,8 @@ export function DistributionChart({ rows }: { rows: ScoredRow[] }) {
               />
               <YAxis tickLine={false} axisLine={false} width={32} className="text-xs" />
               <ReferenceLine x={0} stroke="currentColor" strokeDasharray="3 3" opacity={0.4} />
+              {means && <ReferenceLine x={means.pred} stroke={COLORS.pred} strokeWidth={2} ifOverflow="extendDomain" />}
+              {means && <ReferenceLine x={means.truth} stroke={COLORS.truth} strokeWidth={2} ifOverflow="extendDomain" />}
               <ChartTooltip
                 content={
                   <ChartTooltipContent
