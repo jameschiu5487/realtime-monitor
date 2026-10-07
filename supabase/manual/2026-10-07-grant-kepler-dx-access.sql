@@ -19,3 +19,15 @@ values
   ('3da56e12-f045-4a06-bd8f-f835a87d8a15', '4dcad933-d380-5d08-affc-efcfeef6d0ba', 1.0),
   ('3da56e12-f045-4a06-bd8f-f835a87d8a15', '0ceffe0a-faef-5ff9-9f1c-2ff5472a736f', 1.0)
 on conflict do nothing;
+
+-- 2026-10-07 10:47 UTC, after the restart of all six DX books (ptx / wax / whx rows now exist).
+-- Same owner only; verified: 7 grants on the family, all for 3da56e12.
+--   Kepler DX · Premium Thrust  d82972ec-7669-570f-b1d1-2482950f5f37  (book ptx)
+--   Kepler DX · Weekend FV      8d3c448c-d235-54e6-b2f0-c7c781bc9491  (book wax)
+--   Kepler DX · Weekend Fade    ba239660-2048-5185-bfcd-0a706a77e80a  (book whx)
+insert into public.user_strategy_access (user_id, strategy_id, share_ratio)
+values
+  ('3da56e12-f045-4a06-bd8f-f835a87d8a15', 'd82972ec-7669-570f-b1d1-2482950f5f37', 1.0),
+  ('3da56e12-f045-4a06-bd8f-f835a87d8a15', '8d3c448c-d235-54e6-b2f0-c7c781bc9491', 1.0),
+  ('3da56e12-f045-4a06-bd8f-f835a87d8a15', 'ba239660-2048-5185-bfcd-0a706a77e80a', 1.0)
+on conflict do nothing;
