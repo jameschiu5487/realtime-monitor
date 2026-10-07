@@ -1,6 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendPushNotification } from "@/lib/web-push";
+import { restrictToChildAccess } from "@/lib/notification-access";
 
 /** Time allowed for the opposite hedge leg to land before deciding this is a single-leg close. */
 const HEDGE_PAIR_WAIT_MS = 10_000;
@@ -134,7 +135,12 @@ async function processCombinedTrade(payload: CombinedTradePayload) {
 
   if (!filteredUsers.length) return { sent: 0, reason: "strategy filtered out" };
 
-  const userIds = filteredUsers.map((u: { user_id: string }) => u.user_id);
+  const userIds = await restrictToChildAccess(
+    supabase,
+    strategyId,
+    filteredUsers.map((u: { user_id: string }) => u.user_id)
+  );
+  if (!userIds.length) return { sent: 0, reason: "no access" };
 
   // Look up share_ratio per user
   const ratioMap = new Map<string, number>();

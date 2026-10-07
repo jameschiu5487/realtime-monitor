@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendPushNotification, type PushPayload } from "@/lib/web-push";
+import { restrictToChildAccess } from "@/lib/notification-access";
 
 function getAdminClient() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -85,7 +86,11 @@ export async function POST(request: Request) {
     });
   }
 
-  const enabledIds = filteredUsers.map((u: { user_id: string }) => u.user_id);
+  const enabledIds = await restrictToChildAccess(
+    supabase,
+    strategy_id,
+    filteredUsers.map((u: { user_id: string }) => u.user_id)
+  );
   if (!enabledIds.length) return NextResponse.json({ sent: 0 });
 
   // Look up share_ratio per user for trade notifications
