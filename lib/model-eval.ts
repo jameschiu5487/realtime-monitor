@@ -24,16 +24,19 @@ export const DEFAULT_MARGIN_BP = 3;
 export const DEFAULT_BASIS_CAP = 200;
 /**
  * Per-trade slippage vs the shadow's prices, bp of both legs' notional. The
- * user's live fills (2026-10-05) came in 1.1–1.5 bp worse per trade; it is a
- * cost like the fee, so it sits in the threshold as well as in the P&L.
+ * user's live fills (2026-10-05) came in 1.1–1.5 bp worse per trade. It is
+ * charged in the P&L only: the live engines enter on fee + margin, so the
+ * threshold stays there (user, 2026-10-07).
  */
 export const DEFAULT_SLIPPAGE_BP = 1.5;
 
 export type Period = "day" | "week" | "month";
 
 export interface EvalConfig {
-  /** Per-trade cost: exchange fee + slippage. Every rule and every net uses it. */
+  /** Exchange fee. Entry thresholds are fee + margin. */
   feeBp: number;
+  /** Slippage, charged on top of the fee in every net but not in the thresholds. */
+  slipBp: number;
   marginBp: number;
   period: Period;
   /** |entry_basis| cap; null = off. */
@@ -85,6 +88,9 @@ export function prepare(
   }
   return { rows: out, pendingFunding };
 }
+
+/** What one trade costs in the P&L: fee + slippage. Thresholds use the fee alone. */
+export const costOf = (cfg: EvalConfig) => cfg.feeBp + cfg.slipBp;
 
 /** Realised net: settled funding, never exp_funding (that is decision-time only). */
 export const net = (r: EvalRow, feeBp: number) => r.y + r.settledFunding - feeBp;
@@ -166,7 +172,7 @@ export function baselineTrades(rows: EvalRow[], cfg: EvalConfig, marginBp = cfg.
 
 /**
  * newton_z: the funding-only rule at its own fixed margin — exp_funding >
- * cost (fee + slippage) + 10 bp — whatever margin the page is set to. (Was a flat 20 bp.)
+ * fee + 10 bp — whatever margin the page is set to. (Was a flat 20 bp.)
  */
 export const NEWTON_Z_MARGIN_BP = 10;
 export function newtonZTrades(rows: EvalRow[], feeBp: number) {
@@ -211,7 +217,7 @@ function thresholdBinsOf(rows: EvalRow[], cfg: EvalConfig): ThresholdBin[] {
   for (const r of rows) {
     const edge = r.signal - hurdle;
     const i = bins.findIndex((b) => edge >= b.lo && edge < b.hi);
-    const v = net(r, cfg.feeBp);
+    const v = net(r, costOf(cfg));
     bins[i].n++;
     bins[i].sumNet += v;
     if (v > 0) wins[i]++;
@@ -257,8 +263,8 @@ export function topnCompare(rows: EvalRow[], cfg: EvalConfig): CompareRow[] {
   const byBase = [...rows].sort((a, b) => b.expFunding - a.expFunding);
   return TOPN_SIZES.filter((n) => n <= rows.length).map((n) => ({
     key: n,
-    model: curveStats(byModel.slice(0, n), cfg.feeBp, cfg.period),
-    baseline: curveStats(byBase.slice(0, n), cfg.feeBp, cfg.period),
+    model: curveStats(byModel.slice(0, n), costOf(cfg), cfg.period),
+    baseline: curveStats(byBase.slice(0, n), costOf(cfg), cfg.period),
   }));
 }
 
@@ -268,8 +274,8 @@ export const MARGIN_SWEEP = Array.from({ length: 11 }, (_, i) => i);
 export function marginSweep(rows: EvalRow[], cfg: EvalConfig): CompareRow[] {
   return MARGIN_SWEEP.map((m) => ({
     key: m,
-    model: curveStats(modelTrades(rows, cfg, m), cfg.feeBp, cfg.period),
-    baseline: curveStats(baselineTrades(rows, cfg, m), cfg.feeBp, cfg.period),
+    model: curveStats(modelTrades(rows, cfg, m), costOf(cfg), cfg.period),
+    baseline: curveStats(baselineTrades(rows, cfg, m), costOf(cfg), cfg.period),
   }));
 }
 
@@ -439,14 +445,14 @@ export function concentration(trades: EvalRow[], feeBp: number): Concentration {
 export const FEE_SENSITIVITY = [0, 3, 4.4, 5, 7.03, 8.8, 10, 12];
 
 /** Re-run the rule at other fees: the threshold moves with the fee too. */
-/** The exchange fee varies; slippage stays at the page's setting on top of it. */
-export function feeSensitivity(rows: EvalRow[], cfg: EvalConfig, slipBp: number) {
+/** The exchange fee varies (and moves the threshold); slippage stays on top of it in the P&L. */
+export function feeSensitivity(rows: EvalRow[], cfg: EvalConfig) {
   return FEE_SENSITIVITY.map((fee) => {
-    const c = { ...cfg, feeBp: fee + slipBp };
+    const c = { ...cfg, feeBp: fee };
     return {
       fee,
-      model: curveStats(modelTrades(rows, c), c.feeBp, cfg.period),
-      baseline: curveStats(baselineTrades(rows, c), c.feeBp, cfg.period),
+      model: curveStats(modelTrades(rows, c), costOf(c), cfg.period),
+      baseline: curveStats(baselineTrades(rows, c), costOf(c), cfg.period),
     };
   });
 }

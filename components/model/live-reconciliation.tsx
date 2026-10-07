@@ -109,7 +109,8 @@ export function LiveReconciliation({
     const windows = liveWindows[RULE_STRATEGY] ?? [];
     const inWindow = (ts: number) => windows.some(([a, b]) => ts >= a && ts <= b);
     const cfg: EvalConfig = {
-      feeBp: cost,
+      feeBp: fee,
+      slipBp: settings.slipBp,
       marginBp: settings.marginBp,
       period: settings.period,
       basisCap: settings.capOn ? DEFAULT_BASIS_CAP : null,
@@ -128,7 +129,7 @@ export function LiveReconciliation({
       liveOnly: liveOnly.length,
       liveOnlyNet: liveOnly.reduce((a, t) => a + t.netBp, 0),
     };
-  }, [liveWindows, modelRows, matched, cost, settings.marginBp, settings.period, settings.capOn]);
+  }, [liveWindows, modelRows, matched, fee, cost, settings.slipBp, settings.marginBp, settings.period, settings.capOn]);
 
   // One gap per scored trade, per strategy: price gap = measured slippage,
   // net gap = everything (price + funding + fee).
@@ -245,7 +246,7 @@ export function LiveReconciliation({
       <Section
         n={3}
         title={`${RULE_STRATEGY} vs the page's model rule`}
-        desc={`In the hours ${RULE_STRATEGY} was running: the events the page's model rule (cost ${cost.toFixed(2)} + margin ${settings.marginBp}) trades, against the ones it actually traded. Newtonz + model runs a rule the page doesn't model, so it isn't checked.`}
+        desc={`In the hours ${RULE_STRATEGY} was running: the events the page's model rule (fee ${fee} + margin ${settings.marginBp}) trades, against the ones it actually traded. Newtonz + model runs a rule the page doesn't model, so it isn't checked.`}
       >
         <Table
           head={["", "Trades", "Net bp"]}

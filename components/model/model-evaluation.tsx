@@ -128,7 +128,7 @@ export function ModelEvaluation({
   onSettingsChange: (next: EvalSettings) => void;
 }) {
   const { feeBp: exchangeFeeBp, slipBp, marginBp, period, capOn } = settings;
-  // Everything below runs on the per-trade cost, fee + slippage.
+  // Thresholds use the exchange fee; every net below is charged fee + slippage.
   const feeBp = exchangeFeeBp + slipBp;
   const setFeeBp = (v: number) => onSettingsChange({ ...settings, feeBp: v });
   const setSlipBp = (v: number) => onSettingsChange({ ...settings, slipBp: v });
@@ -137,8 +137,8 @@ export function ModelEvaluation({
   const setCapOn = (v: boolean) => onSettingsChange({ ...settings, capOn: v });
 
   const cfg: EvalConfig = useMemo(
-    () => ({ feeBp, marginBp, period, basisCap: capOn ? DEFAULT_BASIS_CAP : null }),
-    [feeBp, marginBp, period, capOn]
+    () => ({ feeBp: exchangeFeeBp, slipBp, marginBp, period, basisCap: capOn ? DEFAULT_BASIS_CAP : null }),
+    [exchangeFeeBp, slipBp, marginBp, period, capOn]
   );
   const prepared = useMemo(() => prepare(rows, cfg.basisCap), [rows, cfg.basisCap]);
   const evalRows = prepared.rows;
@@ -156,13 +156,13 @@ export function ModelEvaluation({
   }, [evalRows, cfg]);
   const model = useMemo(() => curveStats(modelTrades(evalRows, cfg), feeBp, period), [evalRows, cfg, feeBp, period]);
   const baseline = useMemo(() => curveStats(baselineTrades(evalRows, cfg), feeBp, period), [evalRows, cfg, feeBp, period]);
-  const newtonZ = useMemo(() => curveStats(newtonZTrades(evalRows, feeBp), feeBp, period), [evalRows, feeBp, period]);
+  const newtonZ = useMemo(() => curveStats(newtonZTrades(evalRows, exchangeFeeBp), feeBp, period), [evalRows, exchangeFeeBp, feeBp, period]);
   const sweep = useMemo(() => marginSweep(evalRows, cfg), [evalRows, cfg]);
   const diff = useMemo(() => periodDiff(model, baseline), [model, baseline]);
   const conc = useMemo(() => concentration(modelTrades(evalRows, cfg), feeBp), [evalRows, cfg, feeBp]);
-  const fees = useMemo(() => feeSensitivity(evalRows, cfg, slipBp), [evalRows, cfg, slipBp]);
+  const fees = useMemo(() => feeSensitivity(evalRows, cfg), [evalRows, cfg]);
 
-  const hurdle = feeBp + marginBp;
+  const hurdle = exchangeFeeBp + marginBp;
   // Every settlement in scope, traded or not, so both curves span the whole window.
   // Other models run the same rule on their own events.
   const others = useMemo(
@@ -195,9 +195,9 @@ export function ModelEvaluation({
         ypredBy: ypredMap(o.evalRows),
       })),
       { id: "baseline", label: "Funding-only", trades: baselineTrades(evalRows, cfg) },
-      { id: "newtonZ", label: "newton_z", trades: newtonZTrades(evalRows, feeBp) },
+      { id: "newtonZ", label: "newton_z", trades: newtonZTrades(evalRows, exchangeFeeBp) },
     ],
-    [activeLabel, evalRows, others, cfg, feeBp]
+    [activeLabel, evalRows, others, cfg, exchangeFeeBp]
   );
   const curveSeries: CurveSeries[] = [
     { key: "model", label: `${activeLabel} (cumulative bp)`, color: COLORS.pred, stats: model, width: 2, liveTs: liveTsActive },
@@ -210,7 +210,7 @@ export function ModelEvaluation({
       liveTs: liveTsOthers[i],
     })),
     { key: "baseline", label: "Funding-only (cumulative bp)", color: BASE, stats: baseline, dash: "4 3" },
-    { key: "newtonZ", label: `newton_z (exp_funding > cost + ${NEWTON_Z_MARGIN_BP})`, color: NEWTON_Z, stats: newtonZ },
+    { key: "newtonZ", label: `newton_z (exp_funding > fee + ${NEWTON_Z_MARGIN_BP})`, color: NEWTON_Z, stats: newtonZ },
   ];
 
   return (
@@ -248,7 +248,7 @@ export function ModelEvaluation({
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Cost per trade = fee {exchangeFeeBp} + slippage {slipBp} = {feeBp.toFixed(2)} bp. Net per event = y + settled funding − cost (realised; exp_funding is used only to decide). Model trades when ypred + exp_funding &gt; {hurdle.toFixed(2)} bp;
+            Entry uses fee + margin; the P&amp;L also pays slippage: cost per trade = fee {exchangeFeeBp} + slippage {slipBp} = {feeBp.toFixed(2)} bp. Net per event = y + settled funding − cost (realised; exp_funding is used only to decide). Model trades when ypred + exp_funding &gt; fee + margin = {hurdle.toFixed(2)} bp;
             the funding-only baseline when exp_funding &gt; {hurdle.toFixed(2)} bp. Equal size per trade.{" "}
             <span className="text-amber-500">
               Liquidity gate (qv_240 &gt; 166,666 on both venues) not applied — the shadow tables have no qv_240.
@@ -310,7 +310,7 @@ export function ModelEvaluation({
       <Section
         n={2}
         title="Equity curve (curve_stats)"
-        desc={`Cumulative net bp of every trade the rule takes, in settlement order, against the funding-only rule at the same threshold, and newton_z (exp_funding > cost + ${NEWTON_Z_MARGIN_BP} = ${(feeBp + NEWTON_Z_MARGIN_BP).toFixed(2)} bp, a fixed margin of its own).`}
+        desc={`Cumulative net bp of every trade the rule takes, in settlement order, against the funding-only rule at the same threshold, and newton_z (exp_funding > fee + ${NEWTON_Z_MARGIN_BP} = ${(exchangeFeeBp + NEWTON_Z_MARGIN_BP).toFixed(2)} bp, a fixed margin of its own).`}
       >
         <CurveChart series={curveSeries} timeline={timeline} />
         <Table
@@ -355,7 +355,7 @@ export function ModelEvaluation({
         </ChartContainer>
 
         <div className="pt-2 text-xs font-medium">
-          Same margin — both rules at cost {feeBp.toFixed(2)} + margin (current margin {marginBp} in bold)
+          Same margin — both rules at fee {exchangeFeeBp} + margin, nets after slippage {slipBp} (current margin {marginBp} in bold)
         </div>
         <Table
           head={["Margin", "Model n", "Base n", "Model total", "Base total", "Δ", "Model win", "Base win", `Model +${period}s`, `Base +${period}s`]}
