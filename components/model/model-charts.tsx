@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -15,6 +15,7 @@ import {
   YAxis,
   ZAxis,
 } from "recharts";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -32,6 +33,7 @@ import {
 } from "@/components/ui/chart";
 import {
   MIN_EVENT_N,
+  histograms,
   type CalibrationBin,
   type EventPoint,
   type HistogramBin,
@@ -319,7 +321,13 @@ const histConfig = {
   error: { label: "Error (y − ypred)", color: COLORS.error },
 } satisfies ChartConfig;
 
-export function DistributionChart({ bins }: { bins: HistogramBin[] }) {
+/** Bins across the shared 1st–99th percentile range; 30 was too coarse to see the shape. */
+const BIN_COUNTS = [40, 80, 160] as const;
+
+export function DistributionChart({ rows }: { rows: ScoredRow[] }) {
+  const [binCount, setBinCount] = useState<number>(80);
+  const bins: HistogramBin[] = useMemo(() => histograms(rows, binCount), [rows, binCount]);
+  const width = bins.length > 1 ? bins[1].x - bins[0].x : null;
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -329,7 +337,16 @@ export function DistributionChart({ bins }: { bins: HistogramBin[] }) {
           A prediction spread much narrower than y_true is normal for a shrunk forecast.
         </CardDescription>
       </CardHeader>
-      <CardContent className="px-2 sm:px-6">
+      <CardContent className="space-y-2 px-2 sm:px-6">
+        <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          Bins
+          {BIN_COUNTS.map((n) => (
+            <Button key={n} size="sm" variant={n === binCount ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setBinCount(n)}>
+              {n}
+            </Button>
+          ))}
+          {width != null && <span className="ml-1">≈ {width.toFixed(2)} bp each</span>}
+        </div>
         {bins.length === 0 ? (
           <Empty />
         ) : (
@@ -353,7 +370,9 @@ export function DistributionChart({ bins }: { bins: HistogramBin[] }) {
                   <ChartTooltipContent
                     labelFormatter={(_, p) => {
                       const x = p?.[0]?.payload?.x;
-                      return typeof x === "number" ? `≈ ${x.toFixed(2)} bp` : "";
+                      return typeof x === "number" && width != null
+                        ? `${(x - width / 2).toFixed(2)} ~ ${(x + width / 2).toFixed(2)} bp`
+                        : "";
                     }}
                   />
                 }

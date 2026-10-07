@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils";
 import {
   FULL_WINDOW_MIN,
   calibration,
-  histograms,
   isClean,
   perEvent,
   isLiveSource,
@@ -154,7 +153,6 @@ export function ModelMonitorContent({ packed, days, windows, error, liveTrades, 
   const summary = useMemo(() => summarize(scoredRows), [scoredRows]);
   const events = useMemo(() => perEvent(scoredRows), [scoredRows]);
   const bins = useMemo(() => calibration(scoredRows), [scoredRows]);
-  const hist = useMemo(() => histograms(scoredRows), [scoredRows]);
   const pending = filtered.length - scoredRows.length;
 
   // Predictions-tab only: an exp_funding range, bp. Blank = no bound.
@@ -297,7 +295,7 @@ export function ModelMonitorContent({ packed, days, windows, error, liveTrades, 
           <SummaryCards summary={summary} pending={pending} />
           <IcTrendChart events={events} />
           <ScatterCalibration rows={scoredRows} bins={bins} />
-          <DistributionChart bins={hist} />
+          <DistributionChart rows={scoredRows} />
         </TabsContent>
 
         <TabsContent value="live">
