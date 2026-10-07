@@ -65,7 +65,11 @@ export interface LiveFill {
   action: string | null;
   quantity_actual: number | null;
   price: number | null;
-  /** bp of the fill's price vs the engine's reference quote; positive = paid. Mostly only the zoomex leg has it. */
+  /**
+   * bp of the fill's price vs the engine's reference quote; positive = paid.
+   * Null on the binance leg: it fills as a maker at its limit price, so it has
+   * no slippage (user, 2026-10-07) — null counts as 0, not as unmeasured.
+   */
   exec_slippage_bps: number | null;
 }
 
@@ -85,9 +89,9 @@ export interface LiveTrade {
   netBp: number;
   exitType: string | null;
   /**
-   * Measured execution slippage of the position's fills (open and close, both
-   * legs), bp of both legs' notional, positive = cost; null when none was
-   * measured. Only fills that carry a value count — mostly the zoomex leg.
+   * Execution slippage of the position's fills (open and close, both legs),
+   * bp of both legs' notional, positive = cost. Maker fills (binance) carry no
+   * value and add 0; null when the position's fills weren't found at all.
    */
   execSlipBp: number | null;
   /** Fills with a measured slippage / fills found. */
@@ -169,7 +173,7 @@ export function attachSlippage(trades: LiveTrade[], fills: LiveFill[]): LiveTrad
       usdBp += Number(f.exec_slippage_bps) * Math.abs(Number(f.quantity_actual) * Number(f.price));
       measured++;
     }
-    return { ...t, execSlipBp: measured ? usdBp / t.grossUsd : null, slipFills: measured, fills: mine.length };
+    return { ...t, execSlipBp: mine.length ? usdBp / t.grossUsd : null, slipFills: measured, fills: mine.length };
   });
 }
 
