@@ -281,6 +281,15 @@ async function fetchRawEquityCurve(
 const EQUITY_FINE_BUCKET_MINUTES = 2;
 const EQUITY_COARSE_BUCKET_MINUTES = 15;
 
+/**
+ * Runs per RPC call. One call over every run of a parent family (Kepler: 62 runs,
+ * ~216k raw rows over 30 days, 2026-10-19) came back as a 6.4MB payload, over the
+ * data cache limit, and risked the 8s statement_timeout of the authenticated role;
+ * the parent page then showed "—" on every book card. Small batches keep each scan
+ * short and each cached entry under 2MB.
+ */
+const EQUITY_RUNS_PER_CALL = 6;
+
 export async function getEquityCurve(
   supabase: SupabaseClient,
   runIds: string[],
@@ -288,7 +297,31 @@ export async function getEquityCurve(
   fineSince: string
 ): Promise<EquityCurve[]> {
   if (runIds.length === 0) return [];
+  if (runIds.length > EQUITY_RUNS_PER_CALL) {
+    const sorted = [...runIds].sort();
+    const batches: string[][] = [];
+    for (let i = 0; i < sorted.length; i += EQUITY_RUNS_PER_CALL) {
+      batches.push(sorted.slice(i, i + EQUITY_RUNS_PER_CALL));
+    }
+    const parts = await Promise.all(
+      batches.map((batch) => getEquityCurveBatch(supabase, batch, since, fineSince))
+    );
+    // Same order as a single call: by bucket, then run (ISO timestamps compare as strings).
+    return parts
+      .flat()
+      .sort((a, b) =>
+        a.ts === b.ts ? (a.run_id < b.run_id ? -1 : a.run_id > b.run_id ? 1 : 0) : a.ts < b.ts ? -1 : 1
+      );
+  }
+  return getEquityCurveBatch(supabase, runIds, since, fineSince);
+}
 
+async function getEquityCurveBatch(
+  supabase: SupabaseClient,
+  runIds: string[],
+  since: string,
+  fineSince: string
+): Promise<EquityCurve[]> {
   return cachedQuery(
     "equity-curve",
     ["overview:equity-curve"],
