@@ -37,6 +37,8 @@ export interface PaperEpisode {
 }
 
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
+/** Observe mode's paper account size (user, 2026-10-21); returns are PnL over this. */
+const INITIAL_CAPITAL = 10_000;
 const POS = "#34d399";
 const NEG = "#f87171";
 
@@ -44,6 +46,7 @@ const usd = (v: number | null | undefined, d = 2) =>
   v == null || !Number.isFinite(v) ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(d)}`;
 const tone = (v: number | null | undefined) =>
   v == null ? "text-muted-foreground" : v > 0 ? "text-emerald-500" : v < 0 ? "text-red-500" : "";
+const pctOf = (v: number, d = 2) => `${v > 0 ? "+" : ""}${((100 * v) / INITIAL_CAPITAL).toFixed(d)}%`;
 const fmt = (ms: number) => formatDateTime(ms, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
 export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; error: string | null }) {
@@ -64,6 +67,8 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
         e: r.e == null ? null : Number(r.e),
         exit_vwap: r.exit_vwap == null ? null : Number(r.exit_vwap),
         qty_kept: Number(r.qty_kept),
+        // Entry notional of what was kept.
+        notional: r.e == null ? null : Math.abs(Number(r.qty_kept) * Number(r.e)),
         price_pnl: Number(r.price_pnl),
         commission_fee: Number(r.commission_fee),
         total_pnl: Number(r.total_pnl),
@@ -94,7 +99,7 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
         cum += r.total_pnl;
         peak = Math.max(peak, cum);
         maxDd = Math.max(maxDd, peak - cum);
-        return { ts: r.t_flat, cum };
+        return { ts: r.t_flat, cum, pct: (100 * cum) / INITIAL_CAPITAL };
       });
     const byDay = new Map<string, number>();
     for (const r of shown) byDay.set(taipeiDayKey(r.t_flat), (byDay.get(taipeiDayKey(r.t_flat)) ?? 0) + r.total_pnl);
@@ -107,9 +112,11 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
       e.pnl += r.total_pnl;
       byReason.set(k, e);
     }
-    return { n, total, fees, winRate: n ? wins / n : null, perTrade: n ? total / n : null, maxDd, curve, daily, byReason: [...byReason.entries()] };
+    const notional = shown.reduce((a, r) => a + (r.notional ?? 0), 0);
+    return { n, total, fees, notional, winRate: n ? wins / n : null, perTrade: n ? total / n : null, maxDd, curve, daily, byReason: [...byReason.entries()] };
   }, [shown]);
 
+  const [unit, setUnit] = useState<"usd" | "pct">("pct");
   const table = useMemo(() => [...shown].sort((a, b) => b.t_flat - a.t_flat), [shown]);
 
   return (
@@ -134,32 +141,49 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+        <Stat label={`Return (on ${INITIAL_CAPITAL.toLocaleString("en-US")} U)`} value={pctOf(stats.total)} className={tone(stats.total)} />
         <Stat label="Total PnL (U)" value={usd(stats.total)} className={tone(stats.total)} />
         <Stat label="Trades" value={String(stats.n)} />
         <Stat label="Win rate" value={stats.winRate == null ? "—" : `${(stats.winRate * 100).toFixed(1)}%`} />
         <Stat label="Per trade (U)" value={usd(stats.perTrade, 3)} className={tone(stats.perTrade)} />
         <Stat label="Fees (U)" value={usd(stats.fees)} />
-        <Stat label="Max DD (U)" value={stats.maxDd.toFixed(2)} />
+        <Stat label="Max DD" value={`${stats.maxDd.toFixed(2)} U · ${((100 * stats.maxDd) / INITIAL_CAPITAL).toFixed(2)}%`} />
+        <Stat label="Volume (entry notional, U)" value={Math.round(stats.notional).toLocaleString("en-US")} />
       </div>
 
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Cumulative PnL</CardTitle>
-          <CardDescription className="text-xs">USDT after fees, in flat-time order.</CardDescription>
+          <CardDescription className="text-xs">
+            After fees, in flat-time order; % is of the {INITIAL_CAPITAL.toLocaleString("en-US")} U initial capital.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="px-2 sm:px-6">
+        <CardContent className="space-y-2 px-2 sm:px-6">
+          <div className="flex gap-1">
+            {(["pct", "usd"] as const).map((u) => (
+              <Button key={u} size="sm" variant={u === unit ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setUnit(u)}>
+                {u === "pct" ? "Return %" : "USDT"}
+              </Button>
+            ))}
+          </div>
           {stats.curve.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">No episodes.</p>
           ) : (
-            <ChartContainer config={{ cum: { label: "Cumulative PnL (U)", color: "#0ea5e9" } }} className="aspect-auto h-[260px] w-full">
+            <ChartContainer
+              config={{
+                cum: { label: "Cumulative PnL (U)", color: "#0ea5e9" },
+                pct: { label: "Return (%)", color: "#0ea5e9" },
+              }}
+              className="aspect-auto h-[260px] w-full"
+            >
               <LineChart data={stats.curve} margin={{ left: 4, right: 4, top: 8 }}>
                 <CartesianGrid vertical={false} />
                 <XAxis dataKey="ts" type="number" scale="time" domain={["dataMin", "dataMax"]} tickFormatter={fmt} tickLine={false} axisLine={false} minTickGap={40} className="text-xs" />
-                <YAxis tickLine={false} axisLine={false} width={44} className="text-xs" />
+                <YAxis tickLine={false} axisLine={false} width={48} className="text-xs" tickFormatter={(v: number) => (unit === "pct" ? `${v.toFixed(2)}%` : `${v}`)} />
                 <ReferenceLine y={0} stroke="currentColor" opacity={0.3} />
                 <ChartTooltip content={<ChartTooltipContent labelFormatter={(_, p) => fmt(Number(p?.[0]?.payload?.ts))} />} />
-                <Line dataKey="cum" type="stepAfter" stroke="var(--color-cum)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line dataKey={unit === "pct" ? "pct" : "cum"} type="stepAfter" stroke="#0ea5e9" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ChartContainer>
           )}
@@ -228,8 +252,8 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
             <table className="w-full font-mono text-xs">
               <thead className="sticky top-0 z-10 bg-card text-muted-foreground">
                 <tr className="border-b">
-                  {["Signal", "Flat", "Symbol", "Side", "Entry", "Exit", "Qty", "Exit reason", "Price PnL", "Fee", "Total PnL"].map((h, i) => (
-                    <th key={h} className={cn("whitespace-nowrap px-2 py-1.5 font-medium", i < 4 || i === 7 ? "text-left" : "text-right")}>
+                  {["Signal", "Flat", "Symbol", "Side", "Entry", "Exit", "Qty", "Notional (U)", "Exit reason", "Price PnL", "Fee", "Total PnL", "Return on notional"].map((h, i) => (
+                    <th key={h} className={cn("whitespace-nowrap px-2 py-1.5 font-medium", i < 4 || i === 8 ? "text-left" : "text-right")}>
                       {h}
                     </th>
                   ))}
@@ -249,15 +273,19 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
                     <td className="px-2 py-1.5 text-right">{r.e ?? "—"}</td>
                     <td className="px-2 py-1.5 text-right">{r.exit_vwap ?? "—"}</td>
                     <td className="px-2 py-1.5 text-right">{r.qty_kept}</td>
+                    <td className="px-2 py-1.5 text-right">{r.notional == null ? "—" : r.notional.toFixed(2)}</td>
                     <td className="whitespace-nowrap px-2 py-1.5 font-sans">{r.exit_reason ?? r.flat_reason}</td>
                     <td className={cn("px-2 py-1.5 text-right", tone(r.price_pnl))}>{usd(r.price_pnl, 3)}</td>
                     <td className="px-2 py-1.5 text-right">{usd(r.commission_fee, 3)}</td>
                     <td className={cn("px-2 py-1.5 text-right font-semibold", tone(r.total_pnl))}>{usd(r.total_pnl, 3)}</td>
+                    <td className={cn("px-2 py-1.5 text-right", tone(r.total_pnl))}>
+                      {r.notional ? `${usd((1e4 * r.total_pnl) / r.notional, 1)} bp` : "—"}
+                    </td>
                   </tr>
                 ))}
                 {table.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="py-6 text-center text-muted-foreground">No episodes.</td>
+                    <td colSpan={13} className="py-6 text-center text-muted-foreground">No episodes.</td>
                   </tr>
                 )}
               </tbody>
