@@ -69,6 +69,7 @@ npx shadcn@latest add <component>   # UI 元件加到 @/components/ui
 /strategies/[strategyId]/runs/[runId]  run 詳情（圖表、trades、指標）
 /report                                報表產生（日期區間 + 策略多選）
 /model                                 shadow 模型預測監控（ypred vs 實際 y）
+/paper                                 jump-fade observe 模擬成交（讀 jfm_observe；外部 jfm-checkpoint 寫入，需 authenticated 唯讀 policy）
 /settings                              通知設定等
 ```
 
