@@ -223,9 +223,12 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
     let ca = 0;
     let cb = 0;
     let cc = 0;
-    return [...new Set([...ma.keys(), ...mb.keys()])]
-      .sort((x, y) => x - y)
-      .map((ts) => {
+    const times = [...new Set([...ma.keys(), ...mb.keys()])].sort((x, y) => x - y);
+    // Every line starts from 0, a minute before the first episode closes.
+    const origin = times.length ? [{ ts: times[0] - 60_000, a: 0, b: 0, c: 0, aPct: 0, bPct: 0, cPct: 0 }] : [];
+    return [
+      ...origin,
+      ...times.map((ts) => {
         ca = ma.get(ts)?.cum ?? ca;
         cb = mb.get(ts)?.cum ?? cb;
         cc = mc.get(ts)?.cum ?? cc;
@@ -238,7 +241,8 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
           bPct: (100 * cb) / INITIAL_CAPITAL,
           cPct: (100 * cc) / capital,
         };
-      });
+      }),
+    ];
   }, [statsA, statsB, stats, capital]);
   const compareDaily = useMemo(() => {
     const days = new Map<string, { day: string; a: number; b: number }>();
