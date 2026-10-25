@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,8 @@ import { formatDateTime, taipeiDayKey, TZ_LABEL } from "@/lib/time";
 /** One jfm_observe row: a finished jump-fade episode with simulated fills. PnL in USDT, combined_trades signs. */
 export interface PaperEpisode {
   run_id: string;
+  /** Strategy version (jump_fade_maker_v1, _v2, …); params differ between them. */
+  strategy: string | null;
   episode_id: string;
   venue: string;
   symbol: string;
@@ -76,13 +78,35 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
     [episodes]
   );
 
-  const runs = useMemo(() => [...new Set(rows.map((r) => r.run_id))].sort().reverse(), [rows]);
-  const [run, setRun] = useState<string>("all");
+  // Strategy versions run different params, so the page shows one at a time
+  // (newest by default); runs are listed within the chosen strategy.
+  const strategies = useMemo(() => {
+    const last = new Map<string, number>();
+    for (const r of rows) {
+      const k = r.strategy ?? "unknown";
+      last.set(k, Math.max(last.get(k) ?? 0, r.t_flat));
+    }
+    return [...last.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+  }, [rows]);
+  const [pickedStrategy, setPickedStrategy] = useState<string | null>(null);
+  const strategy = pickedStrategy && (pickedStrategy === "all" || strategies.includes(pickedStrategy)) ? pickedStrategy : strategies[0] ?? "all";
+  const inStrategy = useCallback(
+    (r: { strategy: string | null }) => strategy === "all" || (r.strategy ?? "unknown") === strategy,
+    [strategy]
+  );
+  const runs = useMemo(() => {
+    const venueOf = new Map<string, string>();
+    for (const r of rows) if (inStrategy(r)) venueOf.set(r.run_id, r.venue);
+    return [...venueOf.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([id, venue]) => ({ id, venue }));
+  }, [rows, inStrategy]);
+  const [pickedRun, setPickedRun] = useState<string>("all");
+  // A run from another strategy falls back to all runs of this one.
+  const run = pickedRun !== "all" && runs.some((r) => r.id === pickedRun) ? pickedRun : "all";
   // Duplicates are the same episode recorded twice; counting them would double its P&L.
   const [hideDup, setHideDup] = useState(true);
   const shown = useMemo(
-    () => rows.filter((r) => (run === "all" || r.run_id === run) && (!hideDup || !r.dup)),
-    [rows, run, hideDup]
+    () => rows.filter((r) => inStrategy(r) && (run === "all" || r.run_id === run) && (!hideDup || !r.dup)),
+    [rows, inStrategy, run, hideDup]
   );
 
   const stats = useMemo(() => {
@@ -131,9 +155,19 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
       {error && <p className="text-sm text-red-500">Failed to load jfm_observe: {error}</p>}
 
       <div className="flex flex-wrap items-center gap-1">
-        {["all", ...runs].map((r) => (
-          <Button key={r} size="sm" variant={r === run ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setRun(r)}>
-            {r === "all" ? "All runs" : r.replace(/^observe-/, "")}
+        <span className="w-14 text-xs text-muted-foreground">Strategy</span>
+        {[...strategies, "all"].map((k) => (
+          <Button key={k} size="sm" variant={k === strategy ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setPickedStrategy(k)}>
+            {k === "all" ? "All strategies" : k}
+          </Button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="w-14 text-xs text-muted-foreground">Run</span>
+        {[{ id: "all", venue: "" }, ...runs].map((r) => (
+          <Button key={r.id} size="sm" variant={r.id === run ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setPickedRun(r.id)}>
+            {r.id === "all" ? "All runs" : `${r.id.replace(/^observe-/, "")} · ${r.venue}`}
           </Button>
         ))}
         <Button size="sm" variant={hideDup ? "default" : "outline"} className="ml-2 h-7 px-2 text-xs" onClick={() => setHideDup((v) => !v)}>

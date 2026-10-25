@@ -19,7 +19,7 @@ async function loadEpisodes(supabase: SupabaseClient) {
     const { data, error: e } = await supabase
       .from("jfm_observe")
       .select(
-        "run_id, episode_id, venue, symbol, side, t_sig, e, qty_filled, qty_kept, fill_minute, exit_reason, exit_vwap, t_flat, dup, roundtrip, straggler, flat_reason, price_pnl, commission_fee, total_pnl"
+        "run_id, strategy, episode_id, venue, symbol, side, t_sig, e, qty_filled, qty_kept, fill_minute, exit_reason, exit_vwap, t_flat, dup, roundtrip, straggler, flat_reason, price_pnl, commission_fee, total_pnl"
       )
       .order("t_flat", { ascending: true })
       .order("episode_id", { ascending: true })
