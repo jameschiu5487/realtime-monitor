@@ -94,19 +94,26 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
     (r: { strategy: string | null }) => strategy === "all" || (r.strategy ?? "unknown") === strategy,
     [strategy]
   );
+  // Venues the chosen strategy traded on; each venue is its own paper account.
+  const venues = useMemo(() => [...new Set(rows.filter(inStrategy).map((r) => r.venue))].sort(), [rows, inStrategy]);
+  const [pickedVenue, setPickedVenue] = useState<string>("all");
+  const venue = pickedVenue !== "all" && venues.includes(pickedVenue) ? pickedVenue : "all";
   const runs = useMemo(() => {
     const venueOf = new Map<string, string>();
-    for (const r of rows) if (inStrategy(r)) venueOf.set(r.run_id, r.venue);
+    for (const r of rows) if (inStrategy(r) && (venue === "all" || r.venue === venue)) venueOf.set(r.run_id, r.venue);
     return [...venueOf.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([id, venue]) => ({ id, venue }));
-  }, [rows, inStrategy]);
+  }, [rows, inStrategy, venue]);
   const [pickedRun, setPickedRun] = useState<string>("all");
   // A run from another strategy falls back to all runs of this one.
   const run = pickedRun !== "all" && runs.some((r) => r.id === pickedRun) ? pickedRun : "all";
   // Duplicates are the same episode recorded twice; counting them would double its P&L.
   const [hideDup, setHideDup] = useState(true);
   const shown = useMemo(
-    () => rows.filter((r) => inStrategy(r) && (run === "all" || r.run_id === run) && (!hideDup || !r.dup)),
-    [rows, inStrategy, run, hideDup]
+    () =>
+      rows.filter(
+        (r) => inStrategy(r) && (venue === "all" || r.venue === venue) && (run === "all" || r.run_id === run) && (!hideDup || !r.dup)
+      ),
+    [rows, inStrategy, venue, run, hideDup]
   );
 
   const stats = useMemo(() => {
@@ -159,6 +166,15 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
         {[...strategies, "all"].map((k) => (
           <Button key={k} size="sm" variant={k === strategy ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setPickedStrategy(k)}>
             {k === "all" ? "All strategies" : k}
+          </Button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="w-14 text-xs text-muted-foreground">Venue</span>
+        {["all", ...venues].map((v) => (
+          <Button key={v} size="sm" variant={v === venue ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setPickedVenue(v)}>
+            {v === "all" ? "All venues" : v}
           </Button>
         ))}
       </div>
