@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
+import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { cn } from "@/lib/utils";
 import { formatDateTime, taipeiDayKey, TZ_LABEL } from "@/lib/time";
 
@@ -51,6 +51,98 @@ const tone = (v: number | null | undefined) =>
 const pctOf = (v: number, d = 2) => `${v > 0 ? "+" : ""}${((100 * v) / INITIAL_CAPITAL).toFixed(d)}%`;
 const fmt = (ms: number) => formatDateTime(ms, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
+/** A parsed jfm_observe row (numbers as numbers, plus entry notional). */
+type PaperRow = Omit<PaperEpisode, "e" | "exit_vwap"> & { e: number | null; exit_vwap: number | null; notional: number | null };
+
+/** One line on the page: a strategy, a venue and a run, each "all" or a value. */
+interface Selection {
+  strategy: string;
+  venue: string;
+  run: string;
+}
+
+const strategyOf = (r: { strategy: string | null }) => r.strategy ?? "unknown";
+
+/** Strategies, the one that traded last first. */
+function strategyOrder(rows: PaperRow[]): string[] {
+  const last = new Map<string, number>();
+  for (const r of rows) last.set(strategyOf(r), Math.max(last.get(strategyOf(r)) ?? 0, r.t_flat));
+  return [...last.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+}
+
+/**
+ * A selection made valid against the data: a strategy, venue or run that no
+ * longer fits (the strategy changed under it) falls back to "all", and the
+ * venues and runs it can choose from are listed with it.
+ */
+function resolve(rows: PaperRow[], strategies: string[], sel: Selection) {
+  const strategy = sel.strategy === "all" || strategies.includes(sel.strategy) ? sel.strategy : strategies[0] ?? "all";
+  const inStrategy = rows.filter((r) => strategy === "all" || strategyOf(r) === strategy);
+  // Each venue is its own paper account.
+  const venues = [...new Set(inStrategy.map((r) => r.venue))].sort();
+  const venue = sel.venue !== "all" && venues.includes(sel.venue) ? sel.venue : "all";
+  const venueOf = new Map<string, string>();
+  for (const r of inStrategy) if (venue === "all" || r.venue === venue) venueOf.set(r.run_id, r.venue);
+  const runs = [...venueOf.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([id, v]) => ({ id, venue: v }));
+  const run = sel.run !== "all" && venueOf.has(sel.run) ? sel.run : "all";
+  return { sel: { strategy, venue, run }, venues, runs };
+}
+
+function select(rows: PaperRow[], sel: Selection, hideDup: boolean): PaperRow[] {
+  return rows.filter(
+    (r) =>
+      (sel.strategy === "all" || strategyOf(r) === sel.strategy) &&
+      (sel.venue === "all" || r.venue === sel.venue) &&
+      (sel.run === "all" || r.run_id === sel.run) &&
+      // Duplicates are the same episode recorded twice; counting them would double its P&L.
+      (!hideDup || !r.dup)
+  );
+}
+
+function selectionLabel(sel: Selection): string {
+  return [
+    sel.strategy === "all" ? "all strategies" : sel.strategy,
+    sel.venue === "all" ? "all venues" : sel.venue,
+    sel.run === "all" ? null : sel.run.replace(/^observe-/, ""),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function computeStats(shown: PaperRow[]) {
+  const n = shown.length;
+  const total = shown.reduce((a, r) => a + r.total_pnl, 0);
+  const fees = shown.reduce((a, r) => a + r.commission_fee, 0);
+  const wins = shown.filter((r) => r.total_pnl > 0).length;
+  let cum = 0;
+  let peak = 0;
+  let maxDd = 0;
+  const curve = [...shown]
+    .sort((a, b) => a.t_flat - b.t_flat)
+    .map((r) => {
+      cum += r.total_pnl;
+      peak = Math.max(peak, cum);
+      maxDd = Math.max(maxDd, peak - cum);
+      return { ts: r.t_flat, cum, pct: (100 * cum) / INITIAL_CAPITAL };
+    });
+  const byDay = new Map<string, number>();
+  for (const r of shown) byDay.set(taipeiDayKey(r.t_flat), (byDay.get(taipeiDayKey(r.t_flat)) ?? 0) + r.total_pnl);
+  const daily = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([day, pnl]) => ({ day, pnl }));
+  const byReason = new Map<string, { n: number; pnl: number }>();
+  for (const r of shown) {
+    const k = r.exit_reason ?? r.flat_reason;
+    const e = byReason.get(k) ?? { n: 0, pnl: 0 };
+    e.n++;
+    e.pnl += r.total_pnl;
+    byReason.set(k, e);
+  }
+  const notional = shown.reduce((a, r) => a + (r.notional ?? 0), 0);
+  return { n, total, fees, notional, winRate: n ? wins / n : null, perTrade: n ? total / n : null, maxDd, curve, daily, byReason: [...byReason.entries()] };
+}
+type PaperStats = ReturnType<typeof computeStats>;
+
+const COMPARE_COLORS = { a: "#0ea5e9", b: "#f59e0b" } as const;
+
 export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; error: string | null }) {
   const router = useRouter();
   useEffect(() => {
@@ -78,74 +170,56 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
     [episodes]
   );
 
-  // Strategy versions run different params, so the page shows one at a time
-  // (newest by default); runs are listed within the chosen strategy.
-  const strategies = useMemo(() => {
-    const last = new Map<string, number>();
-    for (const r of rows) {
-      const k = r.strategy ?? "unknown";
-      last.set(k, Math.max(last.get(k) ?? 0, r.t_flat));
-    }
-    return [...last.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
-  }, [rows]);
-  const [pickedStrategy, setPickedStrategy] = useState<string | null>(null);
-  const strategy = pickedStrategy && (pickedStrategy === "all" || strategies.includes(pickedStrategy)) ? pickedStrategy : strategies[0] ?? "all";
-  const inStrategy = useCallback(
-    (r: { strategy: string | null }) => strategy === "all" || (r.strategy ?? "unknown") === strategy,
-    [strategy]
-  );
-  // Venues the chosen strategy traded on; each venue is its own paper account.
-  const venues = useMemo(() => [...new Set(rows.filter(inStrategy).map((r) => r.venue))].sort(), [rows, inStrategy]);
-  const [pickedVenue, setPickedVenue] = useState<string>("all");
-  const venue = pickedVenue !== "all" && venues.includes(pickedVenue) ? pickedVenue : "all";
-  const runs = useMemo(() => {
-    const venueOf = new Map<string, string>();
-    for (const r of rows) if (inStrategy(r) && (venue === "all" || r.venue === venue)) venueOf.set(r.run_id, r.venue);
-    return [...venueOf.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([id, venue]) => ({ id, venue }));
-  }, [rows, inStrategy, venue]);
-  const [pickedRun, setPickedRun] = useState<string>("all");
-  // A run from another strategy falls back to all runs of this one.
-  const run = pickedRun !== "all" && runs.some((r) => r.id === pickedRun) ? pickedRun : "all";
-  // Duplicates are the same episode recorded twice; counting them would double its P&L.
+  // Strategy versions run different params and each venue is its own paper
+  // account. Combine adds up one selection; compare puts two side by side.
+  const strategies = useMemo(() => strategyOrder(rows), [rows]);
+  const [mode, setMode] = useState<"combine" | "compare">("combine");
   const [hideDup, setHideDup] = useState(true);
-  const shown = useMemo(
-    () =>
-      rows.filter(
-        (r) => inStrategy(r) && (venue === "all" || r.venue === venue) && (run === "all" || r.run_id === run) && (!hideDup || !r.dup)
-      ),
-    [rows, inStrategy, venue, run, hideDup]
-  );
+  const [combineSel, setCombineSel] = useState<Selection | null>(null);
+  const [selA, setSelA] = useState<Selection | null>(null);
+  const [selB, setSelB] = useState<Selection | null>(null);
+  // Defaults: the newest strategy; to compare, its first two venues if it has
+  // two, else it against the previous strategy.
+  const defaults = useMemo(() => {
+    const newest = strategies[0] ?? "all";
+    const venues = resolve(rows, strategies, { strategy: newest, venue: "all", run: "all" }).venues;
+    const a: Selection = { strategy: newest, venue: venues[0] ?? "all", run: "all" };
+    const b: Selection =
+      venues.length > 1
+        ? { strategy: newest, venue: venues[1], run: "all" }
+        : { strategy: strategies[1] ?? newest, venue: "all", run: "all" };
+    return { combine: { strategy: newest, venue: "all", run: "all" }, a, b };
+  }, [rows, strategies]);
+  const combine = useMemo(() => resolve(rows, strategies, combineSel ?? defaults.combine), [rows, strategies, combineSel, defaults]);
+  const lineA = useMemo(() => resolve(rows, strategies, selA ?? defaults.a), [rows, strategies, selA, defaults]);
+  const lineB = useMemo(() => resolve(rows, strategies, selB ?? defaults.b), [rows, strategies, selB, defaults]);
 
-  const stats = useMemo(() => {
-    const n = shown.length;
-    const total = shown.reduce((a, r) => a + r.total_pnl, 0);
-    const fees = shown.reduce((a, r) => a + r.commission_fee, 0);
-    const wins = shown.filter((r) => r.total_pnl > 0).length;
-    let cum = 0;
-    let peak = 0;
-    let maxDd = 0;
-    const curve = [...shown]
-      .sort((a, b) => a.t_flat - b.t_flat)
-      .map((r) => {
-        cum += r.total_pnl;
-        peak = Math.max(peak, cum);
-        maxDd = Math.max(maxDd, peak - cum);
-        return { ts: r.t_flat, cum, pct: (100 * cum) / INITIAL_CAPITAL };
+  const shown = useMemo(() => select(rows, combine.sel, hideDup), [rows, combine.sel, hideDup]);
+  const stats = useMemo(() => computeStats(shown), [shown]);
+  const statsA = useMemo(() => computeStats(select(rows, lineA.sel, hideDup)), [rows, lineA.sel, hideDup]);
+  const statsB = useMemo(() => computeStats(select(rows, lineB.sel, hideDup)), [rows, lineB.sel, hideDup]);
+
+  // Both curves on one timeline, each carried forward between its own trades.
+  const compareCurve = useMemo(() => {
+    const at = (st: PaperStats) => new Map(st.curve.map((p) => [p.ts, p]));
+    const ma = at(statsA);
+    const mb = at(statsB);
+    let ca = 0;
+    let cb = 0;
+    return [...new Set([...ma.keys(), ...mb.keys()])]
+      .sort((x, y) => x - y)
+      .map((ts) => {
+        ca = ma.get(ts)?.cum ?? ca;
+        cb = mb.get(ts)?.cum ?? cb;
+        return { ts, a: ca, b: cb, aPct: (100 * ca) / INITIAL_CAPITAL, bPct: (100 * cb) / INITIAL_CAPITAL };
       });
-    const byDay = new Map<string, number>();
-    for (const r of shown) byDay.set(taipeiDayKey(r.t_flat), (byDay.get(taipeiDayKey(r.t_flat)) ?? 0) + r.total_pnl);
-    const daily = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([day, pnl]) => ({ day, pnl }));
-    const byReason = new Map<string, { n: number; pnl: number }>();
-    for (const r of shown) {
-      const k = r.exit_reason ?? r.flat_reason;
-      const e = byReason.get(k) ?? { n: 0, pnl: 0 };
-      e.n++;
-      e.pnl += r.total_pnl;
-      byReason.set(k, e);
-    }
-    const notional = shown.reduce((a, r) => a + (r.notional ?? 0), 0);
-    return { n, total, fees, notional, winRate: n ? wins / n : null, perTrade: n ? total / n : null, maxDd, curve, daily, byReason: [...byReason.entries()] };
-  }, [shown]);
+  }, [statsA, statsB]);
+  const compareDaily = useMemo(() => {
+    const days = new Map<string, { day: string; a: number; b: number }>();
+    for (const d of statsA.daily) days.set(d.day, { day: d.day, a: d.pnl, b: 0 });
+    for (const d of statsB.daily) days.set(d.day, { ...(days.get(d.day) ?? { day: d.day, a: 0, b: 0 }), b: d.pnl });
+    return [...days.values()].sort((x, y) => x.day.localeCompare(y.day));
+  }, [statsA, statsB]);
 
   const [unit, setUnit] = useState<"usd" | "pct">("pct");
   const table = useMemo(() => [...shown].sort((a, b) => b.t_flat - a.t_flat), [shown]);
@@ -162,28 +236,9 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
       {error && <p className="text-sm text-red-500">Failed to load jfm_observe: {error}</p>}
 
       <div className="flex flex-wrap items-center gap-1">
-        <span className="w-14 text-xs text-muted-foreground">Strategy</span>
-        {[...strategies, "all"].map((k) => (
-          <Button key={k} size="sm" variant={k === strategy ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setPickedStrategy(k)}>
-            {k === "all" ? "All strategies" : k}
-          </Button>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1">
-        <span className="w-14 text-xs text-muted-foreground">Venue</span>
-        {["all", ...venues].map((v) => (
-          <Button key={v} size="sm" variant={v === venue ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setPickedVenue(v)}>
-            {v === "all" ? "All venues" : v}
-          </Button>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1">
-        <span className="w-14 text-xs text-muted-foreground">Run</span>
-        {[{ id: "all", venue: "" }, ...runs].map((r) => (
-          <Button key={r.id} size="sm" variant={r.id === run ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setPickedRun(r.id)}>
-            {r.id === "all" ? "All runs" : `${r.id.replace(/^observe-/, "")} · ${r.venue}`}
+        {(["combine", "compare"] as const).map((m) => (
+          <Button key={m} size="sm" variant={m === mode ? "default" : "outline"} className="h-7 px-3 text-xs" onClick={() => setMode(m)}>
+            {m === "combine" ? "Combine" : "Compare"}
           </Button>
         ))}
         <Button size="sm" variant={hideDup ? "default" : "outline"} className="ml-2 h-7 px-2 text-xs" onClick={() => setHideDup((v) => !v)}>
@@ -191,6 +246,59 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
         </Button>
       </div>
 
+      {mode === "combine" ? (
+        <SelectionPicker strategies={strategies} resolved={combine} onChange={setCombineSel} />
+      ) : (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <Card>
+            <CardContent className="space-y-1 p-3">
+              <div className="text-xs font-semibold" style={{ color: COMPARE_COLORS.a }}>A</div>
+              <SelectionPicker strategies={strategies} resolved={lineA} onChange={setSelA} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="space-y-1 p-3">
+              <div className="text-xs font-semibold" style={{ color: COMPARE_COLORS.b }}>B</div>
+              <SelectionPicker strategies={strategies} resolved={lineB} onChange={setSelB} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {mode === "compare" && (
+        <Card>
+          <CardContent className="overflow-x-auto p-3">
+            <table className="w-full font-mono text-xs">
+              <thead className="text-muted-foreground">
+                <tr className="border-b">
+                  {["", "Return", "Total PnL (U)", "Trades", "Win rate", "Per trade (U)", "Fees (U)", "Max DD", "Volume (U)"].map((h, i) => (
+                    <th key={h} className={cn("whitespace-nowrap px-2 py-1.5 font-medium", i === 0 ? "text-left" : "text-right")}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {([["A", lineA.sel, statsA], ["B", lineB.sel, statsB]] as const).map(([k, sel, st]) => (
+                  <tr key={k} className="border-b last:border-0">
+                    <td className="whitespace-nowrap px-2 py-1.5 font-sans">
+                      <span className="font-semibold" style={{ color: COMPARE_COLORS[k === "A" ? "a" : "b"] }}>{k}</span> {selectionLabel(sel)}
+                    </td>
+                    <td className={cn("px-2 py-1.5 text-right", tone(st.total))}>{pctOf(st.total)}</td>
+                    <td className={cn("px-2 py-1.5 text-right", tone(st.total))}>{usd(st.total)}</td>
+                    <td className="px-2 py-1.5 text-right">{st.n}</td>
+                    <td className="px-2 py-1.5 text-right">{st.winRate == null ? "—" : `${(st.winRate * 100).toFixed(1)}%`}</td>
+                    <td className={cn("px-2 py-1.5 text-right", tone(st.perTrade))}>{usd(st.perTrade, 3)}</td>
+                    <td className="px-2 py-1.5 text-right">{usd(st.fees)}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right">{st.maxDd.toFixed(2)} U · {((100 * st.maxDd) / INITIAL_CAPITAL).toFixed(2)}%</td>
+                    <td className="px-2 py-1.5 text-right">{Math.round(st.notional).toLocaleString("en-US")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {mode === "combine" && (
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         <Stat label={`Return (on ${INITIAL_CAPITAL.toLocaleString("en-US")} U)`} value={pctOf(stats.total)} className={tone(stats.total)} />
         <Stat label="Total PnL (U)" value={usd(stats.total)} className={tone(stats.total)} />
@@ -201,6 +309,7 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
         <Stat label="Max DD" value={`${stats.maxDd.toFixed(2)} U · ${((100 * stats.maxDd) / INITIAL_CAPITAL).toFixed(2)}%`} />
         <Stat label="Volume (entry notional, U)" value={Math.round(stats.notional).toLocaleString("en-US")} />
       </div>
+      )}
 
       <Card>
         <CardHeader className="pb-2">
@@ -217,7 +326,39 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
               </Button>
             ))}
           </div>
-          {stats.curve.length === 0 ? (
+          {mode === "compare" ? (
+            compareCurve.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">No episodes.</p>
+            ) : (
+              <ChartContainer
+                config={{
+                  [unit === "pct" ? "aPct" : "a"]: { label: `A ${selectionLabel(lineA.sel)}`, color: COMPARE_COLORS.a },
+                  [unit === "pct" ? "bPct" : "b"]: { label: `B ${selectionLabel(lineB.sel)}`, color: COMPARE_COLORS.b },
+                }}
+                className="aspect-auto h-[260px] w-full"
+              >
+                <LineChart data={compareCurve} margin={{ left: 4, right: 4, top: 8 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="ts" type="number" scale="time" domain={["dataMin", "dataMax"]} tickFormatter={fmt} tickLine={false} axisLine={false} minTickGap={40} className="text-xs" />
+                  <YAxis tickLine={false} axisLine={false} width={48} className="text-xs" tickFormatter={(v: number) => (unit === "pct" ? `${v.toFixed(2)}%` : `${v}`)} />
+                  <ReferenceLine y={0} stroke="currentColor" opacity={0.3} />
+                  <ChartTooltip content={<ChartTooltipContent labelFormatter={(_, p) => fmt(Number(p?.[0]?.payload?.ts))} />} />
+                  <ChartLegend content={<ChartLegendContent className="flex-wrap" />} />
+                  {(["a", "b"] as const).map((k) => (
+                    <Line
+                      key={k}
+                      dataKey={unit === "pct" ? `${k}Pct` : k}
+                      type="stepAfter"
+                      stroke={COMPARE_COLORS[k]}
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  ))}
+                </LineChart>
+              </ChartContainer>
+            )
+          ) : stats.curve.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">No episodes.</p>
           ) : (
             <ChartContainer
@@ -247,6 +388,23 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
             <CardDescription className="text-xs">By flat time, {TZ_LABEL} days.</CardDescription>
           </CardHeader>
           <CardContent className="px-2 sm:px-6">
+            {mode === "compare" ? (
+              <ChartContainer
+                config={{ a: { label: "A (U)", color: COMPARE_COLORS.a }, b: { label: "B (U)", color: COMPARE_COLORS.b } }}
+                className="aspect-auto h-[200px] w-full"
+              >
+                <BarChart data={compareDaily} margin={{ left: 4, right: 4, top: 8 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="day" tickFormatter={(d: string) => d.slice(5)} tickLine={false} axisLine={false} className="text-xs" />
+                  <YAxis tickLine={false} axisLine={false} width={40} className="text-xs" />
+                  <ReferenceLine y={0} stroke="currentColor" opacity={0.3} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <ChartLegend content={<ChartLegendContent />} />
+                  <Bar dataKey="a" fill={COMPARE_COLORS.a} radius={2} isAnimationActive={false} />
+                  <Bar dataKey="b" fill={COMPARE_COLORS.b} radius={2} isAnimationActive={false} />
+                </BarChart>
+              </ChartContainer>
+            ) : (
             <ChartContainer config={{ pnl: { label: "PnL (U)", color: POS } }} className="aspect-auto h-[200px] w-full">
               <BarChart data={stats.daily} margin={{ left: 4, right: 4, top: 8 }}>
                 <CartesianGrid vertical={false} />
@@ -261,8 +419,10 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
                 </Bar>
               </BarChart>
             </ChartContainer>
+            )}
           </CardContent>
         </Card>
+        {mode === "combine" && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">By exit reason</CardTitle>
@@ -290,8 +450,10 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
             </table>
           </CardContent>
         </Card>
+        )}
       </div>
 
+      {mode === "combine" && (
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Trades</CardTitle>
@@ -343,6 +505,52 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
           </div>
         </CardContent>
       </Card>
+      )}
+    </div>
+  );
+}
+
+/** Strategy / venue / run buttons for one selection. */
+function SelectionPicker({
+  strategies,
+  resolved,
+  onChange,
+}: {
+  strategies: string[];
+  resolved: ReturnType<typeof resolve>;
+  onChange: (sel: Selection) => void;
+}) {
+  const { sel, venues, runs } = resolved;
+  const row = (label: string, items: { key: string; text: string }[], current: string, pick: (k: string) => void) => (
+    <div className="flex flex-wrap items-center gap-1">
+      <span className="w-14 text-xs text-muted-foreground">{label}</span>
+      {items.map((it) => (
+        <Button key={it.key} size="sm" variant={it.key === current ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => pick(it.key)}>
+          {it.text}
+        </Button>
+      ))}
+    </div>
+  );
+  return (
+    <div className="space-y-1">
+      {row(
+        "Strategy",
+        [...strategies.map((k) => ({ key: k, text: k })), { key: "all", text: "All strategies" }],
+        sel.strategy,
+        (k) => onChange({ strategy: k, venue: "all", run: "all" })
+      )}
+      {row(
+        "Venue",
+        [{ key: "all", text: "All venues" }, ...venues.map((v) => ({ key: v, text: v }))],
+        sel.venue,
+        (v) => onChange({ ...sel, venue: v, run: "all" })
+      )}
+      {row(
+        "Run",
+        [{ key: "all", text: "All runs" }, ...runs.map((r) => ({ key: r.id, text: `${r.id.replace(/^observe-/, "")} · ${r.venue}` }))],
+        sel.run,
+        (r) => onChange({ ...sel, run: r })
+      )}
     </div>
   );
 }
