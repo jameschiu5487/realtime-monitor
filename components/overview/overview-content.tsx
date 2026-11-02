@@ -258,15 +258,22 @@ export function OverviewContent({
   );
   const { selectedIds, toggle } = useSelectedStrategies(selectableIds);
   const { runMode, selectRunMode } = useRunModeFilter();
+  // Same modes as the Overview's strategy list ("live" is real trading too, e.g.
+  // Jump Fade Maker). Children of a parent also run as "live" but are left out
+  // here: their account is labelled once, with the parent, below.
   const isLiveMode = useCallback(
-    (mode: string) => mode === "realtime" || mode === "test-realtime",
+    (mode: string) => mode === "realtime" || mode === "live" || mode === "test-realtime",
     []
   );
+  const accountRuns = useMemo(() => {
+    const childIds = new Set(allStrategies.filter((s) => s.parent_strategy_id).map((s) => s.strategy_id));
+    return allRuns.filter((r) => !childIds.has(r.strategy_id));
+  }, [allStrategies, allRuns]);
   const accountStrategies = useMemo(() => {
-    const map = buildAccountStrategyMap(allRuns, strategyNameMap, isLiveMode);
-    // A parent's child books run as "live", which isLiveMode leaves out, so
-    // their account would otherwise show no occupant. Label it with the parent
-    // once rather than each child: the account is the parent's money.
+    const map = buildAccountStrategyMap(accountRuns, strategyNameMap, isLiveMode);
+    // A parent's child books are left out above, so their account would
+    // otherwise show no occupant. Label it with the parent once rather than
+    // each child: the account is the parent's money.
     for (const parent of parentStrategies) {
       for (const accountId of parent.accountIds) {
         const names = map[accountId] ?? [];
@@ -275,10 +282,10 @@ export function OverviewContent({
       }
     }
     return map;
-  }, [allRuns, strategyNameMap, isLiveMode, parentStrategies]);
+  }, [accountRuns, strategyNameMap, isLiveMode, parentStrategies]);
   const strategyAccounts = useMemo(
-    () => buildStrategyAccountMap(allRuns, isLiveMode),
-    [allRuns, isLiveMode]
+    () => buildStrategyAccountMap(accountRuns, isLiveMode),
+    [accountRuns, isLiveMode]
   );
   // Populated by FundEquityDashboard once the streamed payload arrives.
   const [fundSummary, setFundSummary] = useState<FundSummary | null>(null);
