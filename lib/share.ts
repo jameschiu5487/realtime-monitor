@@ -5,7 +5,8 @@ import { taipeiMidnightMs } from "@/lib/time";
  * A shareholder's share of every amount the app shows, over time
  * (table shareholder_shares, decided 2026-11-03). One ratio per user for every
  * strategy; it changes only when a row is added in the Supabase table editor,
- * effective from a Taipei day until the user's next row.
+ * effective from its effective_from instant (timestamptz; enter it as Taipei
+ * time, e.g. 2026-11-03 02:32+08) until the user's next row.
  *
  * Visibility is separate: user_strategy_access still decides who sees which
  * strategy. This module only says how much of an amount they see.
@@ -23,7 +24,7 @@ import { taipeiMidnightMs } from "@/lib/time";
  */
 
 export interface SharePeriod {
-  /** Epoch ms the ratio takes effect (Taipei midnight of effective_from). */
+  /** Epoch ms the ratio takes effect (effective_from). */
   fromMs: number;
   ratio: number;
 }
@@ -104,12 +105,20 @@ export function scaleCumulative<T>(
 
 type ShareRow = { effective_from: string; share_ratio: number | string };
 
+/**
+ * effective_from is a timestamptz since 2026-11-03 (a ratio can change at the
+ * minute money moved). A bare date — the column's earlier type — still reads
+ * as Taipei midnight.
+ */
+function effectiveMs(value: string): number {
+  const day = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (day) return taipeiMidnightMs(Number(day[1]), Number(day[2]), Number(day[3]));
+  return Date.parse(value);
+}
+
 function toSchedule(rows: ShareRow[]): ShareSchedule {
   return rows
-    .map((r) => {
-      const [y, m, d] = r.effective_from.split("-").map(Number);
-      return { fromMs: taipeiMidnightMs(y, m, d), ratio: Number(r.share_ratio) };
-    })
+    .map((r) => ({ fromMs: effectiveMs(r.effective_from), ratio: Number(r.share_ratio) }))
     .filter((p) => Number.isFinite(p.fromMs) && Number.isFinite(p.ratio))
     .sort((a, b) => a.fromMs - b.fromMs);
 }
