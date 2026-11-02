@@ -96,9 +96,10 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   曾讓 `/positions` 整頁崩掉 —— positions 的數值欄位顯示前一律先判 null。
 - **strategy_runs**: run_id (PK), strategy_id (FK), mode ('backtest'|'paper'|'live'|'realtime'|
   'test-realtime'), status, start_time, end_time, initial_capital, params (jsonb), code_ref, notes。
-  **Overview 只認 `realtime` / `test-realtime`**（`app/(dashboard)/page.tsx` 與
-  `overview-content.tsx` 各一份判斷）；母策略頁則認 `live` + `realtime`（`lib/parent-strategy.ts`）。
-  非子策略的策略若改用 `live`，會在 Overview 靜默消失。
+  **Overview 認 `realtime` / `live` / `test-realtime`**（`app/(dashboard)/page.tsx` 的 `isOverviewLiveMode`；
+  `overview-content.tsx` 的 Realtime 篩選把 `live` 當 `realtime`）；子策略另外用「有沒有母策略」排除，不靠 mode。
+  母策略頁則認 `live` + `realtime`（`lib/parent-strategy.ts`）。以前 Overview 不認 `live`，
+  Jump Fade Maker 因此整個不見（2026-11-03 修）—— 新增 mode 名稱時兩處判斷都要跟著改。
   **`start_time` 實際可能是 null**（引擎會先建 run 再補時間），產生型別卻標 `string`；
   直接 `.slice()` / `new Date()` 會讓整頁 SSR 崩成 error boundary。
 - **trades**: trade_id (PK), run_id (FK), ts, symbol, exchange, action, side ('buy'|'sell'),

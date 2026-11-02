@@ -296,7 +296,8 @@ export function OverviewContent({
 
   const runToModeMap = useMemo(() => {
     const map: Record<string, string> = {};
-    for (const run of allRuns) map[run.run_id] = run.mode as string;
+    // "live" is real trading like "realtime", so the Realtime filter keeps it.
+    for (const run of allRuns) map[run.run_id] = run.mode === "live" ? "realtime" : (run.mode as string);
     return map;
   }, [allRuns]);
 

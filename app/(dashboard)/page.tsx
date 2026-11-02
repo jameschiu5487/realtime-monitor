@@ -23,9 +23,14 @@ import type { ParentStrategyCard } from "@/components/overview/overview-content"
 // route dynamic, so a page-level revalidate would silently do nothing. Caching
 // lives in lib/overview-queries.ts instead.
 
-/** Overview treats these modes as live/active (excludes paper/backtest/etc.). */
+/**
+ * Overview treats these modes as live/active (excludes paper/backtest/etc.).
+ * "live" is the newer engines' name for real trading (Jump Fade Maker); it was
+ * left out and those strategies vanished from the Overview. Children of a
+ * parent also run as "live" but are kept out separately (isOverviewRun).
+ */
 function isOverviewLiveMode(mode: string): boolean {
-  return mode === "realtime" || mode === "test-realtime";
+  return mode === "realtime" || mode === "live" || mode === "test-realtime";
 }
 
 export default async function DashboardPage() {
