@@ -1,3 +1,4 @@
+import { loadShareSchedule, ratioAt } from "@/lib/share";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
@@ -68,17 +69,16 @@ export default async function StrategyDetailPage({
   // needs its own access to be included.
   if (childStrategies.length > 0) {
     const { data: { user } } = await supabase.auth.getUser();
-    const { data: accessRows } = await supabase
-      .from("user_strategy_access")
-      .select("strategy_id, share_ratio")
-      .eq("user_id", user?.id ?? "") as {
-      data: { strategy_id: string; share_ratio: number }[] | null;
-    };
-    const ratioById = new Map(
-      (accessRows ?? []).map((a) => [a.strategy_id, Number(a.share_ratio) || 1])
-    );
-    const visibleChildren = childStrategies.filter((c) => ratioById.has(c.strategy_id));
-    if (!ratioById.has(strategyId) && visibleChildren.length === 0) {
+    const [{ data: accessRows }, share] = await Promise.all([
+      supabase
+        .from("user_strategy_access")
+        .select("strategy_id")
+        .eq("user_id", user?.id ?? "") as unknown as Promise<{ data: { strategy_id: string }[] | null }>,
+      loadShareSchedule(supabase, user?.id),
+    ]);
+    const accessible = new Set((accessRows ?? []).map((a) => a.strategy_id));
+    const visibleChildren = childStrategies.filter((c) => accessible.has(c.strategy_id));
+    if (!accessible.has(strategyId) && visibleChildren.length === 0) {
       return notFound();
     }
 
@@ -87,10 +87,7 @@ export default async function StrategyDetailPage({
         supabase={supabase}
         parent={strategy}
         childStrategies={visibleChildren}
-        parentShareRatio={ratioById.get(strategyId) ?? null}
-        shareRatioByChild={Object.fromEntries(
-          visibleChildren.map((c) => [c.strategy_id, ratioById.get(c.strategy_id) ?? 1])
-        )}
+        share={share}
         includePaper={paper === "1"}
       />
     );
@@ -106,13 +103,9 @@ export default async function StrategyDetailPage({
   // "simulated equity" labelling.
   const parentStrategy = await fetchParentRef(supabase, strategy);
 
-  // Fetch share ratio for current user
-  const { data: accessData } = await supabase
-    .from("user_strategy_access")
-    .select("share_ratio")
-    .eq("strategy_id", strategyId)
-    .single() as { data: { share_ratio: number } | null };
-  const shareRatio = accessData?.share_ratio ?? 1;
+  // The viewer's share of every amount, over time (lib/share.ts).
+  const { data: { user } } = await supabase.auth.getUser();
+  const share = await loadShareSchedule(supabase, user?.id);
 
   // Slippage is reported per fill, so it is read straight from trades rather
   // than any rollup. exec_slippage_bps only exists from 2026-08-10, so older
@@ -216,8 +209,9 @@ export default async function StrategyDetailPage({
                 <span>
                   <span className="text-foreground font-mono font-medium">
                     $
-                    {(runs
-                      .reduce((sum, r) => sum + (r.initial_capital || 0), 0) * shareRatio)
+                    {runs
+                      // Capital is a level: each run's at the ratio when it started.
+                      .reduce((sum, r) => sum + (r.initial_capital || 0) * ratioAt(share, r.start_time ?? Date.now()), 0)
                       .toLocaleString()}
                   </span>{" "}
                   capital
@@ -246,7 +240,7 @@ export default async function StrategyDetailPage({
         </CardHeader>
         <CardContent className="px-0 sm:px-6">
           <div className="overflow-x-auto">
-            <StrategyRunsTable runs={runs} strategyId={strategyId} shareRatio={shareRatio} />
+            <StrategyRunsTable runs={runs} strategyId={strategyId} share={share} />
           </div>
         </CardContent>
       </Card>

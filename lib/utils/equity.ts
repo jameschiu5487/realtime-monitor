@@ -1,4 +1,5 @@
 import type { EquityCurve } from "@/lib/types/database";
+import { constantShare, isConstantShare, ratioAt, scaleCumulative, type ShareSchedule } from "@/lib/share";
 
 export interface ChartDataPoint {
   time: number;
@@ -49,11 +50,13 @@ export function mergeStrategyEquity(data: EquityCurve[]): EquityCurve[] {
 }
 
 /**
- * Aggregate merged equity curves across strategies with forward-fill and share ratio scaling.
+ * Aggregate merged equity curves across strategies with forward-fill. Equity is
+ * a level, so each point takes the viewer's ratio at its own time (lib/share.ts);
+ * the default share leaves it unscaled.
  */
 export function aggregateTotalEquity(
   strategyData: Map<string, EquityCurve[]>,
-  shareRatioMap: Record<string, number>
+  share: ShareSchedule = constantShare(1)
 ): ChartDataPoint[] {
   if (strategyData.size === 0) return [];
 
@@ -88,9 +91,8 @@ export function aggregateTotalEquity(
   for (const ts of sortedTimestamps) {
     for (const [strategyId, data] of strategyData) {
       let idx = strategyIndices.get(strategyId) || 0;
-      const ratio = shareRatioMap[strategyId] ?? 1;
       while (idx < data.length && new Date(data[idx].ts).getTime() <= ts) {
-        lastValues.set(strategyId, data[idx].total_equity * ratio);
+        lastValues.set(strategyId, data[idx].total_equity * ratioAt(share, data[idx].ts));
         idx++;
       }
       strategyIndices.set(strategyId, idx);
@@ -111,15 +113,46 @@ export function aggregateTotalEquity(
   return result;
 }
 
+const LEVEL_FIELDS = [
+  "total_equity",
+  "total_position_value",
+  "binance_equity",
+  "binance_position_value",
+  "bybit_equity",
+  "bybit_position_value",
+] as const;
+const CUMULATIVE_FIELDS = ["total_pnl", "binance_pnl", "bybit_pnl"] as const;
+
 /**
- * Build a combined EquityCurve[] (summing across strategies with share ratio + forward-fill)
- * for use with PerformanceStats.
+ * One strategy's series with the viewer's share applied: levels at their own
+ * time, cumulative PnL increment by increment (lib/share.ts).
+ */
+function scaleStrategySeries(data: EquityCurve[], share: ShareSchedule): EquityCurve[] {
+  if (isConstantShare(share) && (share[0]?.ratio ?? 1) === 1) return data;
+  const withPnl = scaleCumulative(data, (p) => p.ts, [...CUMULATIVE_FIELDS], share);
+  return withPnl.map((p) => {
+    const r = ratioAt(share, p.ts);
+    const out = { ...p };
+    for (const f of LEVEL_FIELDS) out[f] = Number(p[f] ?? 0) * r;
+    return out;
+  });
+}
+
+/**
+ * Build a combined EquityCurve[] (summing across strategies with forward-fill).
+ * PerformanceStats takes it unscaled (the default): its figures are
+ * percentages, and a ratio change is a change of ownership, not performance.
+ * With a share, amounts are scaled as in scaleStrategySeries; drawdown_pct is
+ * always from the unscaled sum, for the same reason.
  */
 export function buildCombinedEquityCurve(
-  strategyData: Map<string, EquityCurve[]>,
-  shareRatioMap: Record<string, number>
+  strategyDataRaw: Map<string, EquityCurve[]>,
+  share: ShareSchedule = constantShare(1)
 ): EquityCurve[] {
-  if (strategyData.size === 0) return [];
+  if (strategyDataRaw.size === 0) return [];
+  const strategyData = new Map(
+    Array.from(strategyDataRaw, ([id, data]) => [id, scaleStrategySeries(data, share)] as const)
+  );
 
   const allTimestamps = new Set<number>();
   const tsToIso = new Map<number, string>();
@@ -143,6 +176,7 @@ export function buildCombinedEquityCurve(
 
   const strategyIndices = new Map<string, number>();
   const lastRecords = new Map<string, EquityCurve>();
+  const lastRaw = new Map<string, number>();
   for (const strategyId of strategyData.keys()) {
     strategyIndices.set(strategyId, 0);
   }
@@ -155,6 +189,7 @@ export function buildCombinedEquityCurve(
       let idx = strategyIndices.get(strategyId) || 0;
       while (idx < data.length && new Date(data[idx].ts).getTime() <= ts) {
         lastRecords.set(strategyId, data[idx]);
+        lastRaw.set(strategyId, Number(strategyDataRaw.get(strategyId)?.[idx]?.total_equity ?? 0));
         idx++;
       }
       strategyIndices.set(strategyId, idx);
@@ -173,22 +208,23 @@ export function buildCombinedEquityCurve(
     let bybitPnl = 0;
     let bybitPositionValue = 0;
 
-    for (const [strategyId, record] of lastRecords) {
-      const ratio = shareRatioMap[strategyId] ?? 1;
-      totalEquity += record.total_equity * ratio;
-      totalPnl += record.total_pnl * ratio;
-      totalPositionValue += record.total_position_value * ratio;
-      binanceEquity += record.binance_equity * ratio;
-      binancePnl += record.binance_pnl * ratio;
-      binancePositionValue += record.binance_position_value * ratio;
-      bybitEquity += record.bybit_equity * ratio;
-      bybitPnl += record.bybit_pnl * ratio;
-      bybitPositionValue += record.bybit_position_value * ratio;
+    for (const record of lastRecords.values()) {
+      totalEquity += record.total_equity;
+      totalPnl += record.total_pnl;
+      totalPositionValue += record.total_position_value;
+      binanceEquity += record.binance_equity;
+      binancePnl += record.binance_pnl;
+      binancePositionValue += record.binance_position_value;
+      bybitEquity += record.bybit_equity;
+      bybitPnl += record.bybit_pnl;
+      bybitPositionValue += record.bybit_position_value;
     }
 
-    peakEquity = Math.max(peakEquity, totalEquity);
+    let rawEquity = 0;
+    for (const v of lastRaw.values()) rawEquity += v;
+    peakEquity = Math.max(peakEquity, rawEquity);
     const drawdownPct = peakEquity > 0
-      ? ((peakEquity - totalEquity) / peakEquity) * 100
+      ? ((peakEquity - rawEquity) / peakEquity) * 100
       : 0;
 
     result.push({

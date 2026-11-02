@@ -1,3 +1,4 @@
+import { loadShareSchedules, ratioAt } from "@/lib/share";
 import { NextResponse, after } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendPushNotification } from "@/lib/web-push";
@@ -142,19 +143,11 @@ async function processCombinedTrade(payload: CombinedTradePayload) {
   );
   if (!userIds.length) return { sent: 0, reason: "no access" };
 
-  // Look up share_ratio per user
+  // Each recipient's share (shareholder_shares, lib/share.ts) when the position
+  // closed. Same for every strategy; a user with no rows gets 1.
   const ratioMap = new Map<string, number>();
-  if (strategyId) {
-    const { data: accessRows } = await supabase
-      .from("user_strategy_access")
-      .select("user_id, share_ratio")
-      .eq("strategy_id", strategyId)
-      .in("user_id", userIds);
-
-    for (const row of accessRows ?? []) {
-      ratioMap.set(row.user_id, Number(row.share_ratio) || 1);
-    }
-  }
+  const schedules = await loadShareSchedules(supabase, userIds);
+  for (const [userId, schedule] of schedules) ratioMap.set(userId, ratioAt(schedule, ts));
 
   const { data: subs } = await supabase
     .from("push_subscriptions")

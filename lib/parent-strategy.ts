@@ -1,5 +1,5 @@
+import { constantShare, currentRatio, ratioAt, scaleCumulative, type ShareSchedule } from "@/lib/share";
 import type {
-  CombinedTrade,
   EquityCurve,
   Position,
   StrategyRun,
@@ -13,8 +13,8 @@ import { GAP_THRESHOLD_MS } from "@/lib/utils/equity";
  * book on the same exchange account and writes its own runs. The parent page
  * sums the children's *current* books: one running run per (child, mode).
  *
- * Share ratio: every figure is scaled by the viewer's share_ratio for the child
- * it came from, before summing (children may carry different ratios).
+ * Share: amounts carry the viewer's share over time (lib/share.ts, one ratio
+ * for every child); percentages are computed unscaled.
  */
 
 /** Modes that count as "live" on the parent page. `realtime` is the legacy name. */
@@ -127,11 +127,15 @@ export function currentPositions(
     }));
 }
 
-/** Per-book summary from its own (unscaled) equity series. */
+/**
+ * Per-book summary from its own (unscaled) equity series. Amounts carry the
+ * viewer's share (lib/share.ts): capital at the run's start, equity at its last
+ * point, PnL increment by increment; the percentages stay unscaled.
+ */
 export function summarizeBook(
   run: Pick<StrategyRun, "run_id" | "strategy_id" | "mode" | "start_time" | "initial_capital">,
   childName: string,
-  shareRatio: number,
+  share: ShareSchedule,
   series: EquityCurve[],
   positionsCount: number
 ): ParentBook {
@@ -146,16 +150,17 @@ export function summarizeBook(
   }
 
   const base = initial > 0 ? initial : series[0]?.total_equity ?? 0;
+  const scaledPnl = scaleCumulative(series, (p) => p.ts, ["total_pnl"], share);
   return {
     runId: run.run_id,
     childId: run.strategy_id,
     childName,
     mode: run.mode as string,
     startTime: run.start_time,
-    shareRatio,
-    initialCapital: initial * shareRatio,
-    equity: last ? last.total_equity * shareRatio : null,
-    pnl: last ? last.total_pnl * shareRatio : null,
+    shareRatio: currentRatio(share),
+    initialCapital: initial * ratioAt(share, run.start_time ?? series[0]?.ts ?? Date.now()),
+    equity: last ? last.total_equity * ratioAt(share, last.ts) : null,
+    pnl: last ? scaledPnl[scaledPnl.length - 1].total_pnl : null,
     returnPct: last && base > 0 ? ((last.total_equity - base) / base) * 100 : null,
     drawdownPct: last && peak > 0 ? ((peak - last.total_equity) / peak) * 100 : null,
     maxDrawdownPct: last ? maxDd : null,
@@ -178,9 +183,13 @@ export interface PnlPoint {
  * between its own points, so no timestamp double counts or drops a book.
  */
 export function sumPnlSeries(
-  seriesByRun: Map<string, EquityCurve[]>,
-  ratioByRun: Record<string, number>
+  seriesByRunRaw: Map<string, EquityCurve[]>,
+  share: ShareSchedule
 ): PnlPoint[] {
+  // Cumulative PnL: each book's increments at the viewer's ratio then (lib/share.ts).
+  const seriesByRun = new Map(
+    Array.from(seriesByRunRaw, ([id, s]) => [id, scaleCumulative(s, (p) => p.ts, ["total_pnl"], share)] as const)
+  );
   const stamps = new Set<number>();
   for (const series of seriesByRun.values()) {
     for (const p of series) stamps.add(time(p.ts));
@@ -195,7 +204,7 @@ export function sumPnlSeries(
     for (const [runId, series] of seriesByRun) {
       let i = idx.get(runId) ?? 0;
       while (i < series.length && time(series[i].ts) <= t) {
-        last.set(runId, series[i].total_pnl * (ratioByRun[runId] ?? 1));
+        last.set(runId, series[i].total_pnl);
         i++;
       }
       idx.set(runId, i);
@@ -205,26 +214,6 @@ export function sumPnlSeries(
     result.push({ time: new Date(t).toISOString(), pnl: total });
   }
   return result;
-}
-
-/**
- * Combined trades with quantity and PnL scaled per book, for PerformanceStats
- * (whose own shareRatio prop assumes a single ratio, so it gets 1).
- */
-export function scaleCombinedTrades(
-  trades: CombinedTrade[],
-  ratioByRun: Record<string, number>
-): CombinedTrade[] {
-  return trades.map((t) => {
-    const ratio = ratioByRun[t.run_id] ?? 1;
-    return {
-      ...t,
-      quantity: num(t.quantity) * ratio,
-      entry_price: num(t.entry_price),
-      exit_price: t.exit_price == null ? t.exit_price : num(t.exit_price),
-      total_pnl: num(t.total_pnl) * ratio,
-    };
-  });
 }
 
 /**
@@ -260,12 +249,15 @@ export function chainBookSeries(
  * so a book coming online later neither shifts the start of the curve nor
  * adds a deposit-shaped jump; restarts don't reset it either (see
  * chainBookSeries). Each book's last value is carried forward between its
- * points. Fields are scaled by the book's share ratio.
+ * points. With a share (lib/share.ts) equity and position value are levels at
+ * the ratio of their time and PnL is scaled increment by increment; leave it
+ * out for PerformanceStats, whose figures are percentages. drawdown_pct is
+ * always from the unscaled sum.
  */
 export function buildBookStatsCurve(
   seriesByBook: Map<string, EquityCurve[]>,
-  ratioByBook: Record<string, number>,
-  capitalByBook: Record<string, number>
+  capitalByBook: Record<string, number>,
+  share: ShareSchedule = constantShare(1)
 ): EquityCurve[] {
   const books = Array.from(seriesByBook.entries()).filter(([, s]) => s.length > 0);
   if (books.length === 0) return [];
@@ -278,6 +270,8 @@ export function buildBookStatsCurve(
   const last = new Map<string, EquityCurve>();
   const result: EquityCurve[] = [];
   let peak = 0;
+  let prevRawPnl: number | null = null;
+  let scaledPnl = 0;
 
   for (const t of sorted) {
     let equity = 0;
@@ -290,27 +284,31 @@ export function buildBookStatsCurve(
         i++;
       }
       idx.set(book, i);
-      const ratio = ratioByBook[book] ?? 1;
       const rec = last.get(book);
       const bookPnl = num((rec ?? series[0]).total_pnl);
-      equity += (num(capitalByBook[book]) + bookPnl) * ratio;
-      pnl += bookPnl * ratio;
-      if (rec) positionValue += num(rec.total_position_value) * ratio;
+      equity += num(capitalByBook[book]) + bookPnl;
+      pnl += bookPnl;
+      if (rec) positionValue += num(rec.total_position_value);
     }
+    // Drawdown from the unscaled sum; then the viewer's share.
     peak = Math.max(peak, equity);
+    const drawdown = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
+    const ratio = ratioAt(share, t);
+    scaledPnl = prevRawPnl === null ? pnl * ratio : scaledPnl + (pnl - prevRawPnl) * ratio;
+    prevRawPnl = pnl;
     result.push({
       run_id: "combined",
       ts: stamps.get(t) ?? new Date(t).toISOString(),
-      total_equity: equity,
-      total_pnl: pnl,
-      total_position_value: positionValue,
+      total_equity: equity * ratio,
+      total_pnl: scaledPnl,
+      total_position_value: positionValue * ratio,
       binance_equity: 0,
       binance_pnl: 0,
       binance_position_value: 0,
       bybit_equity: 0,
       bybit_pnl: 0,
       bybit_position_value: 0,
-      drawdown_pct: peak > 0 ? ((peak - equity) / peak) * 100 : 0,
+      drawdown_pct: drawdown,
     });
   }
   return result;

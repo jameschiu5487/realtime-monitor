@@ -71,7 +71,7 @@ interface ParentAccountEquityProps {
   rows: FundAccountEquity[];
   /** Server clock, so ranges match between SSR and hydration. */
   nowMs: number;
-  /** Viewer's share_ratio on the parent itself; null without direct access. */
+  /** The viewer's share today (lib/share.ts); shown only, the account equity is not scaled. */
   parentShareRatio: number | null;
   fetchError: string | null;
   /**

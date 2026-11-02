@@ -1,5 +1,6 @@
 "use client";
 
+import { constantShare, ratioAt, type ShareSchedule } from "@/lib/share";
 import Link from "next/link";
 import {
   Table,
@@ -18,7 +19,8 @@ import { formatDateTime as taipeiDateTime } from "@/lib/time";
 interface StrategyRunsTableProps {
   runs: StrategyRun[];
   strategyId: string;
-  shareRatio?: number;
+  /** The viewer's share over time (lib/share.ts); each run's capital at the ratio when it started. */
+  share?: ShareSchedule;
 }
 
 const modeVariants: Record<
@@ -61,10 +63,12 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+const NO_SCALING = constantShare(1);
+
 export function StrategyRunsTable({
   runs,
   strategyId,
-  shareRatio = 1,
+  share = NO_SCALING,
 }: StrategyRunsTableProps) {
   if (runs.length === 0) {
     return (
@@ -113,7 +117,7 @@ export function StrategyRunsTable({
                 {run.end_time ? formatDateTime(run.end_time) : "-"}
               </TableCell>
               <TableCell className="py-2.5 text-right text-sm font-mono">
-                {formatCurrency(run.initial_capital * shareRatio)}
+                {formatCurrency(run.initial_capital * ratioAt(share, run.start_time ?? Date.now()))}
               </TableCell>
               <TableCell className="py-2.5 text-right">
                 <Link

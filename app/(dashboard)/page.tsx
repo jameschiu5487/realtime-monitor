@@ -1,3 +1,4 @@
+import { loadShareSchedule } from "@/lib/share";
 import { createClient } from "@/lib/supabase/server";
 import { OverviewContent } from "@/components/overview/overview-content";
 import {
@@ -41,8 +42,8 @@ export default async function DashboardPage() {
     // Per-user, so deliberately outside the shared cache.
     supabase
       .from("user_strategy_access")
-      .select("user_id, strategy_id, share_ratio") as unknown as Promise<{
-      data: { user_id: string; strategy_id: string; share_ratio: number }[] | null;
+      .select("user_id, strategy_id") as unknown as Promise<{
+      data: { user_id: string; strategy_id: string }[] | null;
     }>,
     supabase.auth.getUser(),
   ]);
@@ -79,11 +80,9 @@ export default async function DashboardPage() {
     cryptoFuturesStrategyIds.has(r.strategy_id)
   ) as StrategyRun[];
 
-  // Build share ratio map: strategy_id -> share_ratio
-  const shareRatioMap: Record<string, number> = {};
-  for (const row of accessResult.data ?? []) {
-    shareRatioMap[row.strategy_id] = row.share_ratio;
-  }
+  // The viewer's share of every amount, over time (lib/share.ts); per request,
+  // outside the shared cache.
+  const share = await loadShareSchedule(supabase, user?.id);
 
   // Children of a parent strategy (e.g. Kepler) keep virtual books on a shared
   // exchange account — their equity is simulated, not money. They are kept out
@@ -249,7 +248,7 @@ export default async function DashboardPage() {
       activeStrategies={activeStrategies}
       parentStrategies={parentStrategies}
       runningRunIds={runningRunIds}
-      shareRatioMap={shareRatioMap}
+      share={share}
       runToStrategyMap={runToStrategyMap}
       strategyNameMap={Object.fromEntries(strategyNameMap)}
       metricsData={{

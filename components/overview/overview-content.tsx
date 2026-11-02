@@ -1,5 +1,6 @@
 "use client";
 
+import { ratioAt, type ShareSchedule } from "@/lib/share";
 import { useState, useEffect, useMemo, useCallback, Suspense, use } from "react";
 import Link from "next/link";
 import { Layers } from "lucide-react";
@@ -13,7 +14,6 @@ import {
   buildStrategyAccountMap,
   exchangeBadgeClass,
 } from "@/lib/utils/fund-account-strategy";
-import { deriveFundShareRatio } from "@/lib/utils/fund-equity";
 import { formatDate } from "@/lib/time";
 import type {
   Strategy,
@@ -111,7 +111,8 @@ interface OverviewContentProps {
   /** Parent strategy_id -> its live books' fill notional, for turnover. */
   parentFills?: Record<string, { ts: string; notional: number }[]>;
   runningRunIds: string[];
-  shareRatioMap: Record<string, number>;
+  /** The viewer's share of every amount, over time (lib/share.ts). */
+  share: ShareSchedule;
   runToStrategyMap: Record<string, string>;
   strategyNameMap: Record<string, string>;
   metricsData: MetricsData;
@@ -138,14 +139,14 @@ type FundSummary = { total: number; accountCount: number };
 /** Suspends on the streamed fund equity payload without blocking the page. */
 function FundEquitySection({
   promise,
-  shareRatio,
+  share,
   accountStrategies,
   hiddenAccountIds,
   onSummaryChange,
   onRowsChange,
 }: {
   promise: Promise<{ data: FundAccountEquity[]; error: string | null }>;
-  shareRatio: number;
+  share: ShareSchedule;
   accountStrategies: ReturnType<typeof buildAccountStrategyMap>;
   hiddenAccountIds?: string[];
   onSummaryChange: (summary: FundSummary) => void;
@@ -160,7 +161,7 @@ function FundEquitySection({
     <FundEquityDashboard
       initialData={data}
       fetchError={error}
-      shareRatio={shareRatio}
+      share={share}
       accountStrategies={accountStrategies}
       hiddenAccountIds={hiddenAccountIds}
       onSummaryChange={onSummaryChange}
@@ -237,7 +238,7 @@ export function OverviewContent({
   activeStrategies,
   parentStrategies = NO_PARENTS,
   runningRunIds,
-  shareRatioMap,
+  share,
   runToStrategyMap,
   strategyNameMap,
   metricsData,
@@ -257,10 +258,6 @@ export function OverviewContent({
   );
   const { selectedIds, toggle } = useSelectedStrategies(selectableIds);
   const { runMode, selectRunMode } = useRunModeFilter();
-  const fundShareRatio = useMemo(
-    () => deriveFundShareRatio(shareRatioMap),
-    [shareRatioMap]
-  );
   const isLiveMode = useCallback(
     (mode: string) => mode === "realtime" || mode === "test-realtime",
     []
@@ -440,7 +437,7 @@ export function OverviewContent({
       const strategyId = runToStrategy[point.run_id];
       if (!strategyId) continue;
       const ts = new Date(point.ts).getTime();
-      const ratio = shareRatioMap[strategyId] ?? 1;
+      const ratio = ratioAt(share, point.ts);
       const existing = lastEquityPerStrategy.get(strategyId);
       if (!existing || ts > existing.ts) {
         lastEquityPerStrategy.set(strategyId, {
@@ -460,7 +457,7 @@ export function OverviewContent({
       const strategyId = runToStrategy[point.run_id];
       if (!strategyId) continue;
       const ts = new Date(point.ts).getTime();
-      const ratio = shareRatioMap[strategyId] ?? 1;
+      const ratio = ratioAt(share, point.ts);
       const existing = equity24hPerStrategy.get(strategyId);
       if (!existing || ts < existing.ts) {
         equity24hPerStrategy.set(strategyId, {
@@ -484,7 +481,7 @@ export function OverviewContent({
       activeStrategiesCount,
       todayTradeCount,
     };
-  }, [filtered, runToStrategyMap, shareRatioMap, selectedIds]);
+  }, [filtered, runToStrategyMap, share, selectedIds]);
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -562,7 +559,7 @@ export function OverviewContent({
       <Suspense fallback={<FundEquitySkeleton />}>
         <FundEquitySection
           promise={fundEquityPromise}
-          shareRatio={fundShareRatio}
+          share={share}
           accountStrategies={accountStrategies}
           hiddenAccountIds={hiddenAccountIds}
           onSummaryChange={handleFundSummaryChange}
@@ -748,7 +745,7 @@ export function OverviewContent({
               runningRunIds={chartFiltered.runningRunIds}
               strategyRunIds={chartFiltered.strategyRunIds}
               runToStrategyMap={runToStrategyMap}
-              shareRatioMap={shareRatioMap}
+              share={share}
               strategyNameMap={chartFiltered.strategyNameMap}
               externalSeries={externalSeries}
               externalStrategyNames={parentNameMap}

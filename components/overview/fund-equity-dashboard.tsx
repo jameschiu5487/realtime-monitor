@@ -1,5 +1,6 @@
 "use client";
 
+import { constantShare, currentRatio, ratioAt, type ShareSchedule } from "@/lib/share";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
@@ -61,6 +62,8 @@ function formatMoney(value: number): string {
   });
 }
 
+const NO_SCALING = constantShare(1);
+
 function pruneOldRows(
   rows: FundAccountEquity[],
   nowMs: number
@@ -72,15 +75,18 @@ function pruneOldRows(
 export function FundEquityDashboard({
   initialData,
   fetchError,
-  shareRatio = 1,
+  share = NO_SCALING,
   accountStrategies = {},
   hiddenAccountIds,
   onSummaryChange,
 }: {
   initialData: FundAccountEquity[];
   fetchError?: string | null;
-  /** From user_strategy_access via deriveFundShareRatio; scales all displayed amounts. */
-  shareRatio?: number;
+  /**
+   * The viewer's share over time (lib/share.ts). Balances are levels: the latest
+   * ones take today's ratio, each curve point the ratio at its own time.
+   */
+  share?: ShareSchedule;
   /** account_id → strategy names for running realtime / test-realtime runs. */
   accountStrategies?: Record<string, string[]>;
   /**
@@ -180,6 +186,7 @@ export function FundEquityDashboard({
   }, [range]);
 
   const latest = useMemo(() => latestByAccount(rows), [rows]);
+  const shareRatio = currentRatio(share);
   const total = useMemo(
     () => totalEquityFromLatest(latest) * shareRatio,
     [latest, shareRatio]
@@ -204,9 +211,9 @@ export function FundEquityDashboard({
     () =>
       downsample(buildFundEquityCurve(rows, sinceMs)).map((point) => ({
         ...point,
-        equity: point.equity * shareRatio,
+        equity: point.equity * ratioAt(share, point.time),
       })),
-    [rows, sinceMs, shareRatio]
+    [rows, sinceMs, share]
   );
 
   useEffect(() => {

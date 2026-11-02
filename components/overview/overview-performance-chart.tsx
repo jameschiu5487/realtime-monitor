@@ -1,5 +1,6 @@
 "use client";
 
+import { ratioAt, type ShareSchedule } from "@/lib/share";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import {
@@ -14,6 +15,7 @@ import { cn } from "@/lib/utils";
 import {
   PerformanceStats,
   combinedTradeTurnover,
+  scaledTradeTurnover,
   type TurnoverFigures,
 } from "@/components/charts/performance-stats";
 import {
@@ -40,7 +42,8 @@ interface OverviewPerformanceChartProps {
   /** All run IDs grouped by strategy: strategy_id -> run_id[] */
   strategyRunIds: Record<string, string[]>;
   runToStrategyMap: Record<string, string>;
-  shareRatioMap: Record<string, number>;
+  /** The viewer's share of every amount, over time (lib/share.ts). */
+  share: ShareSchedule;
   /** strategy_id -> strategy name for per-strategy stats display */
   strategyNameMap: Record<string, string>;
   /**
@@ -90,7 +93,7 @@ export function OverviewPerformanceChart({
   runningRunIds,
   strategyRunIds,
   runToStrategyMap,
-  shareRatioMap,
+  share,
   strategyNameMap,
   externalSeries,
   externalStrategyNames,
@@ -269,16 +272,19 @@ export function OverviewPerformanceChart({
     return merged;
   }, [equityData, runToStrategyMap, externalSeries]);
 
-  // Aggregate across strategies (for chart)
-  const chartData = useMemo(() => {
-    const raw = aggregateTotalEquity(mergedPerStrategy, shareRatioMap);
-    return downsample(raw);
-  }, [mergedPerStrategy, shareRatioMap]);
+  // Aggregate across strategies, unscaled; the chart shows it at the viewer's
+  // ratio at each point's time (equity is a level, lib/share.ts).
+  const rawChartData = useMemo(() => downsample(aggregateTotalEquity(mergedPerStrategy)), [mergedPerStrategy]);
+  const chartData = useMemo(
+    () => rawChartData.map((p) => ({ ...p, equity: p.equity * ratioAt(share, p.time) })),
+    [rawChartData, share]
+  );
 
-  // Build combined EquityCurve for PerformanceStats
+  // Combined EquityCurve for PerformanceStats: unscaled, its figures are
+  // percentages (lib/utils/equity.ts buildCombinedEquityCurve).
   const combinedEquityCurve = useMemo(
-    () => buildCombinedEquityCurve(mergedPerStrategy, shareRatioMap),
-    [mergedPerStrategy, shareRatioMap]
+    () => buildCombinedEquityCurve(mergedPerStrategy),
+    [mergedPerStrategy]
   );
 
   // Time range
@@ -351,7 +357,8 @@ export function OverviewPerformanceChart({
   }, [combinedTrades, timeRange]);
 
   // Turnover of each plotted external series within the range: its fills'
-  // notional, over the account equity change (unscaled, like combined trades).
+  // notional, over the account equity change (unscaled, like combined trades;
+  // scaledNotional is what the viewer is shown, each fill at its own ratio).
   const externalTurnover = useMemo(() => {
     const out = new Map<string, TurnoverFigures>();
     const start = timeRange.start.getTime();
@@ -363,26 +370,29 @@ export function OverviewPerformanceChart({
     for (const strategyId of Object.keys(externalSeries ?? {})) {
       const points = (mergedPerStrategy.get(strategyId) ?? []).filter((p) => inRange(p.ts));
       if (points.length === 0) continue;
-      const notional = (externalFills?.[strategyId] ?? [])
-        .filter((f) => inRange(f.ts))
-        .reduce((sum, f) => sum + f.notional, 0);
+      const fills = (externalFills?.[strategyId] ?? []).filter((f) => inRange(f.ts));
+      const notional = fills.reduce((sum, f) => sum + f.notional, 0);
+      const scaledNotional = fills.reduce((sum, f) => sum + f.notional * ratioAt(share, f.ts), 0);
       const pnl = points[points.length - 1].total_equity - points[0].total_equity;
-      out.set(strategyId, { notional, pnl });
+      out.set(strategyId, { notional, pnl, scaledNotional });
     }
     return out;
-  }, [externalSeries, externalFills, mergedPerStrategy, timeRange]);
+  }, [externalSeries, externalFills, mergedPerStrategy, timeRange, share]);
 
   // Combined turnover only needs overriding when an external series is in it.
   const combinedTurnover = useMemo((): TurnoverFigures | undefined => {
     if (externalTurnover.size === 0) return undefined;
+    // All unscaled, so turnover rate and PnL per turnover stay ratios; only the
+    // displayed amount is scaled, trade by trade and fill by fill.
     const total = combinedTradeTurnover(filteredCombinedTrades);
-    for (const [strategyId, t] of externalTurnover) {
-      const ratio = shareRatioMap[strategyId] ?? 1;
-      total.notional += t.notional * ratio;
-      total.pnl += t.pnl * ratio;
+    let scaledNotional = scaledTradeTurnover(filteredCombinedTrades, share);
+    for (const t of externalTurnover.values()) {
+      total.notional += t.notional;
+      total.pnl += t.pnl;
+      scaledNotional += t.scaledNotional ?? t.notional;
     }
-    return total;
-  }, [externalTurnover, filteredCombinedTrades, shareRatioMap]);
+    return { ...total, scaledNotional };
+  }, [externalTurnover, filteredCombinedTrades, share]);
 
   // Per-strategy filtered data for individual strategy stats
   const perStrategyStats = useMemo(() => {
@@ -391,7 +401,7 @@ export function OverviewPerformanceChart({
       // Build combined equity curve for this single strategy
       const singleStrategyMap = new Map<string, EquityCurve[]>();
       singleStrategyMap.set(strategyId, mergedPerStrategy.get(strategyId) || []);
-      const equityCurve = buildCombinedEquityCurve(singleStrategyMap, shareRatioMap);
+      const equityCurve = buildCombinedEquityCurve(singleStrategyMap);
 
       // Filter by time range
       const filteredEquity = equityCurve.filter((d) => {
@@ -417,17 +427,19 @@ export function OverviewPerformanceChart({
         runCount: strategyRunIds[strategyId]?.length ?? 0,
       };
     });
-  }, [mergedPerStrategy, shareRatioMap, timeRange, combinedTrades, strategyRunIds, strategyNameMap, externalStrategyNames, externalTurnover]);
+  }, [mergedPerStrategy, timeRange, combinedTrades, strategyRunIds, strategyNameMap, externalStrategyNames, externalTurnover]);
 
-  // Compute P&L for selected time range
+  // P&L for the selected range: each step of the unscaled curve at the viewer's
+  // ratio then, so a ratio change isn't read as profit or loss; % is unscaled.
   const rangePnl = useMemo(() => {
-    if (filteredChartData.length < 2) return { pnl: 0, pct: 0, hasData: false };
-    const startEquity = filteredChartData[0].equity;
-    const endEquity = filteredChartData[filteredChartData.length - 1].equity;
-    const pnl = endEquity - startEquity;
-    const pct = startEquity > 0 ? (pnl / startEquity) * 100 : 0;
+    const raw = rawChartData.filter((d) => d.time >= timeRange.start.getTime() && d.time <= timeRange.end.getTime());
+    if (raw.length < 2) return { pnl: 0, pct: 0, hasData: false };
+    let pnl = 0;
+    for (let i = 1; i < raw.length; i++) pnl += (raw[i].equity - raw[i - 1].equity) * ratioAt(share, raw[i].time);
+    const startEquity = raw[0].equity;
+    const pct = startEquity > 0 ? ((raw[raw.length - 1].equity - startEquity) / startEquity) * 100 : 0;
     return { pnl, pct, hasData: true };
-  }, [filteredChartData]);
+  }, [rawChartData, timeRange, share]);
 
   if (chartData.length === 0) {
     return (
@@ -606,6 +618,7 @@ export function OverviewPerformanceChart({
         filteredEquityCurve={filteredEquityCurve}
         filteredCombinedTrades={filteredCombinedTrades}
         turnover={combinedTurnover}
+        share={share}
       />
       {externalNames.length > 0 && (
         <p className="text-xs text-muted-foreground">
@@ -633,7 +646,7 @@ export function OverviewPerformanceChart({
               <PerformanceStats
                 filteredEquityCurve={s.filteredEquity}
                 filteredCombinedTrades={s.filteredTrades}
-                shareRatio={shareRatioMap[s.strategyId] ?? 1}
+                share={share}
                 turnover={s.turnover}
               />
             </div>

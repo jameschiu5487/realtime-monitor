@@ -1,5 +1,6 @@
 "use client";
 
+import { ratioAt, scaleCumulative, type ShareSchedule } from "@/lib/share";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -47,7 +48,8 @@ interface RunDetailsContentProps {
   initialPositions: Position[];
   initialCapital: number;
   enableHedge: boolean;
-  shareRatio: number;
+  /** The viewer's share of every amount, over time (lib/share.ts). */
+  share: ShareSchedule;
   /**
    * Set when this strategy is a child of a parent strategy: its equity is then
    * a simulation from its own virtual book, labelled as such, with a link to
@@ -145,20 +147,20 @@ function downsampleForDisplay<T extends { ts: string }>(data: T[]): T[] {
 }
 
 // Transform equity curve to chart data points
-function transformEquityCurveData(data: EquityCurve[], shareRatio: number): EquityCurveDataPoint[] {
+function transformEquityCurveData(data: EquityCurve[], share: ShareSchedule): EquityCurveDataPoint[] {
+  // Equity is a level: each point at the viewer's ratio at its own time.
   return data.map((point) => ({
     time: point.ts,
-    equity: point.total_equity * shareRatio,
+    equity: point.total_equity * ratioAt(share, point.ts),
   }));
 }
 
 // Transform equity curve to exchange equity data points
-function transformExchangeEquityData(data: EquityCurve[], shareRatio: number): ExchangeEquityDataPoint[] {
-  return data.map((point) => ({
-    time: point.ts,
-    binance: point.binance_equity * shareRatio,
-    bybit: point.bybit_equity * shareRatio,
-  }));
+function transformExchangeEquityData(data: EquityCurve[], share: ShareSchedule): ExchangeEquityDataPoint[] {
+  return data.map((point) => {
+    const r = ratioAt(share, point.ts);
+    return { time: point.ts, binance: point.binance_equity * r, bybit: point.bybit_equity * r };
+  });
 }
 
 // Transform equity curve to exposure data points
@@ -188,19 +190,28 @@ function transformExposureData(data: EquityCurve[]): ExposureDataPoint[] {
 }
 
 // Transform PnL series to breakdown data points
-function transformPnlBreakdownData(data: PnlSeries[], shareRatio: number): PnLBreakdownDataPoint[] {
-  return data.map((point) => ({
+function transformPnlBreakdownData(data: PnlSeries[], share: ShareSchedule): PnLBreakdownDataPoint[] {
+  // Cumulative series: each increment at the ratio of its own time (lib/share.ts).
+  return scaleCumulative(
+    data,
+    (p) => p.ts,
+    ["total_funding_pnl", "total_price_pnl", "total_pnl", "total_fee"],
+    share
+  ).map((point) => ({
     time: point.ts,
-    funding_pnl: point.total_funding_pnl * shareRatio,
-    price_pnl: point.total_price_pnl * shareRatio,
-    total_pnl: point.total_pnl * shareRatio,
-    total_fee: point.total_fee * shareRatio,
+    funding_pnl: point.total_funding_pnl,
+    price_pnl: point.total_price_pnl,
+    total_pnl: point.total_pnl,
+    total_fee: point.total_fee,
   }));
 }
 
 // Transform positions to realtime position data points
-function transformRealtimePositionData(data: Position[], shareRatio: number): RealtimePositionDataPoint[] {
-  return data.map((pos) => ({
+function transformRealtimePositionData(data: Position[], share: ShareSchedule): RealtimePositionDataPoint[] {
+  return data.map((pos) => {
+    // An open position is a level: the ratio at its snapshot time.
+    const shareRatio = ratioAt(share, pos.ts);
+    return {
     symbol: pos.symbol,
     exchange: pos.exchange,
     position: pos.position * shareRatio,
@@ -211,7 +222,8 @@ function transformRealtimePositionData(data: Position[], shareRatio: number): Re
     leverage: pos.leverage,
     liq_price: pos.liq_price,
     ts: pos.ts,
-  }));
+    };
+  });
 }
 
 export function RunDetailsContent({
@@ -222,7 +234,7 @@ export function RunDetailsContent({
   initialPositions,
   initialCapital,
   enableHedge,
-  shareRatio,
+  share,
   parentStrategy = null,
 }: RunDetailsContentProps) {
   // State for loading all historical data
@@ -297,15 +309,12 @@ export function RunDetailsContent({
   // Check if all critical data is loaded
   const isFreshDataLoaded = isEquityLoaded && isPnlLoaded && isTradesLoaded;
 
-  // Scale initial capital by share ratio
-  const scaledInitialCapital = initialCapital * shareRatio;
-
   // Transform data for charts (with share ratio scaling)
-  const equityCurveData = useMemo(() => transformEquityCurveData(equityCurve, shareRatio), [equityCurve, shareRatio]);
-  const exchangeEquityData = useMemo(() => transformExchangeEquityData(equityCurve, shareRatio), [equityCurve, shareRatio]);
+  const equityCurveData = useMemo(() => transformEquityCurveData(equityCurve, share), [equityCurve, share]);
+  const exchangeEquityData = useMemo(() => transformExchangeEquityData(equityCurve, share), [equityCurve, share]);
   const exposureData = useMemo(() => transformExposureData(equityCurve), [equityCurve]);
-  const pnlBreakdownData = useMemo(() => transformPnlBreakdownData(pnlSeries, shareRatio), [pnlSeries, shareRatio]);
-  const realtimePositionData = useMemo(() => transformRealtimePositionData(positions, shareRatio), [positions, shareRatio]);
+  const pnlBreakdownData = useMemo(() => transformPnlBreakdownData(pnlSeries, share), [pnlSeries, share]);
+  const realtimePositionData = useMemo(() => transformRealtimePositionData(positions, share), [positions, share]);
 
   // Calculate data time range from all time-based data
   const { dataStartTime, dataEndTime } = useMemo(() => {
@@ -445,13 +454,24 @@ export function RunDetailsContent({
 
   // Cumulative Trade PnL = equity-based P&L (current − run-start equity), filtered
   // to the selected time range. Baseline is the run-start equity, not the window start.
+  // Built from the unscaled equity, step by step at the viewer's ratio then, so
+  // a ratio change isn't read as profit or loss (lib/share.ts).
+  const cumulativePnLData = useMemo(() => {
+    const first = equityCurve[0]?.total_equity ?? 0;
+    return scaleCumulative(
+      equityCurve.map((p) => ({ time: p.ts, cumulative: p.total_equity - first })),
+      (p) => p.time,
+      ["cumulative"],
+      share
+    );
+  }, [equityCurve, share]);
   const filteredCumulativePnLData = useMemo(
     () =>
-      filteredEquityCurveData.map((d) => ({
-        time: d.time,
-        cumulative: d.equity - baselineEquity,
-      })),
-    [filteredEquityCurveData, baselineEquity]
+      cumulativePnLData.filter((d) => {
+        const time = new Date(d.time);
+        return time >= timeRange.start && time <= timeRange.end;
+      }),
+    [cumulativePnLData, timeRange]
   );
 
   // Filter combined trades based on time range
@@ -478,7 +498,7 @@ export function RunDetailsContent({
         .filter((trade) => trade.total_pnl !== null)
         .map((trade, index) => ({
           trade: String(index + 1),
-          pnl: trade.total_pnl! * shareRatio,
+          pnl: trade.total_pnl! * ratioAt(share, trade.ts),
         }));
     }
 
@@ -514,12 +534,12 @@ export function RunDetailsContent({
         const trade2 = sorted[matchIndex];
         used.add(trade1.combined_trade_id);
         used.add(trade2.combined_trade_id);
-        const pairPnl = ((trade1.total_pnl ?? 0) + (trade2.total_pnl ?? 0)) * shareRatio;
+        const pairPnl = ((trade1.total_pnl ?? 0) + (trade2.total_pnl ?? 0)) * ratioAt(share, trade1.ts);
         pairPnLs.push(pairPnl);
       } else {
         used.add(trade1.combined_trade_id);
         if (trade1.total_pnl !== null) {
-          pairPnLs.push(trade1.total_pnl * shareRatio);
+          pairPnLs.push(trade1.total_pnl * ratioAt(share, trade1.ts));
         }
       }
     }
@@ -528,7 +548,7 @@ export function RunDetailsContent({
       trade: String(index + 1),
       pnl,
     }));
-  }, [filteredCombinedTrades, enableHedge, shareRatio]);
+  }, [filteredCombinedTrades, enableHedge, share]);
 
   return (
     <>
@@ -544,7 +564,7 @@ export function RunDetailsContent({
         <PerformanceStats
           filteredEquityCurve={filteredEquityCurve}
           filteredCombinedTrades={filteredCombinedTrades}
-          shareRatio={shareRatio}
+          share={share}
         />
 
         {/* Time Range Selector */}
@@ -598,7 +618,7 @@ export function RunDetailsContent({
             <CombinedTradesTable
               combinedTrades={filteredCombinedTrades}
               enableHedge={enableHedge}
-              shareRatio={shareRatio}
+              share={share}
             />
           </div>
         </CardContent>

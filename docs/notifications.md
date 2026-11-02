@@ -11,7 +11,7 @@ report 分享 ──(前端 fetch)────────> POST /api/notificati
 NAV 劇變 ──────────────────────────> 尚未接線（設定 UI 已存在）
 
 各 API route 查 notification_preferences 篩選訂閱者
-→ 依 user_strategy_access.share_ratio 縮放數字（每個用戶看到自己的份額）
+→ 依 shareholder_shares 縮放數字（每個用戶看到自己當時的份額，lib/share.ts）
 → web-push 發送到 push_subscriptions 內的裝置
 → Service Worker (public/sw.js) 顯示通知，點擊導向 payload.url
 ```
@@ -34,8 +34,10 @@ NAV 劇變 ───────────────────────
 1. **Hedge 配對**：combined_trades insert 後等 10 秒，找同 run、同 symbol、
    不同 exchange、時間差 1 分鐘內的另一腿。找到 → 只有 `combined_trade_id`
    較大的那筆發「Hedge Closed」彙總通知（避免重複）；沒找到 → 發單腿「Position Closed」。
-2. **share_ratio 縮放**：所有數字（quantity、PnL、Fee、Funding）乘上該用戶在
-   `user_strategy_access` 的 `share_ratio` 才發送。查不到 access 記錄 → ratio = 1。
+2. **份額縮放**：所有數字（quantity、PnL、Fee、Funding）乘上該用戶在 `shareholder_shares`
+   的份額才發送（`lib/share.ts` 的 `loadShareSchedules`，service role 讀）。份額隨時間變、所有策略同一個：
+   combined trade 用平倉 `ts` 當下的份額，trade_every 用發送當下的份額（payload 沒有時間）。
+   該用戶沒有任何列 → 1。（2026-11-03 前讀的是 user_strategy_access.share_ratio，已停用。）
 3. **策略篩選**：`notification_preferences.trade_strategy_ids` 為空陣列 = 訂閱全部策略；
    非空 = 只收清單內策略的通知。`nav_strategy_ids` 同理。
 4. **點擊導向**：trade 與 combined trade 通知點擊後導向
@@ -92,7 +94,8 @@ NAV 劇變 ───────────────────────
 - `notification_preferences`：trade_notifications, trade_every, trade_combined,
   trade_strategy_ids (jsonb), nav_change_notifications, nav_change_threshold,
   nav_strategy_ids (jsonb), report_notifications
-- `user_strategy_access`：user_id, strategy_id, share_ratio
+- `user_strategy_access`：user_id, strategy_id（誰看得到哪個策略）
+- `shareholder_shares`：user_id, effective_from, share_ratio（份額，見業務規則 2）
 
 ### Trigger functions（快照，2026-07-03 當時的 production 狀態）
 
@@ -168,7 +171,7 @@ report-shared 用來找目標用戶的訂閱。
 ## 端到端驗證方法（改完必跑）
 
 1. 用 `execute_sql` insert 一筆測試 trade（或 combined_trades 一對 hedge）到測試 run。
-2. 問使用者手機有沒有收到通知，內容數字是否正確（記得 share_ratio 縮放）。
+2. 問使用者手機有沒有收到通知，內容數字是否正確（記得份額縮放）。
 3. 刪掉測試資料。
 4. 收不到時的排查順序：Vercel function logs → `net._http_response` 表
    （pg_net 的回應紀錄）→ push_subscriptions 是否有該用戶的訂閱。

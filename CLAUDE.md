@@ -33,7 +33,7 @@ Guidance for Claude Code in this repository.
 1. **改完 code 一律跑 `pnpm verify`**（= `lint` → `typecheck` → `build`，任一關失敗
    就中止）。三關全綠才算「build 通過」，才能 commit。只跑 `pnpm build` 不算 ——
    `next build` 不會擋 type error 以外的 lint 問題。
-2. **lint warning 是棘輪**：`pnpm lint` 帶 `--max-warnings 18`（2026-08-13 的 baseline）。
+2. **lint warning 是棘輪**：`pnpm lint` 帶 `--max-warnings 17`（2026-08-13 baseline 18，2026-11-03 降到 17）。
    這個數字只能往下調。新程式碼不該產生新 warning；真的要放寬必須先問使用者。
 3. **每次 commit 後審查 CLAUDE.md**：`.claude/hooks/post-commit-claude-md-review.sh`
    是 PostToolUse hook，偵測到 HEAD 真的前進才觸發，會要求依
@@ -140,8 +140,12 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   **shadow 的 bp（y_bp、funding_bp、fee 4.4）分母是兩腿 entry 名目「加總」**：拿實盤
   `combined_trades` 對帳（`/model` 的 Live vs Shadow 分頁，`lib/live-recon.ts`）時要除以兩腿加總，
   除以單腿會讓 funding、fee 全部翻倍、看起來差一大截（2026-10-05 逐筆驗證）。
-- **user_strategy_access**: user_id, strategy_id, share_ratio —— 用戶對策略的份額，
-  所有對用戶顯示/推播的金額都要乘 share_ratio
+- **user_strategy_access**: user_id, strategy_id —— **只管誰看得到哪個策略**（它的 share_ratio 欄位已停用，待移除）。
+- **shareholder_shares**: user_id, effective_from（台北日）, share_ratio, note —— 用戶的份額，**所有策略同一個、隨時間變**
+  （使用者 2026-11-03 定案；`supabase/manual/2026-11-03-shareholder-shares.sql`）。改比例＝在後台**新增一列**，別改舊列。
+  所有對用戶顯示/推播的金額都走 `lib/share.ts`，別再直接乘一個常數：**水位**（權益、持倉、資本）乘當時的比例；
+  **累積損益**（pnl_series.total_*、equity_curve.total_pnl）要拆成增量各乘當時比例再累加，否則比例一變就被讀成盈虧；
+  **百分比**（報酬、回撤、Sharpe，PerformanceStats 全部）用未縮放資料算。沒有任何列的用戶看全額（1）。
 - **push_subscriptions / notification_preferences**：見 `docs/notifications.md`
 
 **`fund_account_equity` 有一張觸發器維護的衍生表 `fund_account_equity_hourly`**

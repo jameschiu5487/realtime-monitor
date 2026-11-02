@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { loadShareSchedule } from "@/lib/share";
 import { ReportContent } from "@/components/report/report-content";
 import type { Strategy, StrategyRun } from "@/lib/types/database";
 
@@ -8,12 +9,17 @@ export const revalidate = 0;
 export default async function ReportPage() {
   const supabase = await createClient();
 
-  const [{ data: strategiesData }, { data: runsData }, accessResult] = await Promise.all([
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const [{ data: strategiesData }, { data: runsData }, accessResult, share] = await Promise.all([
     supabase.from("strategies").select("*"),
     supabase.from("strategy_runs").select("*"),
-    supabase.from("user_strategy_access").select("strategy_id, share_ratio") as unknown as Promise<{
-      data: { strategy_id: string; share_ratio: number }[] | null;
+    supabase.from("user_strategy_access").select("strategy_id").eq("user_id", user?.id ?? "") as unknown as Promise<{
+      data: { strategy_id: string }[] | null;
     }>,
+    // The viewer's share of every amount, over time (lib/share.ts).
+    loadShareSchedule(supabase, user?.id),
   ]);
 
   const accessRows = accessResult.data ?? [];
@@ -26,16 +32,11 @@ export default async function ReportPage() {
     (r) => accessibleIds.has(r.strategy_id)
   );
 
-  const shareRatioMap: Record<string, number> = {};
-  for (const row of accessResult.data ?? []) {
-    shareRatioMap[row.strategy_id] = row.share_ratio;
-  }
-
   return (
     <ReportContent
       allStrategies={allStrategies}
       allRuns={allRuns}
-      shareRatioMap={shareRatioMap}
+      share={share}
     />
   );
 }

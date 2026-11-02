@@ -1,3 +1,4 @@
+import { currentRatio, ratioAt, type ShareSchedule } from "@/lib/share";
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ArrowLeft, ArrowRight, Layers } from "lucide-react";
@@ -42,7 +43,6 @@ import {
   currentPositions,
   equityByRun,
   isParentBookMode,
-  scaleCombinedTrades,
   sumPnlSeries,
   summarizeBook,
   type ParentBook,
@@ -109,10 +109,8 @@ interface ParentStrategyViewProps {
   parent: Strategy;
   /** Children the viewer has user_strategy_access to. */
   childStrategies: Strategy[];
-  /** Viewer's share_ratio per child strategy_id. */
-  shareRatioByChild: Record<string, number>;
-  /** Viewer's share_ratio on the parent itself; null without direct access. */
-  parentShareRatio: number | null;
+  /** The viewer's share of every amount, over time (lib/share.ts); one ratio for every child. */
+  share: ShareSchedule;
   includePaper: boolean;
 }
 
@@ -148,10 +146,10 @@ export async function ParentStrategyView({
   supabase,
   parent,
   childStrategies: children,
-  shareRatioByChild,
-  parentShareRatio,
+  share,
   includePaper,
 }: ParentStrategyViewProps) {
+  const ratioNow = currentRatio(share);
   const childIds = children.map((c) => c.strategy_id);
   const childName = new Map(children.map((c) => [c.strategy_id, c.name]));
 
@@ -180,8 +178,6 @@ export async function ParentStrategyView({
   ).sort((a, b) => a.localeCompare(b));
 
   const runIds = runs.map((r) => r.run_id);
-  const ratioByRun: Record<string, number> = {};
-  for (const r of runs) ratioByRun[r.run_id] = shareRatioByChild[r.strategy_id] ?? 1;
 
   const since = bucketedSince(WINDOW_DAYS);
 
@@ -202,7 +198,6 @@ export async function ParentStrategyView({
       const book = bookKey.get(`${r.strategy_id}|${r.mode}`);
       if (!book) continue;
       bookOfRun[r.run_id] = book;
-      ratioByRun[r.run_id] = ratioByRun[book];
     }
   }
   const historyRunIds = Object.keys(bookOfRun);
@@ -257,16 +252,16 @@ export async function ParentStrategyView({
   const positions: ParentPosition[] = [];
   const books: ParentBook[] = runs.map((run, i) => {
     const name = childName.get(run.strategy_id) ?? "Unknown";
-    const ratio = ratioByRun[run.run_id];
+    // Unscaled here: the real-account exposure below needs the raw sizes.
     const held = currentPositions(positionRows[i], {
       runId: run.run_id,
       childId: run.strategy_id,
       childName: name,
       mode: run.mode as string,
-      shareRatio: ratio,
+      shareRatio: 1,
     });
     positions.push(...held);
-    return summarizeBook(run, name, ratio, seriesByRun.get(run.run_id) ?? [], held.length);
+    return summarizeBook(run, name, share, seriesByRun.get(run.run_id) ?? [], held.length);
   });
   positions.sort((a, b) => b.notional - a.notional);
 
@@ -276,8 +271,7 @@ export async function ParentStrategyView({
   const netBySymbol = new Map<string, number>();
   for (const p of positions) {
     if (!liveRunIds.has(p.runId)) continue;
-    const ratio = ratioByRun[p.runId] || 1;
-    const signed = (Math.sign(p.quantity) * p.notional) / ratio;
+    const signed = Math.sign(p.quantity) * p.notional;
     netBySymbol.set(p.symbol, (netBySymbol.get(p.symbol) ?? 0) + signed);
   }
   let exposureGross = 0;
@@ -291,12 +285,21 @@ export async function ParentStrategyView({
     null
   );
 
-  // Traded notional per book over the window, across its restarts, scaled.
+  // Open positions are shown at today's share (they are current levels).
+  const shownPositions = positions.map((p) => ({
+    ...p,
+    quantity: p.quantity * ratioNow,
+    notional: p.notional * ratioNow,
+    unrealizedPnl: p.unrealizedPnl * ratioNow,
+  }));
+
+  // Traded notional per book over the window, across its restarts, each fill at
+  // the viewer's ratio when it traded.
   const turnoverByBook: Record<string, number> = {};
   for (const f of fills) {
     const book = bookOfRun[f.run_id];
     if (!book) continue;
-    turnoverByBook[book] = (turnoverByBook[book] ?? 0) + f.notional * (ratioByRun[f.run_id] ?? 1);
+    turnoverByBook[book] = (turnoverByBook[book] ?? 0) + f.notional * ratioAt(share, f.ts);
   }
 
   // Summed from the earliest book: each book (current capital + cumulative
@@ -312,31 +315,35 @@ export async function ParentStrategyView({
       Number(r.initial_capital) ||
       (latest ? latest.total_equity - latest.total_pnl : 0);
   }
-  const aggregate = buildBookStatsCurve(seriesByBook, ratioByRun, capitalByBook);
-  const pnlSeries = sumPnlSeries(seriesByBook, ratioByRun);
+  // Charts in the viewer's amounts; stats from the unscaled curve (percentages).
+  const aggregate = buildBookStatsCurve(seriesByBook, capitalByBook, share);
+  const aggregateRaw = buildBookStatsCurve(seriesByBook, capitalByBook);
+  const pnlSeries = sumPnlSeries(seriesByBook, share);
   const aggregateStart = aggregate.length > 0 ? new Date(aggregate[0].ts).getTime() : 0;
-  const statsTrades = scaleCombinedTrades(
-    combinedTrades.filter((t) => new Date(t.ts).getTime() >= aggregateStart),
-    ratioByRun
-  );
+  const statsTrades = combinedTrades.filter((t) => new Date(t.ts).getTime() >= aggregateStart);
+  const statsFills = fills.filter((f) => new Date(f.ts).getTime() >= aggregateStart);
   // Turnover from fills: the Kepler engine records every fill in trades but
   // writes combined_trades only for some round trips, so combined-trade
   // notional reads near zero.
   const statsTurnover: TurnoverFigures | undefined =
     aggregate.length > 0
       ? {
-          notional: fills
-            .filter((f) => new Date(f.ts).getTime() >= aggregateStart)
-            .reduce((sum, f) => sum + f.notional * (ratioByRun[f.run_id] ?? 1), 0),
-          pnl: aggregate[aggregate.length - 1].total_equity - aggregate[0].total_equity,
+          notional: statsFills.reduce((sum, f) => sum + f.notional, 0),
+          scaledNotional: statsFills.reduce((sum, f) => sum + f.notional * ratioAt(share, f.ts), 0),
+          pnl: aggregateRaw[aggregateRaw.length - 1].total_equity - aggregateRaw[0].total_equity,
         }
       : undefined;
 
   const totalEquity = books.reduce((s, b) => s + (b.equity ?? 0), 0);
   const totalPnl = books.reduce((s, b) => s + (b.pnl ?? 0), 0);
-  const totalInitial = books.reduce((s, b) => s + b.initialCapital, 0);
-  const totalUpnl = positions.reduce((s, p) => s + p.unrealizedPnl, 0);
-  const totalNotional = positions.reduce((s, p) => s + p.notional, 0);
+  // Return from the unscaled books, so a ratio change isn't read as performance.
+  const rawEquity = runs.reduce((s, r) => {
+    const own = seriesByRun.get(r.run_id) ?? [];
+    return s + (own.length ? own[own.length - 1].total_equity : 0);
+  }, 0);
+  const rawInitial = runs.reduce((s, r) => s + (Number(r.initial_capital) || 0), 0);
+  const totalUpnl = shownPositions.reduce((s, p) => s + p.unrealizedPnl, 0);
+  const totalNotional = shownPositions.reduce((s, p) => s + p.notional, 0);
 
   const booksByChild = new Map<string, ParentBook[]>();
   for (const b of books) {
@@ -381,7 +388,7 @@ export async function ParentStrategyView({
         accountIds={accountIds}
         rows={accountEquity.rows}
         nowMs={accountEquity.nowMs}
-        parentShareRatio={parentShareRatio}
+        parentShareRatio={ratioNow}
         fetchError={accountEquity.error}
         tradingByHour={tradingByHour}
         exposure={{ gross: exposureGross, net: exposureNet, symbols: netBySymbol.size, asOf: exposureAsOf }}
@@ -422,8 +429,8 @@ export async function ParentStrategyView({
             />
             <Figure
               label="Simulated return"
-              value={pct(totalInitial > 0 ? ((totalEquity - totalInitial) / totalInitial) * 100 : null, true)}
-              className={tone(totalEquity - totalInitial)}
+              value={pct(books.length && rawInitial > 0 ? ((rawEquity - rawInitial) / rawInitial) * 100 : null, true)}
+              className={tone(rawEquity - rawInitial)}
             />
             <Figure
               label="Simulated unrealized PnL"
@@ -445,7 +452,7 @@ export async function ParentStrategyView({
                   <div className="min-w-0">
                     <CardTitle className="text-sm sm:text-base truncate">{child.name}</CardTitle>
                     <CardDescription className="text-xs font-mono">
-                      {formatVersion(child.version)} · share {(shareRatioByChild[child.strategy_id] ?? 1).toString()}
+                      {formatVersion(child.version)} · share {ratioNow.toString()}
                     </CardDescription>
                   </div>
                   <Link
@@ -518,9 +525,9 @@ export async function ParentStrategyView({
           {aggregate.length > 0 && (
             <>
               <PerformanceStats
-                filteredEquityCurve={aggregate}
+                filteredEquityCurve={aggregateRaw}
                 filteredCombinedTrades={statsTrades}
-                shareRatio={1}
+                share={share}
                 turnover={statsTurnover}
               />
               <EquityCurveChart
@@ -579,7 +586,7 @@ export async function ParentStrategyView({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {positions.map((p) => (
+                  {shownPositions.map((p) => (
                     <TableRow key={`${p.runId}-${p.symbol}-${p.exchange}`}>
                       <TableCell className="font-mono">
                         {p.symbol}

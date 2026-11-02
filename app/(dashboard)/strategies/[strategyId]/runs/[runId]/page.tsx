@@ -1,3 +1,4 @@
+import { loadShareSchedule, ratioAt } from "@/lib/share";
 import { notFound } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -239,13 +240,9 @@ export default async function RunDetailsPage({ params, searchParams }: RunDetail
   }
 
   // === Default: funding arb tables ===
-  // Fetch share ratio for current user
-  const { data: accessData } = await supabase
-    .from("user_strategy_access")
-    .select("share_ratio")
-    .eq("strategy_id", strategyId)
-    .single() as { data: { share_ratio: number } | null };
-  const shareRatio = accessData?.share_ratio ?? 1;
+  // The viewer's share of every amount, over time (lib/share.ts).
+  const { data: { user } } = await supabase.auth.getUser();
+  const share = await loadShareSchedule(supabase, user?.id);
 
   // A child of a parent strategy: its equity is a simulation of its own book.
   const parentStrategy = await fetchParentRef(supabase, strategy);
@@ -256,7 +253,7 @@ export default async function RunDetailsPage({ params, searchParams }: RunDetail
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <RunDetailsHeader strategy={strategy} run={run} initialCapitalOverride={run.initial_capital * shareRatio} />
+      <RunDetailsHeader strategy={strategy} run={run} initialCapitalOverride={run.initial_capital * ratioAt(share, run.start_time ?? Date.now())} />
 
       <RunDetailsContent
         runId={runId}
@@ -266,7 +263,7 @@ export default async function RunDetailsPage({ params, searchParams }: RunDetail
         initialPositions={positions}
         initialCapital={run.initial_capital}
         enableHedge={enableHedge}
-        shareRatio={shareRatio}
+        share={share}
         parentStrategy={parentStrategy}
       />
     </div>

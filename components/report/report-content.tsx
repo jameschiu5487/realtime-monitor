@@ -1,5 +1,6 @@
 "use client";
 
+import { ratioAt, type ShareSchedule } from "@/lib/share";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from "recharts";
 import { Loader2, Play, Save, Trash2, FolderOpen, Send, Pencil, Check, X } from "lucide-react";
@@ -74,7 +75,8 @@ interface SavedReportData {
 interface ReportContentProps {
   allStrategies: Strategy[];
   allRuns: StrategyRun[];
-  shareRatioMap: Record<string, number>;
+  /** The viewer's share of every amount, over time (lib/share.ts). */
+  share: ShareSchedule;
 }
 
 const SESSION_KEY = "report-state";
@@ -268,7 +270,7 @@ function EquityChart({ data, transferPoints, height = 300 }: { data: ChartDataPo
   );
 }
 
-export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportContentProps) {
+export function ReportContent({ allStrategies, allRuns, share }: ReportContentProps) {
   const [startDate, setStartDate] = useState<Date | undefined>();
   const [endDate, setEndDate] = useState<Date | undefined>();
   const [selectedStrategyIds, setSelectedStrategyIds] = useState<Set<string>>(new Set());
@@ -484,8 +486,10 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
 
       const allCombinedTrades = strategyIds.flatMap((id) => strategyCombinedTrades.get(id) ?? []);
 
-      const totalChartData = aggregateTotalEquity(strategyEquity, shareRatioMap);
-      const totalEquityCurve = buildCombinedEquityCurve(strategyEquity, shareRatioMap);
+      // Both unscaled: transfers are detected on real moves, and the stats are
+      // percentages. The chart is scaled afterwards (adjustedCombined).
+      const totalChartData = aggregateTotalEquity(strategyEquity);
+      const totalEquityCurve = buildCombinedEquityCurve(strategyEquity);
 
       setReportResult({
         strategyEquity,
@@ -500,13 +504,15 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
     } finally {
       setIsLoading(false);
     }
-  }, [startDate, endDate, selectedStrategyIds, forwardFillIds, allRuns, shareRatioMap, strategyNameMap]);
+  }, [startDate, endDate, selectedStrategyIds, forwardFillIds, allRuns, strategyNameMap]);
 
   const adjustedCombined = useMemo(() => {
     if (!reportResult) return null;
-    const chartData = maxNavChange > 0
+    const rawChart = maxNavChange > 0
       ? adjustNavTransfers(reportResult.totalChartData, maxNavChange)
       : reportResult.totalChartData;
+    // Equity is a level: each point at the viewer's ratio at its own time.
+    const chartData = rawChart.map((p) => ({ ...p, equity: p.equity * ratioAt(share, p.time) }));
     const equityCurve = maxNavChange > 0
       ? adjustEquityCurveTransfers(reportResult.totalEquityCurve, maxNavChange)
       : reportResult.totalEquityCurve;
@@ -514,7 +520,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
       ? detectTransferPoints(reportResult.totalChartData, maxNavChange)
       : undefined;
     return { chartData, equityCurve, transferPoints };
-  }, [reportResult, maxNavChange]);
+  }, [reportResult, maxNavChange, share]);
 
   const handleSaveReport = useCallback(async () => {
     if (!saveName.trim() || !adjustedCombined || !reportResult || !startDate || !endDate) return;
@@ -1012,6 +1018,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                     <PerformanceStats
                       filteredEquityCurve={adjustedCombined.equityCurve}
                       filteredCombinedTrades={reportResult.totalCombinedTrades}
+                      share={share}
                     />
                   </>
                 )}
@@ -1047,10 +1054,9 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
           {Array.from(selectedStrategyIds).map((strategyId) => {
             const equity = reportResult.strategyEquity.get(strategyId) ?? [];
             const trades = reportResult.strategyCombinedTrades.get(strategyId) ?? [];
-            const ratio = shareRatioMap[strategyId] ?? 1;
             const chartData = equity.map((e) => ({
               time: new Date(e.ts).getTime(),
-              equity: e.total_equity * ratio,
+              equity: e.total_equity * ratioAt(share, e.ts),
             }));
 
             return (
@@ -1070,7 +1076,7 @@ export function ReportContent({ allStrategies, allRuns, shareRatioMap }: ReportC
                   <PerformanceStats
                     filteredEquityCurve={equity}
                     filteredCombinedTrades={trades}
-                    shareRatio={shareRatioMap[strategyId]}
+                    share={share}
                   />
                 </CardContent>
               </Card>

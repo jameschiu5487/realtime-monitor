@@ -5,11 +5,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { EquityCurve, CombinedTrade } from "@/lib/types/database";
 import { taipeiDayKey } from "@/lib/time";
+import { constantShare, ratioAt, type ShareSchedule } from "@/lib/share";
 
 interface PerformanceStatsProps {
   filteredEquityCurve: EquityCurve[];
   filteredCombinedTrades: CombinedTrade[];
-  shareRatio?: number;
+  /**
+   * The viewer's share over time (lib/share.ts). Only Total Turnover is an
+   * amount; it is scaled trade by trade. Every other figure is a percentage or
+   * a ratio, computed from the unscaled curve and trades it is given.
+   */
+  share?: ShareSchedule;
   /**
    * Replaces the turnover (and the PnL it is divided into) derived from
    * combined trades. For books whose engine doesn't write combined_trades —
@@ -21,6 +27,8 @@ interface PerformanceStatsProps {
 export interface TurnoverFigures {
   notional: number;
   pnl: number;
+  /** notional at the viewer's share, each fill or trade at its own time; defaults to notional. */
+  scaledNotional?: number;
 }
 
 /** Turnover as entry + exit notional of combined trades, with their summed PnL. */
@@ -34,6 +42,19 @@ export function combinedTradeTurnover(trades: CombinedTrade[]): TurnoverFigures 
   }
   return { notional, pnl };
 }
+
+/** combinedTradeTurnover's notional, each trade at the viewer's ratio at its close. */
+export function scaledTradeTurnover(trades: CombinedTrade[], share: ShareSchedule): number {
+  let notional = 0;
+  for (const t of trades) {
+    let n = Math.abs(t.quantity * t.entry_price);
+    if (t.exit_price) n += Math.abs(t.quantity * t.exit_price);
+    notional += n * ratioAt(share, t.ts);
+  }
+  return notional;
+}
+
+const NO_SCALING = constantShare(1);
 
 function formatPercent(value: number, decimals: number = 2) {
   const formatted = Math.abs(value).toFixed(decimals);
@@ -248,7 +269,7 @@ function calculateStats(
 export function PerformanceStats({
   filteredEquityCurve,
   filteredCombinedTrades,
-  shareRatio = 1,
+  share = NO_SCALING,
   turnover,
 }: PerformanceStatsProps) {
   // Calculate stats based on selected time range
@@ -257,8 +278,14 @@ export function PerformanceStats({
     [filteredEquityCurve, filteredCombinedTrades, turnover]
   );
 
-  // Scale dollar-amount stats by share ratio
-  const scaledTotalTurnover = stats.totalTurnover * shareRatio;
+  // The one amount: the viewer's share of the turnover, trade by trade.
+  const scaledTotalTurnover = useMemo(
+    () =>
+      turnover
+        ? (turnover.scaledNotional ?? turnover.notional)
+        : scaledTradeTurnover(filteredCombinedTrades, share),
+    [turnover, filteredCombinedTrades, share]
+  );
 
   return (
     <Card>

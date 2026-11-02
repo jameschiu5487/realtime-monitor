@@ -19,7 +19,7 @@ import type {
  *
  * The cached rows are identical for every signed-in user — RLS on these tables
  * grants `authenticated` unrestricted SELECT — so one shared cache entry is
- * correct. Per-user data (user_strategy_access.share_ratio) is deliberately
+ * correct. Per-user data (the viewer's share, lib/share.ts) is deliberately
  * NOT cached here and stays on the request-scoped client.
  */
 

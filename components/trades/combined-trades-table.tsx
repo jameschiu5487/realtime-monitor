@@ -14,11 +14,15 @@ import { ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "luci
 import { cn } from "@/lib/utils";
 import type { CombinedTrade } from "@/lib/types/database";
 import { formatDateTime as taipeiDateTime } from "@/lib/time";
+import { constantShare, ratioAt, type ShareSchedule } from "@/lib/share";
+
+const NO_SCALING = constantShare(1);
 
 interface CombinedTradesTableProps {
   combinedTrades: CombinedTrade[];
   enableHedge: boolean;
-  shareRatio?: number;
+  /** The viewer's share over time (lib/share.ts); each trade at the ratio when it closed. */
+  share?: ShareSchedule;
 }
 
 type SortField = "ts" | "holding_period_hours" | "funding_fee_realized" | "price_pnl" | "commission_fee" | "total_pnl";
@@ -204,7 +208,8 @@ function groupIntoHedgePairs(trades: CombinedTrade[]): HedgePair[] {
   return pairs;
 }
 
-function HedgePairSummaryRow({ pair, shareRatio = 1 }: { pair: HedgePair; shareRatio?: number }) {
+function HedgePairSummaryRow({ pair, share = NO_SCALING }: { pair: HedgePair; share?: ShareSchedule }) {
+  const shareRatio = ratioAt(share, pair.ts);
   return (
     <TableRow className="bg-primary/5 hover:bg-primary/10 border-t-2 border-primary/20">
       <TableCell></TableCell>
@@ -248,15 +253,16 @@ function PositionRow({
   onToggle,
   isPartOfPair,
   isFirstInPair,
-  shareRatio = 1,
+  share = NO_SCALING,
 }: {
   position: CombinedTrade;
   isExpanded: boolean;
   onToggle: () => void;
   isPartOfPair: boolean;
   isFirstInPair: boolean;
-  shareRatio?: number;
+  share?: ShareSchedule;
 }) {
+  const shareRatio = ratioAt(share, position.ts);
   return (
     <TableRow
       className={cn(
@@ -325,7 +331,7 @@ function PositionRow({
   );
 }
 
-export function CombinedTradesTable({ combinedTrades, enableHedge, shareRatio = 1 }: CombinedTradesTableProps) {
+export function CombinedTradesTable({ combinedTrades, enableHedge, share = NO_SCALING }: CombinedTradesTableProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [sortConfig, setSortConfig] = useState<SortConfig>({
     field: "ts",
@@ -477,16 +483,18 @@ export function CombinedTradesTable({ combinedTrades, enableHedge, shareRatio = 
                     onToggle={() => toggleExpanded(pair.id)}
                     isPartOfPair={isActualPair}
                     isFirstInPair={index === 0}
-                    shareRatio={shareRatio}
+                    share={share}
                   />
                 ))}
-                {isExpanded && isActualPair && <HedgePairSummaryRow key={`${pair.id}-summary`} pair={pair} shareRatio={shareRatio} />}
+                {isExpanded && isActualPair && <HedgePairSummaryRow key={`${pair.id}-summary`} pair={pair} share={share} />}
               </Fragment>
             );
           })
         ) : (
           // Non-hedge mode: show individual positions
-          sortedTrades.map((position) => (
+          sortedTrades.map((position) => {
+            const shareRatio = ratioAt(share, position.ts);
+            return (
             <TableRow key={position.combined_trade_id}>
               <TableCell className="w-10"></TableCell>
               <TableCell className="font-mono text-xs">
@@ -536,7 +544,8 @@ export function CombinedTradesTable({ combinedTrades, enableHedge, shareRatio = 
                 {formatCurrency(position.total_pnl !== null ? position.total_pnl * shareRatio : null)}
               </TableCell>
             </TableRow>
-          ))
+            );
+          })
         )}
       </TableBody>
       </Table>

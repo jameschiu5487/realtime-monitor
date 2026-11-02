@@ -1,3 +1,4 @@
+import { currentRatio, loadShareSchedule } from "@/lib/share";
 import { notFound } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
 import Link from "next/link";
@@ -211,13 +212,11 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
     return runParams?.strategy?.enable_hedge === true;
   });
 
-  // Fetch share ratio for current user
-  const { data: accessData } = await supabase
-    .from("user_strategy_access")
-    .select("share_ratio")
-    .eq("strategy_id", strategyId)
-    .single() as { data: { share_ratio: number } | null };
-  const shareRatio = accessData?.share_ratio ?? 1;
+  // The viewer's share of every amount, over time (lib/share.ts).
+  const { data: { user } } = await supabase.auth.getUser();
+  const share = await loadShareSchedule(supabase, user?.id);
+  // The header's capital is a level; today's ratio.
+  const shareRatio = currentRatio(share);
 
   // A child of a parent strategy: its equity is a simulation of its own book.
   const parentStrategy = await fetchParentRef(supabase, strategy as Strategy);
@@ -253,7 +252,7 @@ export default async function CombinedStrategyPage({ params, searchParams }: Com
         initialCapital={totalInitialCapital}
         runIds={runIds}
         enableHedge={enableHedge}
-        shareRatio={shareRatio}
+        share={share}
         parentStrategy={parentStrategy}
       />
     </div>

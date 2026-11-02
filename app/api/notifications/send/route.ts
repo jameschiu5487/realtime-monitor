@@ -1,3 +1,4 @@
+import { loadShareSchedules, ratioAt } from "@/lib/share";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendPushNotification, type PushPayload } from "@/lib/web-push";
@@ -93,18 +94,13 @@ export async function POST(request: Request) {
   );
   if (!enabledIds.length) return NextResponse.json({ sent: 0 });
 
-  // Look up share_ratio per user for trade notifications
+  // Each recipient's share (shareholder_shares, lib/share.ts) at the time of the
+  // fill — the payload carries no timestamp, and it is sent as the fill happens.
   const ratioMap = new Map<string, number>();
   if (strategy_id && trade_data && type === "trade_every") {
-    const { data: accessRows } = await supabase
-      .from("user_strategy_access")
-      .select("user_id, share_ratio")
-      .eq("strategy_id", strategy_id)
-      .in("user_id", enabledIds);
-
-    for (const row of accessRows ?? []) {
-      ratioMap.set(row.user_id, Number(row.share_ratio) || 1);
-    }
+    const schedules = await loadShareSchedules(supabase, enabledIds);
+    const now = Date.now();
+    for (const [userId, schedule] of schedules) ratioMap.set(userId, ratioAt(schedule, now));
   }
 
   const { data: subs, error: subError } = await supabase
