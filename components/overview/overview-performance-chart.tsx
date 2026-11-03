@@ -87,6 +87,9 @@ function externalPoint(strategyId: string, ts: string, equity: number): EquityCu
 
 
 
+/** A run that starts this far (fraction) from where its strategy's last run ended is a capital change. */
+const CAPITAL_STEP_FRACTION = 0.05;
+
 export function OverviewPerformanceChart({
   initialEquityData,
   initialCombinedTrades,
@@ -308,15 +311,42 @@ export function OverviewPerformanceChart({
   const dataStartTimestamp = dataStartTime.getTime();
   const dataEndTimestamp = dataEndTime.getTime();
 
-  // Initial sync: default to 1w
+  // The latest capital step in the plotted data: a strategy restarted with more
+  // or less money (its new run starts more than CAPITAL_STEP_FRACTION away from
+  // where the previous run ended — e.g. the 2026-11-03 deposit restarted
+  // Super_Newtonz from 3.9k at 20k), or the viewer's share changed. Either is a
+  // step in the curve that isn't performance.
+  const latestCapitalStep = useMemo(() => {
+    let latest = 0;
+    for (const series of mergedPerStrategy.values()) {
+      let prev: EquityCurve | null = null;
+      for (const p of series) {
+        if (p.run_id === "bridge" || p.run_id === "gap" || p.run_id.startsWith("external:")) continue;
+        if (prev && p.run_id !== prev.run_id) {
+          const base = Math.max(Math.abs(prev.total_equity), 1);
+          if (Math.abs(p.total_equity - prev.total_equity) / base > CAPITAL_STEP_FRACTION) {
+            latest = Math.max(latest, new Date(p.ts).getTime());
+          }
+        }
+        prev = p;
+      }
+    }
+    for (const period of share) {
+      if (period.fromMs > dataStartTimestamp && period.fromMs <= dataEndTimestamp) latest = Math.max(latest, period.fromMs);
+    }
+    return latest;
+  }, [mergedPerStrategy, share, dataStartTimestamp, dataEndTimestamp]);
+
+  // Initial sync: the last week, or from the latest capital step if that is
+  // later, so a deposit doesn't flatten the curve into one big step. The range
+  // picker still reaches the full history.
   useEffect(() => {
     if (hasInitializedRef.current || chartData.length === 0) return;
     hasInitializedRef.current = true;
     const end = new Date(dataEndTimestamp);
-    const weekAgo = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const start = weekAgo < new Date(dataStartTimestamp) ? new Date(dataStartTimestamp) : weekAgo;
-    setTimeRange({ start, end });
-  }, [chartData.length, dataStartTimestamp, dataEndTimestamp]);
+    const startMs = Math.max(end.getTime() - 7 * 24 * 60 * 60 * 1000, dataStartTimestamp, latestCapitalStep);
+    setTimeRange({ start: new Date(startMs), end });
+  }, [chartData.length, dataStartTimestamp, dataEndTimestamp, latestCapitalStep]);
 
   // Extend end on new data
   useEffect(() => {
