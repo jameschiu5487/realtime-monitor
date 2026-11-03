@@ -143,7 +143,8 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   `combined_trades` 對帳（`/model` 的 Live vs Shadow 分頁，`lib/live-recon.ts`）時要除以兩腿加總，
   除以單腿會讓 funding、fee 全部翻倍、看起來差一大截（2026-10-05 逐筆驗證）。
 - **user_strategy_access**: user_id, strategy_id —— **只管誰看得到哪個策略**（它的 share_ratio 欄位已停用，待移除）。
-- **shareholder_shares**: user_id, effective_from（timestamptz，後台輸入要帶時區如 `2026-11-03 02:32+08`）, share_ratio, note —— 用戶的份額，**所有策略同一個、隨時間變**
+- **shareholder_shares**: user_id, effective_from（timestamptz，後台輸入要帶時區如 `2026-11-03 02:32+08`）, share_ratio, note,
+  equity_at_change（股東當時淨值，只記錄、前端不讀） —— 用戶的份額，**所有策略同一個、隨時間變**
   （使用者 2026-11-03 定案；`supabase/manual/2026-11-03-shareholder-shares.sql`）。改比例＝在後台**新增一列**，別改舊列。
   所有對用戶顯示/推播的金額都走 `lib/share.ts`，別再直接乘一個常數：**水位**（權益、持倉、資本）乘當時的比例；
   **累積損益**（pnl_series.total_*、equity_curve.total_pnl）要拆成增量各乘當時比例再累加，否則比例一變就被讀成盈虧；
