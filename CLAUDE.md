@@ -70,6 +70,8 @@ npx shadcn@latest add <component>   # UI 元件加到 @/components/ui
 /report                                報表產生（日期區間 + 策略多選）
 /model                                 shadow 模型預測監控（ypred vs 實際 y）
 /paper                                 jump-fade observe 模擬成交（讀 jfm_observe；外部 jfm-checkpoint 寫入，需 authenticated 唯讀 policy）
+                                       jfm_observe 沒記資金：每個策略×venue 帳戶 = 最大單筆 fill ÷ size_frac（v2 10k、v4 50k），
+                                       別寫死 10k —— 曾讓 v4 報酬高估 5 倍（2026-11-05）
 /settings                              通知設定等
 ```
 
