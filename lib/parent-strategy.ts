@@ -38,11 +38,11 @@ export interface ParentBook {
   equity: number | null;
   /** Latest cumulative total_pnl, scaled. */
   pnl: number | null;
-  /** (equity − initial) / initial, percent. Ratio-independent. */
+  /** Chained return over the window, across the book's restarts (see chainedIndex), percent. Ratio-independent. */
   returnPct: number | null;
-  /** Current drawdown from the window's peak, percent. */
+  /** Current drawdown of the chained return from its peak in the window, percent. */
   drawdownPct: number | null;
-  /** Worst drawdown inside the window, percent. */
+  /** Worst drawdown of the chained return inside the window, percent. */
   maxDrawdownPct: number | null;
   positionsCount: number;
   lastUpdate: string | null;
@@ -128,28 +128,53 @@ export function currentPositions(
 }
 
 /**
+ * Growth of 1 along a book's equity series: each step's PnL over the capital the
+ * book ran at just before it (capital = total_equity − total_pnl), compounded. A
+ * capital change (a restart at another size) is neither profit nor a new base for
+ * the PnL earned before it, so a book that lost 150 at 4000 and now runs at 1000
+ * reads about −4 %, not −15 %. Steps where the capital is not positive are skipped.
+ */
+export function chainedIndex(series: EquityCurve[]): number[] {
+  const out: number[] = [];
+  let idx = 1;
+  for (let i = 0; i < series.length; i++) {
+    if (i > 0) {
+      const prev = series[i - 1];
+      const capital = prev.total_equity - prev.total_pnl;
+      if (capital > 0) idx *= 1 + (series[i].total_pnl - prev.total_pnl) / capital;
+    }
+    out.push(idx);
+  }
+  return out;
+}
+
+/**
  * Per-book summary from its own (unscaled) equity series. Amounts carry the
  * viewer's share (lib/share.ts): capital at the run's start, equity at its last
- * point, PnL increment by increment; the percentages stay unscaled.
+ * point, PnL increment by increment; the percentages stay unscaled and come from
+ * `bookSeries` (the book across its restarts in the window, chainBookSeries),
+ * chained (chainedIndex).
  */
 export function summarizeBook(
   run: Pick<StrategyRun, "run_id" | "strategy_id" | "mode" | "start_time" | "initial_capital">,
   childName: string,
   share: ShareSchedule,
   series: EquityCurve[],
-  positionsCount: number
+  positionsCount: number,
+  bookSeries: EquityCurve[] = series
 ): ParentBook {
   const initial = num(run.initial_capital);
   const last = series.length > 0 ? series[series.length - 1] : null;
 
+  const index = chainedIndex(bookSeries);
   let peak = 0;
   let maxDd = 0;
-  for (const p of series) {
-    peak = Math.max(peak, p.total_equity);
-    if (peak > 0) maxDd = Math.max(maxDd, ((peak - p.total_equity) / peak) * 100);
+  for (const v of index) {
+    peak = Math.max(peak, v);
+    maxDd = Math.max(maxDd, ((peak - v) / peak) * 100);
   }
+  const lastIndex = index.length > 0 ? index[index.length - 1] : null;
 
-  const base = initial > 0 ? initial : series[0]?.total_equity ?? 0;
   const scaledPnl = scaleCumulative(series, (p) => p.ts, ["total_pnl"], share);
   return {
     runId: run.run_id,
@@ -161,9 +186,9 @@ export function summarizeBook(
     initialCapital: initial * ratioAt(share, run.start_time ?? series[0]?.ts ?? Date.now()),
     equity: last ? last.total_equity * ratioAt(share, last.ts) : null,
     pnl: last ? scaledPnl[scaledPnl.length - 1].total_pnl : null,
-    returnPct: last && base > 0 ? ((last.total_equity - base) / base) * 100 : null,
-    drawdownPct: last && peak > 0 ? ((peak - last.total_equity) / peak) * 100 : null,
-    maxDrawdownPct: last ? maxDd : null,
+    returnPct: last && lastIndex !== null ? (lastIndex - 1) * 100 : null,
+    drawdownPct: last && lastIndex !== null && peak > 0 ? ((peak - lastIndex) / peak) * 100 : null,
+    maxDrawdownPct: last && lastIndex !== null ? maxDd : null,
     positionsCount,
     lastUpdate: last?.ts ?? null,
   };

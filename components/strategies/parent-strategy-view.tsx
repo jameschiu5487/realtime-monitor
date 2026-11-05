@@ -248,6 +248,9 @@ export async function ParentStrategyView({
     .sort((a, b) => a[0] - b[0]);
 
   const seriesByRun = equityByRun(equityRows);
+  // Each book across its restarts in the window: the stats, the charts and each
+  // book's chained return follow it, so a restart or a capital change resets nothing.
+  const seriesByBook = chainBookSeries(seriesByRun, bookOfRun);
 
   const positions: ParentPosition[] = [];
   const books: ParentBook[] = runs.map((run, i) => {
@@ -261,7 +264,14 @@ export async function ParentStrategyView({
       shareRatio: 1,
     });
     positions.push(...held);
-    return summarizeBook(run, name, share, seriesByRun.get(run.run_id) ?? [], held.length);
+    return summarizeBook(
+      run,
+      name,
+      share,
+      seriesByRun.get(run.run_id) ?? [],
+      held.length,
+      seriesByBook.get(run.run_id) ?? []
+    );
   });
   positions.sort((a, b) => b.notional - a.notional);
 
@@ -306,7 +316,6 @@ export async function ParentStrategyView({
   // PnL) is followed across its restarts, and a book that came online later
   // counts flat until it has data, so neither a new book, a restart nor a
   // capital change resets the stats or adds a deposit-shaped jump.
-  const seriesByBook = chainBookSeries(seriesByRun, bookOfRun);
   const capitalByBook: Record<string, number> = {};
   for (const r of runs) {
     const own = seriesByRun.get(r.run_id) ?? [];
@@ -482,11 +491,13 @@ export async function ParentStrategyView({
                       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
                         <dt className="text-muted-foreground">Simulated equity</dt>
                         <dd className="text-right font-mono">{money(b.equity)}</dd>
-                        <dt className="text-muted-foreground">Return</dt>
+                        <dt className="text-muted-foreground" title="Chained over the window across restarts: each step's PnL over the capital the book ran at">
+                          Return ({WINDOW_DAYS}d)
+                        </dt>
                         <dd className={cn("text-right font-mono", tone(b.returnPct))}>
                           {pct(b.returnPct, true)}
                         </dd>
-                        <dt className="text-muted-foreground">Drawdown</dt>
+                        <dt className="text-muted-foreground">Drawdown ({WINDOW_DAYS}d)</dt>
                         <dd className="text-right font-mono">
                           {pct(b.drawdownPct === null ? null : -b.drawdownPct)}
                           <span className="text-xs text-muted-foreground">
