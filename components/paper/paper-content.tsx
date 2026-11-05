@@ -8,6 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { cn } from "@/lib/utils";
 import { formatDateTime, taipeiDayKey, TZ_LABEL } from "@/lib/time";
+import type { ShareSchedule } from "@/lib/share";
+import { bestPaperStrategy, PaperVsLive, parseLive, type LiveJfmTrade } from "@/components/paper/paper-vs-live";
 
 /** One jfm_observe row: a finished jump-fade episode with simulated fills. PnL in USDT, combined_trades signs. */
 export interface PaperEpisode {
@@ -146,7 +148,19 @@ const COMPARE_COLORS = { a: "#3b82f6", b: "#eab308" } as const;
 const COMBINED_COLOR = "#a78bfa";
 const rowKey = (r: { run_id: string; episode_id: string; t_flat: number }) => `${r.run_id}|${r.episode_id}|${r.t_flat}`;
 
-export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; error: string | null }) {
+export function PaperContent({
+  episodes,
+  error,
+  live,
+  liveError,
+  share,
+}: {
+  episodes: PaperEpisode[];
+  error: string | null;
+  live: LiveJfmTrade[];
+  liveError: string | null;
+  share: ShareSchedule;
+}) {
   const router = useRouter();
   useEffect(() => {
     const id = setInterval(() => router.refresh(), AUTO_REFRESH_MS);
@@ -177,7 +191,7 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
   // account. Both modes pick two selections, A and B: combine adds them up
   // (plus their own lines), compare puts them side by side.
   const strategies = useMemo(() => strategyOrder(rows), [rows]);
-  const [mode, setMode] = useState<"combine" | "compare">("combine");
+  const [mode, setMode] = useState<"combine" | "compare" | "pta">("combine");
   const [hideDup, setHideDup] = useState(true);
   const [selA, setSelA] = useState<Selection | null>(null);
   const [selB, setSelB] = useState<Selection | null>(null);
@@ -195,6 +209,16 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
   }, [rows, strategies]);
   const lineA = useMemo(() => resolve(rows, strategies, selA ?? defaults.a), [rows, strategies, selA, defaults]);
   const lineB = useMemo(() => resolve(rows, strategies, selB ?? defaults.b), [rows, strategies, selB, defaults]);
+
+  // PTA: one paper selection against live Jump Fade Maker. Default: the
+  // strategy whose episodes match the most live positions.
+  const [selP, setSelP] = useState<Selection | null>(null);
+  const defaultP = useMemo<Selection>(() => {
+    const best = mode === "pta" ? bestPaperStrategy(rows, parseLive(live, share)) : null;
+    return { strategy: best ?? strategies[0] ?? "all", venue: "all", run: "all" };
+  }, [mode, rows, live, share, strategies]);
+  const lineP = useMemo(() => resolve(rows, strategies, selP ?? defaultP), [rows, strategies, selP, defaultP]);
+  const rowsP = useMemo(() => (mode === "pta" ? select(rows, lineP.sel, hideDup) : []), [mode, rows, lineP.sel, hideDup]);
 
   const rowsA = useMemo(() => select(rows, lineA.sel, hideDup), [rows, lineA.sel, hideDup]);
   const rowsB = useMemo(() => select(rows, lineB.sel, hideDup), [rows, lineB.sel, hideDup]);
@@ -266,9 +290,9 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
       {error && <p className="text-sm text-red-500">Failed to load jfm_observe: {error}</p>}
 
       <div className="flex flex-wrap items-center gap-1">
-        {(["combine", "compare"] as const).map((m) => (
+        {(["combine", "compare", "pta"] as const).map((m) => (
           <Button key={m} size="sm" variant={m === mode ? "default" : "outline"} className="h-7 px-3 text-xs" onClick={() => setMode(m)}>
-            {m === "combine" ? "Combine" : "Compare"}
+            {m === "combine" ? "Combine" : m === "compare" ? "Compare" : "PTA (vs live)"}
           </Button>
         ))}
         <Button size="sm" variant={hideDup ? "default" : "outline"} className="ml-2 h-7 px-2 text-xs" onClick={() => setHideDup((v) => !v)}>
@@ -276,6 +300,19 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
         </Button>
       </div>
 
+      {mode === "pta" ? (
+        <>
+          {liveError && <p className="text-sm text-red-500">Failed to load live trades: {liveError}</p>}
+          <Card>
+            <CardContent className="space-y-1 p-3">
+              <div className="text-xs font-semibold" style={{ color: COMPARE_COLORS.b }}>Paper</div>
+              <SelectionPicker strategies={strategies} resolved={lineP} onChange={setSelP} />
+            </CardContent>
+          </Card>
+          <PaperVsLive paper={rowsP} live={live} share={share} paperLabel={selectionLabel(lineP.sel)} />
+        </>
+      ) : (
+      <>
         <div className="grid gap-3 lg:grid-cols-2">
           <Card>
             <CardContent className="space-y-1 p-3">
@@ -517,6 +554,8 @@ export function PaperContent({ episodes, error }: { episodes: PaperEpisode[]; er
           </div>
         </CardContent>
       </Card>
+      )}
+      </>
       )}
     </div>
   );
