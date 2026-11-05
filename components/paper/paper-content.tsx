@@ -9,7 +9,7 @@ import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartToo
 import { cn } from "@/lib/utils";
 import { formatDateTime, taipeiDayKey, TZ_LABEL } from "@/lib/time";
 import type { ShareSchedule } from "@/lib/share";
-import { bestPaperStrategy, PaperVsLive, parseLive, type LiveJfmTrade } from "@/components/paper/paper-vs-live";
+import { bestPaperStrategy, PaperVsLive, parseLive, type LiveCapital, type LiveJfmTrade } from "@/components/paper/paper-vs-live";
 
 /** One jfm_observe row: a finished jump-fade episode with simulated fills. PnL in USDT, combined_trades signs. */
 export interface PaperEpisode {
@@ -152,12 +152,14 @@ export function PaperContent({
   episodes,
   error,
   live,
+  liveCapital,
   liveError,
   share,
 }: {
   episodes: PaperEpisode[];
   error: string | null;
   live: LiveJfmTrade[];
+  liveCapital: LiveCapital[];
   liveError: string | null;
   share: ShareSchedule;
 }) {
@@ -309,7 +311,7 @@ export function PaperContent({
               <SelectionPicker strategies={strategies} resolved={lineP} onChange={setSelP} />
             </CardContent>
           </Card>
-          <PaperVsLive paper={rowsP} live={live} share={share} paperLabel={selectionLabel(lineP.sel)} />
+          <PaperVsLive paper={rowsP} live={live} liveCapital={liveCapital} paperCapital={INITIAL_CAPITAL} share={share} paperLabel={selectionLabel(lineP.sel)} />
         </>
       ) : (
       <>

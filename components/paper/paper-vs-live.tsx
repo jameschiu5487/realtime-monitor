@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +27,22 @@ export interface LiveJfmTrade {
   commission_fee: number | string | null;
   funding_fee_realized: number | string | null;
   total_pnl: number | string | null;
+}
+
+/** A live run's initial capital, from its start. */
+export interface LiveCapital {
+  fromMs: number;
+  capital: number;
+}
+
+/** Live capital at `t`: the latest run started by then (before the first run, its capital). */
+function capitalAt(runs: LiveCapital[], t: number): number | null {
+  let c = runs[0]?.capital ?? null;
+  for (const r of runs) {
+    if (r.fromMs > t) break;
+    c = r.capital;
+  }
+  return c;
 }
 
 /** The paper fields PTA needs (a parsed jfm_observe row). */
@@ -177,21 +193,31 @@ function stats(items: { pnl: number; bp: number | null }[]) {
  * PTA (paper-to-actual): the paper selection against Jump Fade Maker's live
  * positions over the hours both were running, trade by trade. Sizes differ
  * between paper and live, so the like-for-like figure is bp of entry notional;
- * "paper at live size" is paper's bp applied to the live notional.
+ * paper's U is rescaled from its own account to the live run's capital at the
+ * signal time (paper PnL × live capital ÷ paper capital), then the viewer's share.
  */
 export function PaperVsLive({
   paper,
   live: liveRaw,
+  liveCapital,
+  paperCapital,
   share,
   paperLabel,
 }: {
   paper: PtaPaperRow[];
   live: LiveJfmTrade[];
+  liveCapital: LiveCapital[];
+  paperCapital: number;
   share: ShareSchedule;
   paperLabel: string;
 }) {
   const liveAll = useMemo(() => parseLive(liveRaw, share), [liveRaw, share]);
   const [unit, setUnit] = useState<"bp" | "usd">("bp");
+  // Paper PnL on the live account's capital at the signal, at the viewer's share.
+  const paperUsd = useCallback(
+    (p: PtaPaperRow) => (p.total_pnl * (capitalAt(liveCapital, p.t_sig) ?? paperCapital)) / paperCapital * ratioAt(share, p.t_flat),
+    [liveCapital, paperCapital, share]
+  );
 
   const view = useMemo(() => {
     const venues = new Set(liveAll.map((l) => l.venue));
@@ -205,15 +231,12 @@ export function PaperVsLive({
     const pairs = matchTrades(live, pap);
     const both = pairs.filter((x) => x.live && x.paper);
 
-    const paperItem = (p: PtaPaperRow) => ({ pnl: p.total_pnl, bp: paperBp(p) });
-    // Paper's bp on the live position's notional, at the viewer's share.
-    const paperAtLive = (x: Pair) => ((paperBp(x.paper!) ?? 0) * x.live!.notional) / 1e4 * ratioAt(share, x.live!.exitMs);
+    const paperItem = (p: PtaPaperRow) => ({ pnl: paperUsd(p), bp: paperBp(p) });
     const summary = [
       { label: "Live", color: LIVE, ...stats(live) },
       { label: "Paper", color: PAPER, ...stats(pap.map(paperItem)) },
       { label: "Live (matched)", color: LIVE, ...stats(both.map((x) => x.live!)) },
       { label: "Paper (matched)", color: PAPER, ...stats(both.map((x) => paperItem(x.paper!))) },
-      { label: "Paper at live size (matched)", color: PAPER, ...stats(both.map((x) => ({ pnl: paperAtLive(x), bp: paperBp(x.paper!) }))) },
     ];
     const mean = (vals: (number | null)[]) => {
       const v = vals.filter((x): x is number => x != null && Number.isFinite(x));
@@ -229,12 +252,12 @@ export function PaperVsLive({
     // the diff over matched trades only.
     const events = [
       ...live.map((l) => ({ ts: l.exitMs, live: { usd: l.pnl, bp: l.bp ?? 0 }, paper: null, diff: null })),
-      ...pap.map((p) => ({ ts: p.t_flat, live: null, paper: { usd: p.total_pnl, bp: paperBp(p) ?? 0 }, diff: null })),
+      ...pap.map((p) => ({ ts: p.t_flat, live: null, paper: { usd: paperUsd(p), bp: paperBp(p) ?? 0 }, diff: null })),
       ...both.map((x) => ({
         ts: Math.max(x.live!.exitMs, x.paper!.t_flat),
         live: null,
         paper: null,
-        diff: { usd: x.live!.pnl - paperAtLive(x), bp: (x.live!.bp ?? 0) - (paperBp(x.paper!) ?? 0) },
+        diff: { usd: x.live!.pnl - paperUsd(x.paper!), bp: (x.live!.bp ?? 0) - (paperBp(x.paper!) ?? 0) },
       })),
     ].sort((a, b) => a.ts - b.ts);
     const acc = { liveUsd: 0, liveBp: 0, paperUsd: 0, paperBp: 0, diffUsd: 0, diffBp: 0 };
@@ -264,7 +287,7 @@ export function PaperVsLive({
       counts: { both: both.length, liveOnly: live.length - both.length, paperOnly: pap.length - both.length },
       venues: [...venues].join(", "),
     };
-  }, [liveAll, paper, share]);
+  }, [liveAll, paper, paperUsd]);
 
   if (liveAll.length === 0) {
     return <p className="py-6 text-center text-sm text-muted-foreground">No live Jump Fade Maker trades (or no access to the strategy).</p>;
@@ -282,7 +305,8 @@ export function PaperVsLive({
           <CardDescription className="text-xs">
             Paper: {paperLabel}, only on the live venue ({view.venues}). Live: Jump Fade Maker, all live runs. Window {fmt(view.start)} –{" "}
             {fmt(view.end)} {TZ_LABEL}, the hours both ran. Matched = same symbol and side, paper signal within 10 min before / 2 min after
-            the live entry. bp = PnL after fees ÷ entry notional; live U is your share.
+            the live entry. bp = PnL after fees ÷ entry notional. Paper U is rescaled from its {paperCapital.toLocaleString("en-US")} U account to
+            the live run&apos;s capital at the time (now {(capitalAt(liveCapital, Date.now()) ?? paperCapital).toLocaleString("en-US")} U); all U are your share.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 overflow-x-auto">
@@ -325,8 +349,7 @@ export function PaperVsLive({
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Cumulative PnL</CardTitle>
           <CardDescription className="text-xs">
-            Live and paper over all their trades in the window, by close time. Below: live − paper over matched trades only (in U, paper
-            at live size).
+            Live and paper over all their trades in the window, by close time. Below: live − paper over matched trades only.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2 px-2 sm:px-6">
@@ -404,7 +427,7 @@ export function PaperVsLive({
                       <td className={cn("px-2 py-1.5 text-right", tone(pb))}>{signed(pb, 1)}</td>
                       <td className={cn("px-2 py-1.5 text-right font-semibold", tone(lb != null && pb != null ? lb - pb : null))}>{lb != null && pb != null ? signed(lb - pb, 1) : ""}</td>
                       <td className={cn("px-2 py-1.5 text-right", tone(l?.pnl))}>{signed(l?.pnl, 3)}</td>
-                      <td className={cn("px-2 py-1.5 text-right", tone(p?.total_pnl))}>{signed(p?.total_pnl, 3)}</td>
+                      <td className={cn("px-2 py-1.5 text-right", tone(p?.total_pnl))}>{p ? signed(paperUsd(p), 3) : "—"}</td>
                     </tr>
                   );
                 })}

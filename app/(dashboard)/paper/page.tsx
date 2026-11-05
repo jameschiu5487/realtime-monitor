@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { loadShareSchedule } from "@/lib/share";
 import { PaperContent, type PaperEpisode } from "@/components/paper/paper-content";
-import type { LiveJfmTrade } from "@/components/paper/paper-vs-live";
+import type { LiveCapital, LiveJfmTrade } from "@/components/paper/paper-vs-live";
 
 const PAGE_SIZE = 1000;
 
@@ -48,16 +48,21 @@ const LIVE_STRATEGY_NAME = "Jump Fade Maker";
 async function loadLiveTrades(supabase: SupabaseClient) {
   const { data: runs, error: runsError } = await supabase
     .from("strategy_runs")
-    .select("run_id, strategies!inner(name)")
+    .select("run_id, start_time, initial_capital, strategies!inner(name)")
     .eq("strategies.name", LIVE_STRATEGY_NAME)
     .eq("mode", "live");
   if (runsError) {
     console.error("[paper] live runs:", runsError);
-    return { trades: [] as LiveJfmTrade[], error: runsError.message };
+    return { trades: [] as LiveJfmTrade[], capital: [] as LiveCapital[], error: runsError.message };
   }
+  // Each run's capital from its start (start_time can be null while the engine creates it).
+  const capital: LiveCapital[] = (runs ?? [])
+    .filter((r) => r.start_time && Number(r.initial_capital) > 0)
+    .map((r) => ({ fromMs: Date.parse(r.start_time as string), capital: Number(r.initial_capital) }))
+    .sort((a, b) => a.fromMs - b.fromMs);
   const runIds = (runs ?? []).map((r) => r.run_id);
   const trades: LiveJfmTrade[] = [];
-  if (runIds.length === 0) return { trades, error: null };
+  if (runIds.length === 0) return { trades, capital, error: null };
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase
       .from("combined_trades")
@@ -67,13 +72,13 @@ async function loadLiveTrades(supabase: SupabaseClient) {
       .range(from, from + PAGE_SIZE - 1);
     if (error) {
       console.error("[paper] live combined_trades:", error);
-      return { trades, error: error.message };
+      return { trades, capital, error: error.message };
     }
     const batch = (data ?? []) as unknown as LiveJfmTrade[];
     trades.push(...batch);
     if (batch.length < PAGE_SIZE) break;
   }
-  return { trades, error: null };
+  return { trades, capital, error: null };
 }
 
 export default async function PaperPage() {
@@ -87,5 +92,5 @@ export default async function PaperPage() {
     // Live amounts are the viewer's share (lib/share.ts); paper is not an account anyone owns.
     loadShareSchedule(supabase, user?.id),
   ]);
-  return <PaperContent episodes={rows} error={error} live={live.trades} liveError={live.error} share={share} />;
+  return <PaperContent episodes={rows} error={error} live={live.trades} liveCapital={live.capital} liveError={live.error} share={share} />;
 }
