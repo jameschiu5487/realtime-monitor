@@ -38,6 +38,8 @@ export interface ParentBook {
   capitalRaw: number;
   /** PnL over the window across the book's restarts, scaled increment by increment. */
   windowPnl: number | null;
+  /** The same PnL unscaled: compared with the real account equity. */
+  windowPnlRaw: number | null;
   /** Latest equity in the window, scaled. null when the run has no equity rows yet. */
   equity: number | null;
   /** Latest cumulative total_pnl, scaled. */
@@ -179,9 +181,11 @@ export function summarizeBook(
   }
   const lastIndex = index.length > 0 ? index[index.length - 1] : null;
   let windowPnl: number | null = bookSeries.length > 0 ? 0 : null;
+  let windowPnlRaw: number | null = windowPnl;
   for (let i = 1; i < bookSeries.length; i++) {
     const step = bookSeries[i].total_pnl - bookSeries[i - 1].total_pnl;
     windowPnl = (windowPnl ?? 0) + step * ratioAt(share, bookSeries[i].ts);
+    windowPnlRaw = (windowPnlRaw ?? 0) + step;
   }
 
   const scaledPnl = scaleCumulative(series, (p) => p.ts, ["total_pnl"], share);
@@ -195,6 +199,7 @@ export function summarizeBook(
     initialCapital: initial * ratioAt(share, run.start_time ?? series[0]?.ts ?? Date.now()),
     capitalRaw: initial,
     windowPnl,
+    windowPnlRaw,
     equity: last ? last.total_equity * ratioAt(share, last.ts) : null,
     pnl: last ? scaledPnl[scaledPnl.length - 1].total_pnl : null,
     returnPct: last && lastIndex !== null ? (lastIndex - 1) * 100 : null,

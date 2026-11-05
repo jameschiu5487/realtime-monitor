@@ -19,10 +19,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { EquityCurveChart } from "@/components/charts/equity-curve-chart";
 import { DrawdownChart } from "@/components/charts/drawdown-chart";
 import { PerformanceStats, type TurnoverFigures } from "@/components/charts/performance-stats";
 import { AggregatePnlChart } from "@/components/strategies/aggregate-pnl-chart";
+import { AccountReturnChart } from "@/components/strategies/account-return-chart";
 import { ParentAccountEquity } from "@/components/strategies/parent-account-equity";
 import {
   SimulatedEquityBadge,
@@ -51,6 +51,7 @@ import {
 import { cn, formatVersion } from "@/lib/utils";
 import { TZ_LABEL, taipeiDayKey, taipeiIso } from "@/lib/time";
 import type {
+  EquityCurve,
   FundAccountEquity,
   Json,
   Position,
@@ -311,10 +312,14 @@ export async function ParentStrategyView({
   // Traded notional per book over the window, across its restarts, each fill at
   // the viewer's ratio when it traded.
   const turnoverByBook: Record<string, number> = {};
+  // Unscaled, for the multiple of the real account (a book's capital may have changed
+  // inside the window, so turnover over today's capital would mislead).
+  const turnoverRawByBook: Record<string, number> = {};
   for (const f of fills) {
     const book = bookOfRun[f.run_id];
     if (!book) continue;
     turnoverByBook[book] = (turnoverByBook[book] ?? 0) + f.notional * ratioAt(share, f.ts);
+    turnoverRawByBook[book] = (turnoverRawByBook[book] ?? 0) + f.notional;
   }
 
   // Summed from the earliest book: each book (current capital + cumulative
@@ -362,7 +367,27 @@ export async function ParentStrategyView({
   const totalCapital = books.reduce((s, b) => s + b.initialCapital, 0);
   const totalCapitalRaw = books.reduce((s, b) => s + b.capitalRaw, 0);
   const windowPnl = books.reduce((s, b) => s + (b.windowPnl ?? 0), 0);
-  const windowPnlRaw = books.reduce((s, b) => s + (b.windowPnl ?? 0) / (b.shareRatio || 1), 0);
+  const windowPnlRaw = books.reduce((s, b) => s + (b.windowPnlRaw ?? 0), 0);
+
+  // The books' summed PnL on the real account: today's account equity plus the PnL
+  // since the window's first point (unscaled, so ratio-independent). The return and
+  // drawdown charts and the stats read it, so they are % of the account, not of the
+  // books' notional capital.
+  const accountCurve: EquityCurve[] = [];
+  if (accountNow > 0 && aggregateRaw.length > 0) {
+    const first = aggregateRaw[0].total_equity;
+    let peak = 0;
+    for (const p of aggregateRaw) {
+      const equity = accountNow + (p.total_equity - first);
+      peak = Math.max(peak, equity);
+      accountCurve.push({
+        ...p,
+        total_equity: equity,
+        total_pnl: p.total_equity - first,
+        drawdown_pct: peak > 0 ? ((peak - equity) / peak) * 100 : 0,
+      });
+    }
+  }
   const totalUpnl = shownPositions.reduce((s, p) => s + p.unrealizedPnl, 0);
   const totalNotional = shownPositions.reduce((s, p) => s + p.notional, 0);
 
@@ -520,9 +545,9 @@ export async function ParentStrategyView({
                         <dt className="text-muted-foreground">PnL ({WINDOW_DAYS}d)</dt>
                         <dd className={cn("text-right font-mono", tone(b.windowPnl))}>
                           {money(b.windowPnl, true)}
-                          {accountNow > 0 && b.windowPnl !== null && (
+                          {accountNow > 0 && b.windowPnlRaw !== null && (
                             <span className="text-xs text-muted-foreground">
-                              {" "}({pct((b.windowPnl / (b.shareRatio || 1) / accountNow) * 100, true)} acct)
+                              {" "}({pct((b.windowPnlRaw / accountNow) * 100, true)} acct)
                             </span>
                           )}
                         </dd>
@@ -544,9 +569,9 @@ export async function ParentStrategyView({
                         <dt className="text-muted-foreground">Turnover ({WINDOW_DAYS}d)</dt>
                         <dd className="text-right font-mono">
                           {money(turnoverByBook[b.runId] ?? 0)}
-                          {b.initialCapital > 0 && (
+                          {accountNow > 0 && (
                             <span className="text-xs text-muted-foreground">
-                              {" "}({((turnoverByBook[b.runId] ?? 0) / b.initialCapital).toFixed(1)}×)
+                              {" "}({((turnoverRawByBook[b.runId] ?? 0) / accountNow).toFixed(1)}× account)
                             </span>
                           )}
                         </dd>
@@ -568,30 +593,30 @@ export async function ParentStrategyView({
         </Card>
       ) : (
         <>
-          {aggregate.length > 0 && (
+          {accountCurve.length > 0 && (
             <>
               <PerformanceStats
-                filteredEquityCurve={aggregateRaw}
+                filteredEquityCurve={accountCurve}
                 filteredCombinedTrades={statsTrades}
                 share={share}
                 turnover={statsTurnover}
               />
-              <EquityCurveChart
-                title="Sub-strategies simulated equity (sum)"
-                description="Sum of the sub-strategies' virtual book equity (simulated, not real account money)"
-                currentLabel="Simulated equity"
-                data={aggregate.map((p) => ({ time: p.ts, equity: p.total_equity }))}
+              <AccountReturnChart
+                title={`Sub-strategies return on the account (${WINDOW_DAYS}d)`}
+                description="The books' summed PnL since the window's start, as % of today's real account equity"
+                currentLabel="Return / account"
+                data={accountCurve.map((p) => ({ time: p.ts, value: (p.total_pnl / accountNow) * 100 }))}
               />
               {books.length > 1 && (
                 <p className="text-xs text-muted-foreground -mt-2">
-                  Summed from the earliest book ({taipeiIso(aggregate[0].ts).slice(0, 16).replace("T", " ")} {TZ_LABEL}), across restarts;
-                  each book counts as its current capital plus cumulative PnL (flat before it has data), and its last value is carried forward between its points.
+                  Summed from the earliest book ({taipeiIso(accountCurve[0].ts).slice(0, 16).replace("T", " ")} {TZ_LABEL}), across restarts;
+                  a book counts from its first point and its last value is carried forward between its points. The PnL is the books&apos; own, divided by today&apos;s account equity.
                 </p>
               )}
               <DrawdownChart
-                title="Sub-strategies simulated equity drawdown (%)"
-                description="Computed from the simulated equity sum above, not the real account drawdown"
-                data={aggregate.map((p) => ({ time: p.ts, drawdown: -p.drawdown_pct }))}
+                title={`Sub-strategies drawdown on the account (${WINDOW_DAYS}d, %)`}
+                description="Drawdown of the account-based curve above: today's account equity plus the books' summed PnL"
+                data={accountCurve.map((p) => ({ time: p.ts, drawdown: -p.drawdown_pct }))}
               />
             </>
           )}
