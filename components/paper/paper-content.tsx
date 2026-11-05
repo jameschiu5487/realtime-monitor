@@ -9,7 +9,7 @@ import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartToo
 import { cn } from "@/lib/utils";
 import { formatDateTime, taipeiDayKey, TZ_LABEL } from "@/lib/time";
 import type { ShareSchedule } from "@/lib/share";
-import { bestPaperStrategy, PaperVsLive, parseLive, type LiveCapital, type LiveJfmTrade } from "@/components/paper/paper-vs-live";
+import { bestPaperStrategy, liveWindow, PaperVsLive, parseLive, type LiveCapital, type LiveJfmTrade } from "@/components/paper/paper-vs-live";
 
 /** One jfm_observe row: a finished jump-fade episode with simulated fills. PnL in USDT, combined_trades signs. */
 export interface PaperEpisode {
@@ -248,13 +248,26 @@ export function PaperContent({
   const lineA = useMemo(() => resolve(rows, strategies, selA ?? defaults.a), [rows, strategies, selA, defaults]);
   const lineB = useMemo(() => resolve(rows, strategies, selB ?? defaults.b), [rows, strategies, selB, defaults]);
 
-  // PTA: one paper selection against live Jump Fade Maker. Default: the
-  // strategy whose episodes match the most live positions.
+  // PTA: one paper selection against a live Jump Fade Maker run (default the
+  // newest run that traded); the window is that run's span. Paper default:
+  // the strategy whose episodes match the most of its positions.
+  const liveRuns = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const t of live) n.set(t.run_id, (n.get(t.run_id) ?? 0) + 1);
+    return liveCapital.filter((r) => n.has(r.runId)).map((r) => ({ ...r, trades: n.get(r.runId) ?? 0 })).reverse();
+  }, [live, liveCapital]);
+  const [liveRunSel, setLiveRun] = useState<string | null>(null);
+  const liveRun = liveRunSel ?? liveRuns[0]?.runId ?? "all";
   const [selP, setSelP] = useState<Selection | null>(null);
   const defaultP = useMemo<Selection>(() => {
-    const best = mode === "pta" ? bestPaperStrategy(rows, parseLive(live, share)) : null;
+    let best: string | null = null;
+    const win = liveWindow(liveCapital, liveRun);
+    if (mode === "pta" && win) {
+      const runTrades = live.filter((t) => liveRun === "all" || t.run_id === liveRun);
+      best = bestPaperStrategy(rows.filter((r) => r.t_sig >= win.start && r.t_sig <= win.end), parseLive(runTrades, share));
+    }
     return { strategy: best ?? strategies[0] ?? "all", venue: "all", run: "all" };
-  }, [mode, rows, live, share, strategies]);
+  }, [mode, rows, live, liveCapital, liveRun, share, strategies]);
   const lineP = useMemo(() => resolve(rows, strategies, selP ?? defaultP), [rows, strategies, selP, defaultP]);
   const rowsP = useMemo(() => (mode === "pta" ? select(rows, lineP.sel, hideDup) : []), [mode, rows, lineP.sel, hideDup]);
 
@@ -343,11 +356,27 @@ export function PaperContent({
           {liveError && <p className="text-sm text-red-500">Failed to load live trades: {liveError}</p>}
           <Card>
             <CardContent className="space-y-1 p-3">
+              <div className="text-xs font-semibold" style={{ color: COMPARE_COLORS.a }}>Live · Jump Fade Maker</div>
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="w-14 text-xs text-muted-foreground">Run</span>
+                {liveRuns.map((r) => (
+                  <Button key={r.runId} size="sm" variant={r.runId === liveRun ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setLiveRun(r.runId)}>
+                    {fmt(r.fromMs)} – {r.toMs == null ? "now" : fmt(r.toMs)} · {r.capital.toLocaleString("en-US")} U · {r.trades}
+                  </Button>
+                ))}
+                <Button size="sm" variant={liveRun === "all" ? "default" : "outline"} className="h-7 px-2 text-xs" onClick={() => setLiveRun("all")}>
+                  All runs
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="space-y-1 p-3">
               <div className="text-xs font-semibold" style={{ color: COMPARE_COLORS.b }}>Paper</div>
               <SelectionPicker strategies={strategies} resolved={lineP} onChange={setSelP} />
             </CardContent>
           </Card>
-          <PaperVsLive paper={rowsP} live={live} liveCapital={liveCapital} paperCapitals={capitals} share={share} paperLabel={selectionLabel(lineP.sel)} />
+          <PaperVsLive paper={rowsP} live={live} liveCapital={liveCapital} liveRun={liveRun} paperCapitals={capitals} share={share} paperLabel={selectionLabel(lineP.sel)} />
         </>
       ) : (
       <>

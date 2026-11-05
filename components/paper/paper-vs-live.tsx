@@ -29,20 +29,33 @@ export interface LiveJfmTrade {
   total_pnl: number | string | null;
 }
 
-/** A live run's initial capital, from its start. */
+/** A live run: its span (toMs null while running) and initial capital. Sorted by fromMs. */
 export interface LiveCapital {
+  runId: string;
   fromMs: number;
+  toMs: number | null;
   capital: number;
 }
 
 /** Live capital at `t`: the latest run started by then (before the first run, its capital). */
 function capitalAt(runs: LiveCapital[], t: number): number | null {
-  let c = runs[0]?.capital ?? null;
+  let c: number | null = null;
   for (const r of runs) {
-    if (r.fromMs > t) break;
+    if (r.capital <= 0) continue;
+    if (c != null && r.fromMs > t) break;
     c = r.capital;
   }
   return c;
+}
+
+/** The PTA window: the chosen live run's span, or all live runs' (open ends at now). */
+export function liveWindow(runs: LiveCapital[], runId: string): { start: number; end: number } | null {
+  const chosen = runId === "all" ? runs : runs.filter((r) => r.runId === runId);
+  if (chosen.length === 0) return null;
+  return {
+    start: Math.min(...chosen.map((r) => r.fromMs)),
+    end: Math.max(...chosen.map((r) => r.toMs ?? Date.now())),
+  };
 }
 
 /** The paper fields PTA needs (a parsed jfm_observe row). */
@@ -86,6 +99,7 @@ const fmt = (ms: number) => formatDateTime(ms, { month: "short", day: "numeric",
 
 interface LiveRow {
   id: number;
+  runId: string;
   symbol: string;
   venue: string;
   side: "long" | "short";
@@ -108,6 +122,7 @@ export function parseLive(trades: LiveJfmTrade[], share: ShareSchedule): LiveRow
     const notional = Math.abs((num(t.quantity) ?? 0) * (entry ?? 0));
     return {
       id: t.combined_trade_id,
+      runId: t.run_id,
       symbol: t.symbol,
       venue: t.exchange.toLowerCase(),
       side: t.side.toLowerCase() === "short" ? "short" : "long",
@@ -202,6 +217,7 @@ export function PaperVsLive({
   paper,
   live: liveRaw,
   liveCapital,
+  liveRun,
   paperCapitals,
   share,
   paperLabel,
@@ -209,12 +225,17 @@ export function PaperVsLive({
   paper: PtaPaperRow[];
   live: LiveJfmTrade[];
   liveCapital: LiveCapital[];
+  /** Live run id, or "all". The window is its span. */
+  liveRun: string;
   /** Paper account size per strategy (one venue). */
   paperCapitals: Map<string, number>;
   share: ShareSchedule;
   paperLabel: string;
 }) {
-  const liveAll = useMemo(() => parseLive(liveRaw, share), [liveRaw, share]);
+  const liveAll = useMemo(
+    () => parseLive(liveRaw, share).filter((l) => liveRun === "all" || l.runId === liveRun),
+    [liveRaw, share, liveRun]
+  );
   const [unit, setUnit] = useState<"bp" | "usd">("bp");
   // Paper PnL on the live account's capital at the signal, at the viewer's share.
   const paperUsd = useCallback(
@@ -232,11 +253,11 @@ export function PaperVsLive({
   const view = useMemo(() => {
     const venues = new Set(liveAll.map((l) => l.venue));
     const onVenue = paper.filter((p) => venues.has(p.venue));
-    if (liveAll.length === 0 || onVenue.length === 0) return null;
-    // Only the hours both ran.
-    const start = Math.max(Math.min(...liveAll.map((l) => l.entryMs)), Math.min(...onVenue.map((p) => p.t_sig))) - MATCH_BEFORE_MS;
-    const end = Math.min(Math.max(...liveAll.map((l) => l.entryMs)), Math.max(...onVenue.map((p) => p.t_sig))) + MATCH_AFTER_MS;
-    const live = liveAll.filter((l) => l.entryMs >= start && l.entryMs <= end);
+    const win = liveWindow(liveCapital, liveRun);
+    if (liveAll.length === 0 || onVenue.length === 0 || !win) return null;
+    // The window follows live: the chosen run's start to its end (or now).
+    const { start, end } = win;
+    const live = liveAll;
     const pap = onVenue.filter((p) => p.t_sig >= start && p.t_sig <= end);
     const pairs = matchTrades(live, pap);
     const both = pairs.filter((x) => x.live && x.paper);
@@ -297,10 +318,10 @@ export function PaperVsLive({
       counts: { both: both.length, liveOnly: live.length - both.length, paperOnly: pap.length - both.length },
       venues: [...venues].join(", "),
     };
-  }, [liveAll, paper, paperUsd]);
+  }, [liveAll, paper, paperUsd, liveCapital, liveRun]);
 
   if (liveAll.length === 0) {
-    return <p className="py-6 text-center text-sm text-muted-foreground">No live Jump Fade Maker trades (or no access to the strategy).</p>;
+    return <p className="py-6 text-center text-sm text-muted-foreground">No live Jump Fade Maker trades in this run (or no access to the strategy).</p>;
   }
   if (!view) {
     return <p className="py-6 text-center text-sm text-muted-foreground">The paper selection has no episodes on the live venue(s).</p>;
@@ -313,8 +334,8 @@ export function PaperVsLive({
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Paper vs live</CardTitle>
           <CardDescription className="text-xs">
-            Paper: {paperLabel}, only on the live venue ({view.venues}). Live: Jump Fade Maker, all live runs. Window {fmt(view.start)} –{" "}
-            {fmt(view.end)} {TZ_LABEL}, the hours both ran. Matched = same symbol and side, paper signal within 10 min before / 2 min after
+            Paper: {paperLabel}, only on the live venue ({view.venues}). Live: Jump Fade Maker, {liveRun === "all" ? "all live runs" : "the chosen run"}. Window{" "}
+            {fmt(view.start)} – {fmt(view.end)} {TZ_LABEL}, the live run&apos;s start to its end (or now). Matched = same symbol and side, paper signal within 10 min before / 2 min after
             the live entry. bp = PnL after fees ÷ entry notional. Paper U is rescaled from its account ({paperAccounts} U) to the live
             run&apos;s capital at the time (now {(capitalAt(liveCapital, Date.now()) ?? 0).toLocaleString("en-US")} U); all U are your share.
           </CardDescription>

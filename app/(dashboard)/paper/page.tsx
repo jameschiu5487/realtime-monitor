@@ -48,17 +48,22 @@ const LIVE_STRATEGY_NAME = "Jump Fade Maker";
 async function loadLiveTrades(supabase: SupabaseClient) {
   const { data: runs, error: runsError } = await supabase
     .from("strategy_runs")
-    .select("run_id, start_time, initial_capital, strategies!inner(name)")
+    .select("run_id, start_time, end_time, initial_capital, strategies!inner(name)")
     .eq("strategies.name", LIVE_STRATEGY_NAME)
     .eq("mode", "live");
   if (runsError) {
     console.error("[paper] live runs:", runsError);
     return { trades: [] as LiveJfmTrade[], capital: [] as LiveCapital[], error: runsError.message };
   }
-  // Each run's capital from its start (start_time can be null while the engine creates it).
+  // Each run's span and capital (start_time can be null while the engine creates it).
   const capital: LiveCapital[] = (runs ?? [])
-    .filter((r) => r.start_time && Number(r.initial_capital) > 0)
-    .map((r) => ({ fromMs: Date.parse(r.start_time as string), capital: Number(r.initial_capital) }))
+    .filter((r) => r.start_time)
+    .map((r) => ({
+      runId: r.run_id,
+      fromMs: Date.parse(r.start_time as string),
+      toMs: r.end_time ? Date.parse(r.end_time) : null,
+      capital: Number(r.initial_capital) || 0,
+    }))
     .sort((a, b) => a.fromMs - b.fromMs);
   const runIds = (runs ?? []).map((r) => r.run_id);
   const trades: LiveJfmTrade[] = [];
