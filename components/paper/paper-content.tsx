@@ -38,11 +38,15 @@ export interface PaperEpisode {
   price_pnl: number;
   commission_fee: number;
   total_pnl: number;
+  /** params.size_frac: each position's share of the account (null on v1 rows). */
+  size_frac: string | number | null;
 }
 
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
-/** Observe mode's paper account size (user, 2026-10-21); returns are PnL over this. */
-const INITIAL_CAPITAL = 10_000;
+/** Fallback account size when a strategy's can't be derived (user, 2026-10-21). */
+const FALLBACK_CAPITAL = 10_000;
+/** size_frac when params don't carry it (v1); every later version runs 0.05. */
+const DEFAULT_SIZE_FRAC = 0.05;
 const POS = "#34d399";
 const NEG = "#f87171";
 
@@ -50,11 +54,42 @@ const usd = (v: number | null | undefined, d = 2) =>
   v == null || !Number.isFinite(v) ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(d)}`;
 const tone = (v: number | null | undefined) =>
   v == null ? "text-muted-foreground" : v > 0 ? "text-emerald-500" : v < 0 ? "text-red-500" : "";
-const pctOf = (v: number, d = 2, capital = INITIAL_CAPITAL) => `${v > 0 ? "+" : ""}${((100 * v) / capital).toFixed(d)}%`;
+const pctOf = (v: number, d: number, capital: number) => `${v > 0 ? "+" : ""}${((100 * v) / capital).toFixed(d)}%`;
 const fmt = (ms: number) => formatDateTime(ms, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
 /** A parsed jfm_observe row (numbers as numbers, plus entry notional). */
 type PaperRow = Omit<PaperEpisode, "e" | "exit_vwap"> & { e: number | null; exit_vwap: number | null; notional: number | null };
+
+/**
+ * Each strategy's paper account size. jfm_observe doesn't record it, so it is
+ * derived: the largest entry fill is one full slot, size_frac of the account
+ * (v1 200 U → 4,000; v2 500 → 10,000; v3/v4 2,500 → 50,000; confirmed by the
+ * user 2026-11-05). Live works the same way: 10,000 U × 0.05 = 500 U max.
+ */
+function strategyCapitals(rows: PaperRow[]): Map<string, number> {
+  const maxFill = new Map<string, number>();
+  const frac = new Map<string, number>();
+  for (const r of rows) {
+    const k = strategyOf(r);
+    if (r.e != null) maxFill.set(k, Math.max(maxFill.get(k) ?? 0, Math.abs(r.qty_filled * r.e)));
+    const f = Number(r.size_frac);
+    if (r.size_frac != null && f > 0) frac.set(k, f);
+  }
+  const out = new Map<string, number>();
+  for (const [k, m] of maxFill) {
+    const cap = Math.round(m / (frac.get(k) ?? DEFAULT_SIZE_FRAC) / 100) * 100;
+    out.set(k, cap > 0 ? cap : FALLBACK_CAPITAL);
+  }
+  return out;
+}
+
+/** A selection's capital: one account per (strategy, venue) it trades on. */
+function accountCapital(rows: PaperRow[], capitals: Map<string, number>): number {
+  const accounts = new Set(rows.map((r) => `${strategyOf(r)}|${r.venue}`));
+  let total = 0;
+  for (const a of accounts) total += capitals.get(a.split("|")[0]) ?? FALLBACK_CAPITAL;
+  return total || FALLBACK_CAPITAL;
+}
 
 /** One line on the page: a strategy, a venue and a run, each "all" or a value. */
 interface Selection {
@@ -111,7 +146,7 @@ function selectionLabel(sel: Selection): string {
     .join(" · ");
 }
 
-function computeStats(shown: PaperRow[]) {
+function computeStats(shown: PaperRow[], capital: number) {
   const n = shown.length;
   const total = shown.reduce((a, r) => a + r.total_pnl, 0);
   const fees = shown.reduce((a, r) => a + r.commission_fee, 0);
@@ -125,7 +160,7 @@ function computeStats(shown: PaperRow[]) {
       cum += r.total_pnl;
       peak = Math.max(peak, cum);
       maxDd = Math.max(maxDd, peak - cum);
-      return { ts: r.t_flat, cum, pct: (100 * cum) / INITIAL_CAPITAL };
+      return { ts: r.t_flat, cum, pct: (100 * cum) / capital };
     });
   const byDay = new Map<string, number>();
   for (const r of shown) byDay.set(taipeiDayKey(r.t_flat), (byDay.get(taipeiDayKey(r.t_flat)) ?? 0) + r.total_pnl);
@@ -139,7 +174,7 @@ function computeStats(shown: PaperRow[]) {
     byReason.set(k, e);
   }
   const notional = shown.reduce((a, r) => a + (r.notional ?? 0), 0);
-  return { n, total, fees, notional, winRate: n ? wins / n : null, perTrade: n ? total / n : null, maxDd, curve, daily, byReason: [...byReason.entries()] };
+  return { capital, n, total, fees, notional, winRate: n ? wins / n : null, perTrade: n ? total / n : null, maxDd, curve, daily, byReason: [...byReason.entries()] };
 }
 type PaperStats = ReturnType<typeof computeStats>;
 
@@ -180,6 +215,7 @@ export function PaperContent({
         e: r.e == null ? null : Number(r.e),
         exit_vwap: r.exit_vwap == null ? null : Number(r.exit_vwap),
         qty_kept: Number(r.qty_kept),
+        qty_filled: Number(r.qty_filled),
         // Entry notional of what was kept.
         notional: r.e == null ? null : Math.abs(Number(r.qty_kept) * Number(r.e)),
         price_pnl: Number(r.price_pnl),
@@ -224,20 +260,20 @@ export function PaperContent({
 
   const rowsA = useMemo(() => select(rows, lineA.sel, hideDup), [rows, lineA.sel, hideDup]);
   const rowsB = useMemo(() => select(rows, lineB.sel, hideDup), [rows, lineB.sel, hideDup]);
-  const statsA = useMemo(() => computeStats(rowsA), [rowsA]);
-  const statsB = useMemo(() => computeStats(rowsB), [rowsB]);
+  const capitals = useMemo(() => strategyCapitals(rows), [rows]);
+  const statsA = useMemo(() => computeStats(rowsA, accountCapital(rowsA, capitals)), [rowsA, capitals]);
+  const statsB = useMemo(() => computeStats(rowsB, accountCapital(rowsB, capitals)), [rowsB, capitals]);
   // A + B as a union, so an episode in both selections is counted once. Each
   // selection is its own 10,000 U account unless one contains the other.
   const combined = useMemo(() => {
     const inA = new Set(rowsA.map(rowKey));
     const inB = new Set(rowsB.map(rowKey));
     const union = [...rowsA, ...rowsB.filter((r) => !inA.has(rowKey(r)))];
-    const nested = rowsA.every((r) => inB.has(rowKey(r))) || rowsB.every((r) => inA.has(rowKey(r)));
     const tag = (r: PaperRow) => (inA.has(rowKey(r)) && inB.has(rowKey(r)) ? "A+B" : inA.has(rowKey(r)) ? "A" : "B");
-    return { rows: union, capital: INITIAL_CAPITAL * (nested ? 1 : 2), tag };
-  }, [rowsA, rowsB]);
+    return { rows: union, capital: accountCapital(union, capitals), tag };
+  }, [rowsA, rowsB, capitals]);
   const shown = combined.rows;
-  const stats = useMemo(() => computeStats(shown), [shown]);
+  const stats = useMemo(() => computeStats(shown, combined.capital), [shown, combined.capital]);
   const capital = combined.capital;
 
   // Both curves on one timeline, each carried forward between its own trades.
@@ -263,8 +299,8 @@ export function PaperContent({
           a: ca,
           b: cb,
           c: cc,
-          aPct: (100 * ca) / INITIAL_CAPITAL,
-          bPct: (100 * cb) / INITIAL_CAPITAL,
+          aPct: (100 * ca) / statsA.capital,
+          bPct: (100 * cb) / statsB.capital,
           cPct: (100 * cc) / capital,
         };
       }),
@@ -311,7 +347,7 @@ export function PaperContent({
               <SelectionPicker strategies={strategies} resolved={lineP} onChange={setSelP} />
             </CardContent>
           </Card>
-          <PaperVsLive paper={rowsP} live={live} liveCapital={liveCapital} paperCapital={INITIAL_CAPITAL} share={share} paperLabel={selectionLabel(lineP.sel)} />
+          <PaperVsLive paper={rowsP} live={live} liveCapital={liveCapital} paperCapitals={capitals} share={share} paperLabel={selectionLabel(lineP.sel)} />
         </>
       ) : (
       <>
@@ -336,7 +372,7 @@ export function PaperContent({
             <table className="w-full font-mono text-xs">
               <thead className="text-muted-foreground">
                 <tr className="border-b">
-                  {["", "Return", "Total PnL (U)", "Trades", "Win rate", "Per trade (U)", "Fees (U)", "Max DD", "Volume (U)"].map((h, i) => (
+                  {["", "Capital (U)", "Return", "Total PnL (U)", "Trades", "Win rate", "Per trade (U)", "Fees (U)", "Max DD", "Volume (U)"].map((h, i) => (
                     <th key={h} className={cn("whitespace-nowrap px-2 py-1.5 font-medium", i === 0 ? "text-left" : "text-right")}>{h}</th>
                   ))}
                 </tr>
@@ -347,13 +383,14 @@ export function PaperContent({
                     <td className="whitespace-nowrap px-2 py-1.5 font-sans">
                       <span className="font-semibold" style={{ color: COMPARE_COLORS[k === "A" ? "a" : "b"] }}>{k}</span> {selectionLabel(sel)}
                     </td>
-                    <td className={cn("px-2 py-1.5 text-right", tone(st.total))}>{pctOf(st.total)}</td>
+                    <td className="px-2 py-1.5 text-right">{st.capital.toLocaleString("en-US")}</td>
+                    <td className={cn("px-2 py-1.5 text-right", tone(st.total))}>{pctOf(st.total, 2, st.capital)}</td>
                     <td className={cn("px-2 py-1.5 text-right", tone(st.total))}>{usd(st.total)}</td>
                     <td className="px-2 py-1.5 text-right">{st.n}</td>
                     <td className="px-2 py-1.5 text-right">{st.winRate == null ? "—" : `${(st.winRate * 100).toFixed(1)}%`}</td>
                     <td className={cn("px-2 py-1.5 text-right", tone(st.perTrade))}>{usd(st.perTrade, 3)}</td>
                     <td className="px-2 py-1.5 text-right">{usd(st.fees)}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-right">{st.maxDd.toFixed(2)} U · {((100 * st.maxDd) / INITIAL_CAPITAL).toFixed(2)}%</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right">{st.maxDd.toFixed(2)} U · {((100 * st.maxDd) / st.capital).toFixed(2)}%</td>
                     <td className="px-2 py-1.5 text-right">{Math.round(st.notional).toLocaleString("en-US")}</td>
                   </tr>
                 ))}
@@ -380,7 +417,8 @@ export function PaperContent({
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Cumulative PnL</CardTitle>
           <CardDescription className="text-xs">
-            After fees, in flat-time order. A and B are each a {INITIAL_CAPITAL.toLocaleString("en-US")} U account; A + B
+            After fees, in flat-time order. Each strategy × venue is its own paper account, sized from its largest fill ÷
+            size_frac (A {statsA.capital.toLocaleString("en-US")} U, B {statsB.capital.toLocaleString("en-US")} U). A + B
             (combine) counts an episode in both once, and its % is of {capital.toLocaleString("en-US")} U.
           </CardDescription>
         </CardHeader>

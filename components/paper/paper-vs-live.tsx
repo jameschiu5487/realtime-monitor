@@ -56,6 +56,7 @@ export interface PtaPaperRow {
   t_sig: number;
   t_flat: number;
   e: number | null;
+  qty_filled: number;
   exit_vwap: number | null;
   exit_reason: string | null;
   flat_reason: string;
@@ -194,20 +195,22 @@ function stats(items: { pnl: number; bp: number | null }[]) {
  * positions over the hours both were running, trade by trade. Sizes differ
  * between paper and live, so the like-for-like figure is bp of entry notional;
  * paper's U is rescaled from its own account to the live run's capital at the
- * signal time (paper PnL × live capital ÷ paper capital), then the viewer's share.
+ * signal time (paper PnL × live capital ÷ the paper strategy's account size),
+ * then the viewer's share.
  */
 export function PaperVsLive({
   paper,
   live: liveRaw,
   liveCapital,
-  paperCapital,
+  paperCapitals,
   share,
   paperLabel,
 }: {
   paper: PtaPaperRow[];
   live: LiveJfmTrade[];
   liveCapital: LiveCapital[];
-  paperCapital: number;
+  /** Paper account size per strategy (one venue). */
+  paperCapitals: Map<string, number>;
   share: ShareSchedule;
   paperLabel: string;
 }) {
@@ -215,9 +218,16 @@ export function PaperVsLive({
   const [unit, setUnit] = useState<"bp" | "usd">("bp");
   // Paper PnL on the live account's capital at the signal, at the viewer's share.
   const paperUsd = useCallback(
-    (p: PtaPaperRow) => (p.total_pnl * (capitalAt(liveCapital, p.t_sig) ?? paperCapital)) / paperCapital * ratioAt(share, p.t_flat),
-    [liveCapital, paperCapital, share]
+    (p: PtaPaperRow) => {
+      const own = paperCapitals.get(p.strategy ?? "unknown");
+      const target = capitalAt(liveCapital, p.t_sig);
+      return (own && target ? (p.total_pnl * target) / own : p.total_pnl) * ratioAt(share, p.t_flat);
+    },
+    [liveCapital, paperCapitals, share]
   );
+  const paperAccounts = [...new Set(paper.map((p) => p.strategy ?? "unknown"))]
+    .map((k) => `${k} ${(paperCapitals.get(k) ?? 0).toLocaleString("en-US")}`)
+    .join(", ");
 
   const view = useMemo(() => {
     const venues = new Set(liveAll.map((l) => l.venue));
@@ -305,8 +315,8 @@ export function PaperVsLive({
           <CardDescription className="text-xs">
             Paper: {paperLabel}, only on the live venue ({view.venues}). Live: Jump Fade Maker, all live runs. Window {fmt(view.start)} –{" "}
             {fmt(view.end)} {TZ_LABEL}, the hours both ran. Matched = same symbol and side, paper signal within 10 min before / 2 min after
-            the live entry. bp = PnL after fees ÷ entry notional. Paper U is rescaled from its {paperCapital.toLocaleString("en-US")} U account to
-            the live run&apos;s capital at the time (now {(capitalAt(liveCapital, Date.now()) ?? paperCapital).toLocaleString("en-US")} U); all U are your share.
+            the live entry. bp = PnL after fees ÷ entry notional. Paper U is rescaled from its account ({paperAccounts} U) to the live
+            run&apos;s capital at the time (now {(capitalAt(liveCapital, Date.now()) ?? 0).toLocaleString("en-US")} U); all U are your share.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 overflow-x-auto">
