@@ -34,6 +34,10 @@ export interface ParentBook {
   shareRatio: number;
   /** Scaled by shareRatio. */
   initialCapital: number;
+  /** The run's initial_capital, unscaled: compared with the real account equity (× account). */
+  capitalRaw: number;
+  /** PnL over the window across the book's restarts, scaled increment by increment. */
+  windowPnl: number | null;
   /** Latest equity in the window, scaled. null when the run has no equity rows yet. */
   equity: number | null;
   /** Latest cumulative total_pnl, scaled. */
@@ -174,6 +178,11 @@ export function summarizeBook(
     maxDd = Math.max(maxDd, ((peak - v) / peak) * 100);
   }
   const lastIndex = index.length > 0 ? index[index.length - 1] : null;
+  let windowPnl: number | null = bookSeries.length > 0 ? 0 : null;
+  for (let i = 1; i < bookSeries.length; i++) {
+    const step = bookSeries[i].total_pnl - bookSeries[i - 1].total_pnl;
+    windowPnl = (windowPnl ?? 0) + step * ratioAt(share, bookSeries[i].ts);
+  }
 
   const scaledPnl = scaleCumulative(series, (p) => p.ts, ["total_pnl"], share);
   return {
@@ -184,6 +193,8 @@ export function summarizeBook(
     startTime: run.start_time,
     shareRatio: currentRatio(share),
     initialCapital: initial * ratioAt(share, run.start_time ?? series[0]?.ts ?? Date.now()),
+    capitalRaw: initial,
+    windowPnl,
     equity: last ? last.total_equity * ratioAt(share, last.ts) : null,
     pnl: last ? scaledPnl[scaledPnl.length - 1].total_pnl : null,
     returnPct: last && lastIndex !== null ? (lastIndex - 1) * 100 : null,

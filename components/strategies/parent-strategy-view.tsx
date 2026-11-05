@@ -131,6 +131,11 @@ function pct(value: number | null, signed = false) {
   return signed && value > 0 ? `+${s}` : s;
 }
 
+/** A multiple, e.g. 6.16×. */
+function times(value: number | null) {
+  return value === null ? "—" : `${value.toFixed(2)}×`;
+}
+
 function tone(value: number | null) {
   if (value === null || value === 0) return "";
   return value > 0
@@ -343,14 +348,21 @@ export async function ParentStrategyView({
         }
       : undefined;
 
-  const totalEquity = books.reduce((s, b) => s + (b.equity ?? 0), 0);
-  const totalPnl = books.reduce((s, b) => s + (b.pnl ?? 0), 0);
-  // Return from the unscaled books, so a ratio change isn't read as performance.
-  const rawEquity = runs.reduce((s, r) => {
-    const own = seriesByRun.get(r.run_id) ?? [];
-    return s + (own.length ? own[own.length - 1].total_equity : 0);
-  }, 0);
-  const rawInitial = runs.reduce((s, r) => s + (Number(r.initial_capital) || 0), 0);
+  // A book's capital is a notional allocation, not money in it: shown as a multiple
+  // of the real account equity (latest row of each account, unscaled like the
+  // capital it is compared with), so the cards say how many times the principal
+  // each book trades.
+  const latestByAccount = new Map<string, { ts: string; equity: number }>();
+  for (const r of accountEquity.rows) {
+    const seen = latestByAccount.get(r.account_id);
+    if (!seen || r.ts > seen.ts) latestByAccount.set(r.account_id, { ts: r.ts, equity: r.total_equity });
+  }
+  const accountNow = Array.from(latestByAccount.values()).reduce((s, a) => s + a.equity, 0);
+  const timesAccount = (capital: number) => (accountNow > 0 ? capital / accountNow : null);
+  const totalCapital = books.reduce((s, b) => s + b.initialCapital, 0);
+  const totalCapitalRaw = books.reduce((s, b) => s + b.capitalRaw, 0);
+  const windowPnl = books.reduce((s, b) => s + (b.windowPnl ?? 0), 0);
+  const windowPnlRaw = books.reduce((s, b) => s + (b.windowPnl ?? 0) / (b.shareRatio || 1), 0);
   const totalUpnl = shownPositions.reduce((s, p) => s + p.unrealizedPnl, 0);
   const totalNotional = shownPositions.reduce((s, p) => s + p.notional, 0);
 
@@ -430,16 +442,23 @@ export async function ParentStrategyView({
       <Card>
         <CardContent className="p-0">
           <div className="grid grid-cols-2 sm:grid-cols-4">
-            <Figure label="Simulated total equity" value={money(books.length ? totalEquity : null)} />
             <Figure
-              label="Simulated total PnL"
-              value={money(books.length ? totalPnl : null, true)}
-              className={tone(totalPnl)}
+              label="Total book capital"
+              value={
+                books.length
+                  ? `${money(totalCapital)}${timesAccount(totalCapitalRaw) !== null ? ` · ${times(timesAccount(totalCapitalRaw))} account` : ""}`
+                  : "—"
+              }
             />
             <Figure
-              label="Simulated return"
-              value={pct(books.length && rawInitial > 0 ? ((rawEquity - rawInitial) / rawInitial) * 100 : null, true)}
-              className={tone(rawEquity - rawInitial)}
+              label={`Books PnL (${WINDOW_DAYS}d)`}
+              value={money(books.length ? windowPnl : null, true)}
+              className={tone(windowPnl)}
+            />
+            <Figure
+              label={`Books PnL / account (${WINDOW_DAYS}d)`}
+              value={pct(books.length && accountNow > 0 ? (windowPnlRaw / accountNow) * 100 : null, true)}
+              className={tone(windowPnlRaw)}
             />
             <Figure
               label="Simulated unrealized PnL"
@@ -489,8 +508,24 @@ export async function ParentStrategyView({
                         </span>
                       </div>
                       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                        <dt className="text-muted-foreground">Simulated equity</dt>
-                        <dd className="text-right font-mono">{money(b.equity)}</dd>
+                        <dt className="text-muted-foreground" title="The book's notional capital and its multiple of the real account equity">
+                          Capital
+                        </dt>
+                        <dd className="text-right font-mono">
+                          {money(b.initialCapital)}
+                          {timesAccount(b.capitalRaw) !== null && (
+                            <span className="text-xs text-muted-foreground"> ({times(timesAccount(b.capitalRaw))} account)</span>
+                          )}
+                        </dd>
+                        <dt className="text-muted-foreground">PnL ({WINDOW_DAYS}d)</dt>
+                        <dd className={cn("text-right font-mono", tone(b.windowPnl))}>
+                          {money(b.windowPnl, true)}
+                          {accountNow > 0 && b.windowPnl !== null && (
+                            <span className="text-xs text-muted-foreground">
+                              {" "}({pct((b.windowPnl / (b.shareRatio || 1) / accountNow) * 100, true)} acct)
+                            </span>
+                          )}
+                        </dd>
                         <dt className="text-muted-foreground" title="Chained over the window across restarts: each step's PnL over the capital the book ran at">
                           Return ({WINDOW_DAYS}d)
                         </dt>
