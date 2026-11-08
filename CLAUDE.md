@@ -96,6 +96,8 @@ Auth：email/password，根目錄 `proxy.ts` 保護路由（Next 16 把 middlewa
   `getFillNotional` + PerformanceStats 的 `turnover` prop，其他指標還沒有。
   它寫的 `positions.liq_price` 也全是 null（產生型別卻標 `number`），對它 `.toLocaleString()`
   曾讓 `/positions` 整頁崩掉 —— positions 的數值欄位顯示前一律先判 null。
+  **重啟時 `equity_curve.total_pnl` 各引擎不同**：Kepler 延續上一個 run 的累計，Jump Fade（Lagrange 底下）每個 run 從 0 開始。
+  跨 run 串累計一律走 `chainBookSeries`（偵測歸零並補位移），直接把各 run 的列接起來會在重啟時把之前的 PnL 吃掉。
 - **strategy_runs**: run_id (PK), strategy_id (FK), mode ('backtest'|'paper'|'live'|'realtime'|
   'test-realtime'), status, start_time, end_time, initial_capital, params (jsonb), code_ref, notes。
   **Overview 認 `realtime` / `live` / `test-realtime`**（`app/(dashboard)/page.tsx` 的 `isOverviewLiveMode`；
