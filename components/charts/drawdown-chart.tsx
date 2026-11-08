@@ -37,7 +37,7 @@ interface DrawdownChartProps {
 const chartConfig = {
   drawdown: {
     label: "Drawdown (%)",
-    color: "hsl(var(--destructive))",
+    color: "var(--destructive)",
   },
 } satisfies ChartConfig;
 
@@ -117,7 +117,7 @@ export function DrawdownChart({
             />
             <ReferenceLine
               y={0}
-              stroke="hsl(var(--muted-foreground))"
+              stroke="var(--muted-foreground)"
               strokeDasharray="3 3"
             />
             {maxDrawdownPoint && (

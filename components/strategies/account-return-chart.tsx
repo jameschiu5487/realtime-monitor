@@ -32,7 +32,7 @@ interface AccountReturnChartProps {
 const chartConfig = {
   value: {
     label: "Return (% of account)",
-    color: "hsl(var(--chart-1))",
+    color: "var(--chart-1)",
   },
 } satisfies ChartConfig;
 
@@ -110,7 +110,7 @@ export function AccountReturnChart({
                 />
               }
             />
-            <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+            <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeDasharray="3 3" />
             <Area
               dataKey="value"
               type="linear"

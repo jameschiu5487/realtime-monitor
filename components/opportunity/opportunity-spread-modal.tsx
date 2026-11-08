@@ -598,7 +598,7 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
         <div className="h-[calc(100%-20px)]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ left: 50, right: 20, top: 10, bottom: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis
                 dataKey="time"
                 type="number"
@@ -615,7 +615,7 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
               />
               <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={spreadYDomain} tick={{ fontSize: 11, fill: "#888888" }} tickFormatter={(value) => `${value}bp`} />
               <Tooltip content={<SpreadTooltip />} />
-              <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+              <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeDasharray="3 3" />
               {groupedFundingRates.map((group, idx) => (
                 <ReferenceLine
                   key={`funding-spread-${idx}`}
@@ -664,7 +664,7 @@ export function OpportunitySpreadModal({ symbol, exchangeA, exchangeB }: Opportu
         <div className="h-[calc(100%-20px)]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ left: 50, right: 20, top: 10, bottom: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis
                 dataKey="time"
                 type="number"

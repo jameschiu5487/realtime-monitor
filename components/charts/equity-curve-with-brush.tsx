@@ -43,7 +43,7 @@ interface EquityCurveWithBrushProps {
 const chartConfig = {
   equity: {
     label: "Equity ($)",
-    color: "hsl(var(--chart-1))",
+    color: "var(--chart-1)",
   },
 } satisfies ChartConfig;
 
@@ -183,8 +183,8 @@ export function EquityCurveWithBrush({
           >
             <defs>
               <linearGradient id="fillEquityZoom" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.8} />
-                <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0.1} />
+                <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.8} />
+                <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0.1} />
               </linearGradient>
             </defs>
             <CartesianGrid vertical={false} />
@@ -234,7 +234,7 @@ export function EquityCurveWithBrush({
               type="monotone"
               fill="#34d399"
               fillOpacity={0.4}
-              stroke="hsl(var(--chart-1))"
+              stroke="var(--chart-1)"
               strokeWidth={2}
             />
             {refAreaLeft && refAreaRight && (
@@ -242,7 +242,7 @@ export function EquityCurveWithBrush({
                 x1={refAreaLeft}
                 x2={refAreaRight}
                 strokeOpacity={0.3}
-                fill="hsl(var(--primary))"
+                fill="var(--primary)"
                 fillOpacity={0.3}
               />
             )}

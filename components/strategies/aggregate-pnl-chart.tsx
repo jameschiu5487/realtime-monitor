@@ -21,7 +21,7 @@ import { formatDate, formatDateTime } from "@/lib/time";
 const chartConfig = {
   pnl: {
     label: "PnL ($)",
-    color: "hsl(var(--chart-2))",
+    color: "var(--chart-2)",
   },
 } satisfies ChartConfig;
 
@@ -100,9 +100,9 @@ export function AggregatePnlChart({
             <Area
               dataKey="pnl"
               type="monotone"
-              fill="hsl(var(--chart-2))"
+              fill="var(--chart-2)"
               fillOpacity={0.3}
-              stroke="hsl(var(--chart-2))"
+              stroke="var(--chart-2)"
               strokeWidth={2}
             />
           </AreaChart>

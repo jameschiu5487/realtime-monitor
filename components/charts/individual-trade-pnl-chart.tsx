@@ -104,7 +104,7 @@ export function IndividualTradePnLChart({ data }: IndividualTradePnLChartProps) 
             <XAxis dataKey="trade" tickLine={false} axisLine={false} tickMargin={8} />
             <ReferenceLine
               y={0}
-              stroke="hsl(var(--muted-foreground))"
+              stroke="var(--muted-foreground)"
               strokeDasharray="3 3"
             />
             <ChartTooltip

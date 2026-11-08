@@ -523,7 +523,7 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ left: 50, right: 20, top: 20, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   dataKey="time"
                   type="number"
@@ -552,7 +552,7 @@ export function SpreadChart({ symbol, entryTimes = [], entrySpread = null, onSym
                   tickFormatter={(value) => `${value}bp`}
                 />
                 <Tooltip content={<CustomTooltip />} />
-                <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+                <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeDasharray="3 3" />
                 {/* Entry time vertical lines */}
                 {validEntryTimes.map((time, idx) => (
                   <ReferenceLine
