@@ -258,26 +258,47 @@ export function sumPnlSeries(
 }
 
 /**
- * Each book's equity series across its runs.
+ * Each book's equity series across its runs, with one continuous cumulative PnL.
  *
- * A child restarted inside the window has several runs; its cumulative PnL
- * carries over from one run to the next (the engine persists the book's
- * totals), so the runs' rows concatenated in time order are one continuous PnL
- * series (equity is not: it jumps when the book's capital changes between
- * runs). `bookOfRun` maps every run (current and earlier) to the book key, the
- * current run's id.
+ * A child restarted inside the window has several runs. Engines differ on what
+ * a restart does to total_pnl: Kepler persists the book's totals, so the next
+ * run starts where the last ended; Jump Fade (Lagrange) starts every run from
+ * 0 (checked 2026-11-09). A run whose first total_pnl is nearer 0 than the
+ * previous run's last is taken as a reset and shifted by that last value, so
+ * earlier runs' PnL is not dropped at a restart; total_equity is shifted with
+ * it, so equity − pnl is still the run's capital. Equity still jumps when the
+ * book's capital changes between runs. `bookOfRun` maps every run
+ * (current and earlier) to the book key, the current run's id.
  */
 export function chainBookSeries(
   seriesByRun: Map<string, EquityCurve[]>,
   bookOfRun: Record<string, string>
 ): Map<string, EquityCurve[]> {
-  const map = new Map<string, EquityCurve[]>();
+  const runsByBook = new Map<string, EquityCurve[][]>();
   for (const [runId, series] of seriesByRun) {
     const book = bookOfRun[runId];
-    if (!book) continue;
-    map.set(book, [...(map.get(book) ?? []), ...series]);
+    if (!book || series.length === 0) continue;
+    const sorted = [...series].sort((a, b) => time(a.ts) - time(b.ts));
+    runsByBook.set(book, [...(runsByBook.get(book) ?? []), sorted]);
   }
-  for (const list of map.values()) list.sort((a, b) => time(a.ts) - time(b.ts));
+  const map = new Map<string, EquityCurve[]>();
+  for (const [book, runs] of runsByBook) {
+    runs.sort((a, b) => time(a[0].ts) - time(b[0].ts));
+    const out: EquityCurve[] = [];
+    let offset = 0;
+    let prevRaw: number | null = null;
+    for (const run of runs) {
+      const first = num(run[0].total_pnl);
+      // Reset: the run starts nearer 0 than where the previous one ended.
+      if (prevRaw !== null && Math.abs(first) < Math.abs(first - prevRaw)) offset += prevRaw;
+      // total_equity moves with it so capital (equity − pnl, chainedIndex) is unchanged.
+      for (const p of run) {
+        out.push(offset ? { ...p, total_pnl: num(p.total_pnl) + offset, total_equity: num(p.total_equity) + offset } : p);
+      }
+      prevRaw = num(run[run.length - 1].total_pnl);
+    }
+    map.set(book, out.sort((a, b) => time(a.ts) - time(b.ts)));
+  }
   return map;
 }
 
