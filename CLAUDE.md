@@ -60,6 +60,9 @@ npx shadcn@latest add <component>   # UI 元件加到 @/components/ui
 
 路徑別名：`@/*` → repo root（`@/components`, `@/lib`, `@/hooks`）。
 
+主題色變數（`--chart-1`、`--muted-foreground` 等，`app/globals.css`）存的是 **oklch**：圖表顏色寫 `var(--chart-1)`，
+**別照舊版 shadcn 範例寫 `hsl(var(--chart-1))`** —— 那是無效顏色，不報錯、直接畫成黑色（2026-11-09 修過 10 個檔）。
+
 ## 導航結構
 
 ```
