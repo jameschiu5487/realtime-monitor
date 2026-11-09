@@ -184,12 +184,3 @@ Overview 會靜默顯示錯的金額。要刪就同時處理兩張表，或事�
   路徑、positions 的 entry spread、opportunity 表的 basis 欄）。直覺容易寫成
   `(A − B) / B`，寫反了不會壞、只會讓同一筆資料在表格與圖表差一個負號。
   例外：`lib/basis.ts` 是 basis-monitor 子系統，legs 由使用者自選，用 `(leg1 − leg2) / leg2`。
-
-<!-- code-review-graph MCP tools -->
-## MCP Tools: code-review-graph
-
-This repo has a code-review-graph knowledge graph (`mcp__code-review-graph__*`; hooks keep it
-updated on file changes). It answers structural questions — callers/callees, importers, impact
-radius, affected flows, test coverage — for far fewer tokens than reading the files, so use it
-when the question is about how code relates. Locating a string or reading a known file is still
-Grep/Read.
