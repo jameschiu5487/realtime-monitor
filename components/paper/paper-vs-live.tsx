@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { ratioAt, type ShareSchedule } from "@/lib/share";
 import { formatDateTime, TZ_LABEL } from "@/lib/time";
 
-/** One live Jump Fade Maker position (combined_trades). PnL in USDT, unscaled. */
+/** One live position of a Lagrange book (combined_trades). PnL in USDT, unscaled. */
 export interface LiveJfmTrade {
   combined_trade_id: number;
   run_id: string;
@@ -32,6 +32,8 @@ export interface LiveJfmTrade {
 /** A live run: its span (toMs null while running) and initial capital. Sorted by fromMs. */
 export interface LiveCapital {
   runId: string;
+  /** The live strategy (a Lagrange child) the run belongs to. */
+  strategy: string;
   fromMs: number;
   toMs: number | null;
   capital: number;
@@ -206,7 +208,7 @@ function stats(items: { pnl: number; bp: number | null }[]) {
 }
 
 /**
- * PTA (paper-to-actual): the paper selection against Jump Fade Maker's live
+ * PTA (paper-to-actual): the paper selection against one Lagrange book's live
  * positions over the hours both were running, trade by trade. Sizes differ
  * between paper and live, so the like-for-like figure is bp of entry notional;
  * paper's U is rescaled from its own account to the live run's capital at the
@@ -321,7 +323,7 @@ export function PaperVsLive({
   }, [liveAll, paper, paperUsd, liveCapital, liveRun]);
 
   if (liveAll.length === 0) {
-    return <p className="py-6 text-center text-sm text-muted-foreground">No live Jump Fade Maker trades in this run (or no access to the strategy).</p>;
+    return <p className="py-6 text-center text-sm text-muted-foreground">No live trades in this run (or no access to the strategy).</p>;
   }
   if (!view) {
     return <p className="py-6 text-center text-sm text-muted-foreground">The paper selection has no episodes on the live venue(s).</p>;
@@ -334,7 +336,7 @@ export function PaperVsLive({
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Paper vs live</CardTitle>
           <CardDescription className="text-xs">
-            Paper: {paperLabel}, only on the live venue ({view.venues}). Live: Jump Fade Maker, {liveRun === "all" ? "all live runs" : "the chosen run"}. Window{" "}
+            Paper: {paperLabel}, only on the live venue ({view.venues}). Live: {liveCapital[0]?.strategy ?? "—"}, {liveRun === "all" ? "all live runs" : "the chosen run"}. Window{" "}
             {fmt(view.start)} – {fmt(view.end)} {TZ_LABEL}, the live run&apos;s start to its end (or now). Matched = same symbol and side, paper signal within 10 min before / 2 min after
             the live entry. bp = PnL after fees ÷ entry notional. Paper U is rescaled from its account ({paperAccounts} U) to the live
             run&apos;s capital at the time (now {(capitalAt(liveCapital, Date.now()) ?? 0).toLocaleString("en-US")} U); all U are your share.

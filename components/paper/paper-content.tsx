@@ -248,26 +248,36 @@ export function PaperContent({
   const lineA = useMemo(() => resolve(rows, strategies, selA ?? defaults.a), [rows, strategies, selA, defaults]);
   const lineB = useMemo(() => resolve(rows, strategies, selB ?? defaults.b), [rows, strategies, selB, defaults]);
 
-  // PTA: one paper selection against a live Jump Fade Maker run (default the
-  // newest run that traded); the window is that run's span. Paper default:
-  // the strategy whose episodes match the most of its positions.
-  const liveRuns = useMemo(() => {
+  // PTA: one paper selection against one live run of a Lagrange book (default
+  // the book and run that traded last); the window is that run's span. Paper
+  // default: the strategy whose episodes match the most of its positions.
+  const tradedRuns = useMemo(() => {
     const n = new Map<string, number>();
     for (const t of live) n.set(t.run_id, (n.get(t.run_id) ?? 0) + 1);
     return liveCapital.filter((r) => n.has(r.runId)).map((r) => ({ ...r, trades: n.get(r.runId) ?? 0 })).reverse();
   }, [live, liveCapital]);
+  const liveStrategies = useMemo(() => [...new Set(tradedRuns.map((r) => r.strategy))], [tradedRuns]);
+  const [liveStrategySel, setLiveStrategySel] = useState<string | null>(null);
+  const liveStrategy = liveStrategySel && liveStrategies.includes(liveStrategySel) ? liveStrategySel : liveStrategies[0] ?? null;
+  const liveRuns = useMemo(() => tradedRuns.filter((r) => r.strategy === liveStrategy), [tradedRuns, liveStrategy]);
+  // Everything below sees only the chosen book's runs and trades.
+  const bookCapital = useMemo(() => liveCapital.filter((r) => r.strategy === liveStrategy), [liveCapital, liveStrategy]);
+  const bookLive = useMemo(() => {
+    const ids = new Set(bookCapital.map((r) => r.runId));
+    return live.filter((t) => ids.has(t.run_id));
+  }, [live, bookCapital]);
   const [liveRunSel, setLiveRun] = useState<string | null>(null);
-  const liveRun = liveRunSel ?? liveRuns[0]?.runId ?? "all";
+  const liveRun = liveRunSel && (liveRunSel === "all" || liveRuns.some((r) => r.runId === liveRunSel)) ? liveRunSel : liveRuns[0]?.runId ?? "all";
   const [selP, setSelP] = useState<Selection | null>(null);
   const defaultP = useMemo<Selection>(() => {
     let best: string | null = null;
-    const win = liveWindow(liveCapital, liveRun);
+    const win = liveWindow(bookCapital, liveRun);
     if (mode === "pta" && win) {
-      const runTrades = live.filter((t) => liveRun === "all" || t.run_id === liveRun);
+      const runTrades = bookLive.filter((t) => liveRun === "all" || t.run_id === liveRun);
       best = bestPaperStrategy(rows.filter((r) => r.t_sig >= win.start && r.t_sig <= win.end), parseLive(runTrades, share));
     }
     return { strategy: best ?? strategies[0] ?? "all", venue: "all", run: "all" };
-  }, [mode, rows, live, liveCapital, liveRun, share, strategies]);
+  }, [mode, rows, bookLive, bookCapital, liveRun, share, strategies]);
   const lineP = useMemo(() => resolve(rows, strategies, selP ?? defaultP), [rows, strategies, selP, defaultP]);
   const rowsP = useMemo(() => (mode === "pta" ? select(rows, lineP.sel, hideDup) : []), [mode, rows, lineP.sel, hideDup]);
 
@@ -356,7 +366,25 @@ export function PaperContent({
           {liveError && <p className="text-sm text-red-500">Failed to load live trades: {liveError}</p>}
           <Card>
             <CardContent className="space-y-1 p-3">
-              <div className="text-xs font-semibold" style={{ color: COMPARE_COLORS.a }}>Live · Jump Fade Maker</div>
+              <div className="text-xs font-semibold" style={{ color: COMPARE_COLORS.a }}>Live · Lagrange</div>
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="w-14 text-xs text-muted-foreground">Strategy</span>
+                {liveStrategies.map((k) => (
+                  <Button
+                    key={k}
+                    size="sm"
+                    variant={k === liveStrategy ? "default" : "outline"}
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      setLiveStrategySel(k);
+                      setLiveRun(null);
+                      setSelP(null);
+                    }}
+                  >
+                    {k}
+                  </Button>
+                ))}
+              </div>
               <div className="flex flex-wrap items-center gap-1">
                 <span className="w-14 text-xs text-muted-foreground">Run</span>
                 {liveRuns.map((r) => (
@@ -376,7 +404,7 @@ export function PaperContent({
               <SelectionPicker strategies={strategies} resolved={lineP} onChange={setSelP} />
             </CardContent>
           </Card>
-          <PaperVsLive paper={rowsP} live={live} liveCapital={liveCapital} liveRun={liveRun} paperCapitals={capitals} share={share} paperLabel={selectionLabel(lineP.sel)} />
+          <PaperVsLive paper={rowsP} live={bookLive} liveCapital={bookCapital} liveRun={liveRun} paperCapitals={capitals} share={share} paperLabel={selectionLabel(lineP.sel)} />
         </>
       ) : (
       <>

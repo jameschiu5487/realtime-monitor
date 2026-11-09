@@ -38,18 +38,25 @@ async function loadEpisodes(supabase: SupabaseClient) {
   return { rows, error };
 }
 
-/** The live strategy the paper episodes are compared against (PTA mode). */
-const LIVE_STRATEGY_NAME = "Jump Fade Maker";
+/** The parent whose live books the paper episodes are compared against (PTA mode). */
+const LIVE_PARENT_NAME = "Lagrange";
 
 /**
- * Jump Fade Maker's live positions (combined_trades of its live runs). Empty
- * when the viewer has no access to the strategy (RLS).
+ * Live positions (combined_trades) of every live run of Lagrange's children
+ * (Jump Fade Maker, Jump Fade Taker, …). Empty when the viewer has no access
+ * to them (RLS).
  */
 async function loadLiveTrades(supabase: SupabaseClient) {
+  const { data: parents } = await supabase.from("strategies").select("strategy_id").eq("name", LIVE_PARENT_NAME);
+  const parentIds = (parents ?? []).map((p) => p.strategy_id);
+  const { data: children } = parentIds.length
+    ? await supabase.from("strategies").select("strategy_id, name").in("parent_strategy_id", parentIds)
+    : { data: [] as { strategy_id: string; name: string }[] };
+  const nameOf = new Map((children ?? []).map((c) => [c.strategy_id, c.name]));
   const { data: runs, error: runsError } = await supabase
     .from("strategy_runs")
-    .select("run_id, start_time, end_time, initial_capital, strategies!inner(name)")
-    .eq("strategies.name", LIVE_STRATEGY_NAME)
+    .select("run_id, strategy_id, start_time, end_time, initial_capital")
+    .in("strategy_id", [...nameOf.keys()])
     .eq("mode", "live");
   if (runsError) {
     console.error("[paper] live runs:", runsError);
@@ -60,6 +67,7 @@ async function loadLiveTrades(supabase: SupabaseClient) {
     .filter((r) => r.start_time)
     .map((r) => ({
       runId: r.run_id,
+      strategy: nameOf.get(r.strategy_id) ?? "Unknown",
       fromMs: Date.parse(r.start_time as string),
       toMs: r.end_time ? Date.parse(r.end_time) : null,
       capital: Number(r.initial_capital) || 0,
