@@ -468,10 +468,10 @@ export async function ParentStrategyView({
         <CardContent className="p-0">
           <div className="grid grid-cols-2 sm:grid-cols-4">
             <Figure
-              label="Total book capital"
+              label={ratioNow !== 1 ? `Total notional (your share ${money(totalCapital)})` : "Total notional"}
               value={
                 books.length
-                  ? `${money(totalCapital)}${timesAccount(totalCapitalRaw) !== null ? ` · ${times(timesAccount(totalCapitalRaw))} account` : ""}`
+                  ? `${money(totalCapitalRaw)}${timesAccount(totalCapitalRaw) !== null ? ` · ${times(timesAccount(totalCapitalRaw))} account` : ""}`
                   : "—"
               }
             />
@@ -533,15 +533,21 @@ export async function ParentStrategyView({
                         </span>
                       </div>
                       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                        <dt className="text-muted-foreground" title="The book's notional capital and its multiple of the real account equity">
-                          Capital
+                        <dt className="text-muted-foreground" title="The notional the book trades (its configured capital, not scaled by your share) and its multiple of the real account equity">
+                          Notional
                         </dt>
                         <dd className="text-right font-mono">
-                          {money(b.initialCapital)}
+                          {money(b.capitalRaw)}
                           {timesAccount(b.capitalRaw) !== null && (
                             <span className="text-xs text-muted-foreground"> ({times(timesAccount(b.capitalRaw))} account)</span>
                           )}
                         </dd>
+                        {b.shareRatio !== 1 && (
+                          <>
+                            <dt className="text-muted-foreground">Your share</dt>
+                            <dd className="text-right font-mono text-muted-foreground">{money(b.initialCapital)}</dd>
+                          </>
+                        )}
                         <dt className="text-muted-foreground">PnL ({WINDOW_DAYS}d)</dt>
                         <dd className={cn("text-right font-mono", tone(b.windowPnl))}>
                           {money(b.windowPnl, true)}
