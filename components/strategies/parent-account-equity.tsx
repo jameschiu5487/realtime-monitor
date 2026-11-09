@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Landmark } from "lucide-react";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Landmark, RotateCcw } from "lucide-react";
+import { Area, AreaChart, CartesianGrid, ReferenceArea, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -103,7 +103,17 @@ export function ParentAccountEquity({
   tradingByHour = [],
   exposure,
 }: ParentAccountEquityProps) {
-  const [range, setRange] = useState<AccountEquityRange>("7d");
+  const [range, setRangeState] = useState<AccountEquityRange>("7d");
+  // Drag on the chart to zoom into [from, to]; a new range clears it.
+  const [zoom, setZoom] = useState<[number, number] | null>(null);
+  const [selection, setSelection] = useState<[number, number] | null>(null);
+  const setRange = (r: AccountEquityRange) => {
+    setRangeState(r);
+    setZoom(null);
+  };
+  const windowFrom = zoom ? zoom[0] : nowMs - RANGE_MS[range];
+  const windowTo = zoom ? zoom[1] : Infinity;
+  const windowLabel = zoom ? "Selected" : range;
 
   const latest = useMemo(() => latestByAccount(rows), [rows]);
   const total = useMemo(() => totalEquityFromLatest(latest), [latest]);
@@ -113,19 +123,22 @@ export function ParentAccountEquity({
     return max;
   }, [latest]);
   const curve = useMemo(
-    () => downsample(buildFundEquityCurve(rows, nowMs - RANGE_MS[range])),
-    [rows, nowMs, range]
+    () => downsample(buildFundEquityCurve(rows, windowFrom).filter((p) => p.time <= windowTo)),
+    [rows, windowFrom, windowTo]
   );
-  const { delta, deltaPct } = useMemo(() => computeRangeDelta(curve, total), [curve, total]);
+  // Zoomed, the change runs to the selection's last point instead of now.
+  const { delta, deltaPct } = useMemo(
+    () => computeRangeDelta(curve, zoom && curve.length > 0 ? curve[curve.length - 1].equity : total),
+    [curve, total, zoom]
+  );
   const drawdown = useMemo(() => maxDrawdown(curve), [curve]);
   // Volume in the range as a multiple of the account equity at the range start,
   // and the fees paid on it.
   const volume = useMemo(() => {
-    const from = nowMs - RANGE_MS[range];
     let notional = 0;
     let fees = 0;
     for (const [t, v, fee] of tradingByHour) {
-      if (t < from) continue;
+      if (t < windowFrom || t > windowTo) continue;
       notional += v;
       fees += fee;
     }
@@ -137,7 +150,7 @@ export function ParentAccountEquity({
       feeBps: notional > 0 ? (fees / notional) * 1e4 : null,
       feePctOfEquity: base > 0 ? (fees / base) * 100 : null,
     };
-  }, [tradingByHour, nowMs, range, curve, total]);
+  }, [tradingByHour, windowFrom, windowTo, curve, total]);
   const yDomain = useMemo<[number, number]>(() => {
     if (curve.length === 0) return [0, 1];
     const values = curve.map((p) => p.equity);
@@ -168,6 +181,11 @@ export function ParentAccountEquity({
         </div>
         {hasData && (
           <div className="flex items-center gap-1">
+            {zoom && (
+              <Button type="button" size="sm" variant="outline" onClick={() => setZoom(null)} title="Reset zoom">
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            )}
             {ACCOUNT_EQUITY_RANGES.map((option) => (
               <Button
                 key={option}
@@ -222,24 +240,24 @@ export function ParentAccountEquity({
               className={tone(exposure ? exposure.net : null)}
             />
             <Figure
-              label={`${range} change`}
+              label={`${windowLabel} change`}
               value={money(delta, true)}
               sub={deltaPct === null ? undefined : `${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(2)}%`}
               className={tone(delta)}
             />
             <Figure
-              label={`${range} max drawdown`}
+              label={`${windowLabel} max drawdown`}
               value={drawdown ? `${drawdown.pct > 0 ? "-" : ""}${drawdown.pct.toFixed(2)}%` : "—"}
               sub={drawdown && drawdown.amount > 0 ? money(-drawdown.amount) : undefined}
               className={drawdown && drawdown.pct > 0 ? "text-red-600 dark:text-red-400" : ""}
             />
             <Figure
-              label={`${range} volume`}
+              label={`${windowLabel} volume`}
               value={money(volume.notional)}
               sub={volume.multiple === null ? undefined : `${volume.multiple.toFixed(1)}× equity`}
             />
             <Figure
-              label={`${range} fees`}
+              label={`${windowLabel} fees`}
               value={money(-volume.fees)}
               sub={
                 volume.feeBps === null
@@ -253,8 +271,31 @@ export function ParentAccountEquity({
             <Figure label="Last update" value={taipeiMinute(lastUpdateMs)} small />
           </div>
           <CardContent className="px-2 py-4 sm:px-6">
+            <p className="mb-1 px-2 text-xs text-muted-foreground">
+              {zoom
+                ? `Zoomed: ${taipeiMinute(zoom[0]).replace(` ${TZ_LABEL}`, "")} – ${taipeiMinute(zoom[1])}. Drag again to zoom further; ↺ to reset.`
+                : "Drag on the chart to zoom into a period; the figures above follow it."}
+            </p>
             <ChartContainer config={chartConfig} className="aspect-auto h-[240px] sm:h-[280px] w-full">
-              <AreaChart accessibilityLayer data={curve} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <AreaChart
+                accessibilityLayer
+                data={curve}
+                margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                onMouseDown={(e) => {
+                  const t = Number(e?.activeLabel);
+                  if (Number.isFinite(t)) setSelection([t, t]);
+                }}
+                onMouseMove={(e) => {
+                  const t = Number(e?.activeLabel);
+                  if (selection && Number.isFinite(t)) setSelection([selection[0], t]);
+                }}
+                onMouseUp={() => {
+                  if (selection && selection[0] !== selection[1]) {
+                    setZoom([Math.min(...selection), Math.max(...selection)]);
+                  }
+                  setSelection(null);
+                }}
+              >
                 <defs>
                   <linearGradient id="fillParentAccountEquity" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={COLOR} stopOpacity={0.8} />
@@ -273,8 +314,8 @@ export function ParentAccountEquity({
                   minTickGap={48}
                   tickFormatter={(value) =>
                     formatDateTime(Number(value), {
-                      month: range === "24h" ? undefined : "short",
-                      day: range === "24h" ? undefined : "numeric",
+                      month: range === "24h" && !zoom ? undefined : "short",
+                      day: range === "24h" && !zoom ? undefined : "numeric",
                       hour: "2-digit",
                       minute: "2-digit",
                       hour12: false,
@@ -327,6 +368,9 @@ export function ParentAccountEquity({
                   stroke={COLOR}
                   strokeWidth={2}
                 />
+                {selection && selection[0] !== selection[1] && (
+                  <ReferenceArea x1={selection[0]} x2={selection[1]} strokeOpacity={0.3} fill="var(--primary)" fillOpacity={0.2} />
+                )}
               </AreaChart>
             </ChartContainer>
           </CardContent>
