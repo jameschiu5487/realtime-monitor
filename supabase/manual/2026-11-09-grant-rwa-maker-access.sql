@@ -1,4 +1,5 @@
 -- 2026-11-09  Grant user_strategy_access for RWA Maker (operator only, like Kepler DX)
+-- Renamed the same day to Archimedes / Archimedes · Zoomex (display names only; the ids below are unchanged).
 --
 -- RWA Maker (parent, c6be05ee-3227-5a62-a661-715a47282478) and its child
 -- RWA Maker · Zoomex (ab037d3c-97f4-5dbb-b8b4-08e543c5bd45): multistrat branch rwa-maker, crates/rwa,
