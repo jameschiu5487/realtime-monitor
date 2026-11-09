@@ -58,7 +58,23 @@ const pctOf = (v: number, d: number, capital: number) => `${v > 0 ? "+" : ""}${(
 const fmt = (ms: number) => formatDateTime(ms, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
 /** A parsed jfm_observe row (numbers as numbers, plus entry notional). */
-type PaperRow = Omit<PaperEpisode, "e" | "exit_vwap"> & { e: number | null; exit_vwap: number | null; notional: number | null };
+type PaperRow = Omit<PaperEpisode, "e" | "exit_vwap"> & {
+  e: number | null;
+  exit_vwap: number | null;
+  notional: number | null;
+  /** Why the row is left out of every figure, when its PnL can't be trusted. */
+  invalid: string | null;
+};
+
+/**
+ * A "residual" flatten with no exit price: jfm-checkpoint values the residual
+ * at 0, so its price_pnl is −qty × entry (seen 2026-11-09: CSOPSAMSUNG2LUSDT,
+ * −0.7 × 4.59 = −3.213 U on a 3.67 U position, −8,768 bp, which dragged Σ bp
+ * down by ~9,000). Such rows are left out of the stats, curves and PTA.
+ */
+function invalidReason(r: Pick<PaperEpisode, "flat_reason" | "exit_vwap">): string | null {
+  return r.flat_reason === "residual" && r.exit_vwap == null ? "residual flatten with no exit price" : null;
+}
 
 /**
  * Each strategy's paper account size. jfm_observe doesn't record it, so it is
@@ -132,7 +148,9 @@ function select(rows: PaperRow[], sel: Selection, hideDup: boolean): PaperRow[] 
       (sel.venue === "all" || r.venue === sel.venue) &&
       (sel.run === "all" || r.run_id === sel.run) &&
       // Duplicates are the same episode recorded twice; counting them would double its P&L.
-      (!hideDup || !r.dup)
+      (!hideDup || !r.dup) &&
+      // Rows with untrustworthy PnL never count (invalidReason).
+      !r.invalid
   );
 }
 
@@ -218,12 +236,15 @@ export function PaperContent({
         qty_filled: Number(r.qty_filled),
         // Entry notional of what was kept.
         notional: r.e == null ? null : Math.abs(Number(r.qty_kept) * Number(r.e)),
+        invalid: invalidReason(r),
         price_pnl: Number(r.price_pnl),
         commission_fee: Number(r.commission_fee),
         total_pnl: Number(r.total_pnl),
       })),
     [episodes]
   );
+
+  const excluded = useMemo(() => rows.filter((r) => r.invalid), [rows]);
 
   // Strategy versions run different params and each venue is its own paper
   // account. Both modes pick two selections, A and B: combine adds them up
@@ -349,6 +370,12 @@ export function PaperContent({
       </div>
 
       {error && <p className="text-sm text-red-500">Failed to load jfm_observe: {error}</p>}
+      {excluded.length > 0 && (
+        <p className="text-xs text-amber-500">
+          Left out of every figure ({excluded.length}, data error from jfm-checkpoint):{" "}
+          {excluded.map((r) => `${strategyOf(r)} ${r.symbol} ${fmt(r.t_flat)} — ${r.invalid}`).join("; ")}.
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-1">
         {(["combine", "compare", "pta"] as const).map((m) => (
