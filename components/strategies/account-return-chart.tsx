@@ -32,7 +32,7 @@ interface AccountReturnChartProps {
 const chartConfig = {
   value: {
     label: "Return (% of account)",
-    color: "var(--chart-1)",
+    color: "#34d399",
   },
 } satisfies ChartConfig;
 

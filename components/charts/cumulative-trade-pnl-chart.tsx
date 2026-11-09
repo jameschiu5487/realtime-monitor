@@ -28,7 +28,7 @@ interface CumulativeTradePnLChartProps {
 const chartConfig = {
   cumulative: {
     label: "Cumulative PnL ($)",
-    color: "var(--chart-1)",
+    color: "#34d399",
   },
 } satisfies ChartConfig;
 

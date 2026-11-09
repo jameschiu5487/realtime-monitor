@@ -31,7 +31,7 @@ interface PolymarketEquityChartProps {
 const chartConfig = {
   equity: {
     label: "Equity ($)",
-    color: "var(--chart-1)",
+    color: "#34d399",
   },
 } satisfies ChartConfig;
 
