@@ -508,16 +508,6 @@ export function OverviewContent({
         )}
       </div>
 
-      {/* Today's PnL per running strategy */}
-      <DailyStrategyPnl
-        strategies={activeStrategies}
-        parents={parentStrategies}
-        equityData={equityData}
-        fundRows={fundRows}
-        share={share}
-        dayStartMs={dayStartMs}
-      />
-
       {/* Metrics Strip */}
       <Card className="overflow-hidden">
         <CardContent className="p-0">
@@ -577,6 +567,16 @@ export function OverviewContent({
           </div>
         </CardContent>
       </Card>
+
+      {/* Today's PnL per running strategy */}
+      <DailyStrategyPnl
+        strategies={activeStrategies}
+        parents={parentStrategies}
+        equityData={equityData}
+        fundRows={fundRows}
+        share={share}
+        dayStartMs={dayStartMs}
+      />
 
       <Suspense fallback={<FundEquitySkeleton />}>
         <FundEquitySection

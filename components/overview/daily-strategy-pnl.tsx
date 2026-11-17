@@ -127,42 +127,32 @@ export function DailyStrategyPnl({
 
   if (rows.length === 0) return null;
   const total = rows.reduce((sum, r) => sum + r.pnl, 0);
+  const label = "text-xs font-medium text-muted-foreground uppercase tracking-wider";
 
+  // Same cells as the metrics strip above: a gap-px grid on the border colour.
   return (
     <Card className="overflow-hidden">
-      <CardContent className="p-3 sm:p-4">
-        <div className="mb-2 flex items-baseline justify-between gap-2">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Today&apos;s PnL <span className="normal-case tracking-normal">(since 00:00 {TZ_LABEL})</span>
-          </p>
-          <p className={cn("font-mono text-sm font-bold tabular-nums", tone(total))}>{money(total)}</p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+      <CardContent className="p-0">
+        <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-3 lg:grid-cols-4">
+          <div className="bg-card p-3 sm:p-4 lg:p-5">
+            <p className={label}>Today&apos;s PnL</p>
+            <p className={cn("mt-1 text-lg font-bold font-mono tabular-nums sm:text-2xl lg:text-3xl", tone(total))}>{money(total)}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground sm:mt-1">since 00:00 {TZ_LABEL}</p>
+          </div>
           {rows.map((r) => (
-            <Link
-              key={r.id}
-              href={`/strategies/${r.id}`}
-              className="rounded-md border px-2.5 py-2 transition-colors hover:bg-accent/50"
-            >
-              <div className="flex items-center gap-1.5">
-                <span className="truncate text-xs font-medium">{r.name}</span>
-                {r.mode === "test-realtime" && (
-                  <span className="shrink-0 rounded bg-muted px-1 font-mono text-[10px] uppercase text-muted-foreground">test</span>
-                )}
-              </div>
-              <div className={cn("font-mono text-base font-bold tabular-nums", tone(r.pnl))}>{money(r.pnl)}</div>
-              <div className="font-mono text-[11px] text-muted-foreground tabular-nums">
+            <Link key={r.id} href={`/strategies/${r.id}`} className="bg-card p-3 transition-colors hover:bg-accent/50 sm:p-4 lg:p-5">
+              <p className={cn(label, "flex items-center gap-1.5")}>
+                <span className="truncate">{r.name}</span>
+                {r.mode === "test-realtime" && <span className="shrink-0 rounded bg-muted px-1 font-mono text-[10px]">test</span>}
+              </p>
+              <p className={cn("mt-1 text-lg font-bold font-mono tabular-nums sm:text-2xl", tone(r.pnl))}>{money(r.pnl)}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground font-mono tabular-nums sm:mt-1">
                 {r.pct == null ? "—" : `${r.pct > 0 ? "+" : ""}${r.pct.toFixed(2)}%`}
                 {r.fromAccount && " · account Δ"}
-              </div>
+              </p>
             </Link>
           ))}
         </div>
-        {rows.some((r) => r.fromAccount) && (
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            account Δ: a parent&apos;s real account equity change since midnight, so deposits and withdrawals show up in it.
-          </p>
-        )}
       </CardContent>
     </Card>
   );
