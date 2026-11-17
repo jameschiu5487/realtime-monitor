@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { currentRatio, scaleCumulative, type ShareSchedule } from "@/lib/share";
-import { TZ_LABEL } from "@/lib/time";
 import type { EquityCurve, FundAccountEquity } from "@/lib/types/database";
 
 interface DailyStrategy {
@@ -85,8 +84,14 @@ const money = (v: number) =>
   `${v > 0 ? "+" : v < 0 ? "−" : ""}$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const tone = (v: number) => (v > 0 ? "text-emerald-500" : v < 0 ? "text-red-500" : "text-muted-foreground");
 
-/** Today's PnL (since 00:00 Taipei) for every running strategy, plus parents' accounts. */
-export function DailyStrategyPnl({
+export const fmtDayPnl = money;
+export const dayPnlTone = tone;
+
+/**
+ * Today's PnL (since 00:00 Taipei) for every running strategy, plus parents'
+ * accounts, sorted best first, and their total.
+ */
+export function useDailyPnl({
   strategies,
   parents,
   equityData,
@@ -100,8 +105,8 @@ export function DailyStrategyPnl({
   fundRows: FundAccountEquity[] | null;
   share: ShareSchedule;
   dayStartMs: number;
-}) {
-  const rows = useMemo(() => {
+}): { rows: DailyRow[]; total: number } {
+  return useMemo(() => {
     const byRun = new Map<string, EquityCurve[]>();
     for (const p of equityData) {
       const list = byRun.get(p.run_id) ?? [];
@@ -122,31 +127,31 @@ export function DailyStrategyPnl({
         if (day) out.push({ id: p.strategyId, name: p.strategyName, mode: "live", ...day, fromAccount: true });
       }
     }
-    return out.sort((a, b) => b.pnl - a.pnl);
+    out.sort((a, b) => b.pnl - a.pnl);
+    return { rows: out, total: out.reduce((sum, r) => sum + r.pnl, 0) };
   }, [strategies, parents, equityData, fundRows, share, dayStartMs]);
+}
 
+/** One row of per-strategy cells, in the metrics strip's cell style; scrolls sideways when it doesn't fit. */
+export function DailyStrategyPnlRow({ rows }: { rows: DailyRow[] }) {
   if (rows.length === 0) return null;
-  const total = rows.reduce((sum, r) => sum + r.pnl, 0);
   const label = "text-xs font-medium text-muted-foreground uppercase tracking-wider";
-
-  // Same cells as the metrics strip above: a gap-px grid on the border colour.
   return (
     <Card className="overflow-hidden">
       <CardContent className="p-0">
-        <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-3 lg:grid-cols-4">
-          <div className="bg-card p-3 sm:p-4 lg:p-5">
-            <p className={label}>Today&apos;s PnL</p>
-            <p className={cn("mt-1 text-lg font-bold font-mono tabular-nums sm:text-2xl lg:text-3xl", tone(total))}>{money(total)}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground sm:mt-1">since 00:00 {TZ_LABEL}</p>
-          </div>
+        <div className="flex gap-px overflow-x-auto bg-border">
           {rows.map((r) => (
-            <Link key={r.id} href={`/strategies/${r.id}`} className="bg-card p-3 transition-colors hover:bg-accent/50 sm:p-4 lg:p-5">
+            <Link
+              key={r.id}
+              href={`/strategies/${r.id}`}
+              className="min-w-[9.5rem] flex-1 bg-card p-3 transition-colors hover:bg-accent/50 sm:p-4"
+            >
               <p className={cn(label, "flex items-center gap-1.5")}>
                 <span className="truncate">{r.name}</span>
                 {r.mode === "test-realtime" && <span className="shrink-0 rounded bg-muted px-1 font-mono text-[10px]">test</span>}
               </p>
-              <p className={cn("mt-1 text-lg font-bold font-mono tabular-nums sm:text-2xl", tone(r.pnl))}>{money(r.pnl)}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground font-mono tabular-nums sm:mt-1">
+              <p className={cn("mt-1 text-base font-bold font-mono tabular-nums sm:text-xl", tone(r.pnl))}>{money(r.pnl)}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground font-mono tabular-nums">
                 {r.pct == null ? "—" : `${r.pct > 0 ? "+" : ""}${r.pct.toFixed(2)}%`}
                 {r.fromAccount && " · account Δ"}
               </p>

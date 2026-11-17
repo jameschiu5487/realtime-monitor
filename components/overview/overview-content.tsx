@@ -1,6 +1,6 @@
 "use client";
 
-import { DailyStrategyPnl } from "@/components/overview/daily-strategy-pnl";
+import { DailyStrategyPnlRow, dayPnlTone, fmtDayPnl, useDailyPnl } from "@/components/overview/daily-strategy-pnl";
 import { ratioAt, type ShareSchedule } from "@/lib/share";
 import { useState, useEffect, useMemo, useCallback, Suspense, use } from "react";
 import Link from "next/link";
@@ -15,7 +15,7 @@ import {
   buildStrategyAccountMap,
   exchangeBadgeClass,
 } from "@/lib/utils/fund-account-strategy";
-import { formatDate } from "@/lib/time";
+import { formatDate, TZ_LABEL } from "@/lib/time";
 import type {
   Strategy,
   StrategyRun,
@@ -380,6 +380,14 @@ export function OverviewContent({
    */
   // Resolved fund equity rows, lifted out of the streamed dashboard.
   const [fundRows, setFundRows] = useState<FundAccountEquity[] | null>(null);
+  const dailyPnl = useDailyPnl({
+    strategies: activeStrategies,
+    parents: parentStrategies,
+    equityData,
+    fundRows,
+    share,
+    dayStartMs,
+  });
 
   /**
    * Selected parents' real account equity, for the equity curve.
@@ -511,7 +519,7 @@ export function OverviewContent({
       {/* Metrics Strip */}
       <Card className="overflow-hidden">
         <CardContent className="p-0">
-          <div className="grid grid-cols-3 gap-px bg-border">
+          <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
             {/* Total Balance (fund accounts) */}
             <div className="p-3 sm:p-4 lg:p-5 bg-card">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -564,19 +572,23 @@ export function OverviewContent({
                 })}
               </p>
             </div>
+
+            {/* Today's PnL, summed over the strategies in the row below */}
+            <div className="p-3 sm:p-4 lg:p-5 bg-card">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Today&apos;s PnL
+              </p>
+              <p className={cn("text-lg sm:text-2xl lg:text-3xl font-bold font-mono tabular-nums mt-1", dayPnlTone(dailyPnl.total))}>
+                {fmtDayPnl(dailyPnl.total)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">since 00:00 {TZ_LABEL}</p>
+            </div>
           </div>
         </CardContent>
       </Card>
 
       {/* Today's PnL per running strategy */}
-      <DailyStrategyPnl
-        strategies={activeStrategies}
-        parents={parentStrategies}
-        equityData={equityData}
-        fundRows={fundRows}
-        share={share}
-        dayStartMs={dayStartMs}
-      />
+      <DailyStrategyPnlRow rows={dailyPnl.rows} />
 
       <Suspense fallback={<FundEquitySkeleton />}>
         <FundEquitySection
