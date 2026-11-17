@@ -262,6 +262,7 @@ export default async function DashboardPage() {
         todayTrades,
       }}
       equityData={equityData}
+      dayStartMs={todayStart.getTime()}
       combinedTradesData={combinedTradesData}
       strategyRunIds={strategyRunIds}
       fundEquityPromise={fundEquityPromise}

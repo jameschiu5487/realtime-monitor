@@ -1,5 +1,6 @@
 "use client";
 
+import { DailyStrategyPnl } from "@/components/overview/daily-strategy-pnl";
 import { ratioAt, type ShareSchedule } from "@/lib/share";
 import { useState, useEffect, useMemo, useCallback, Suspense, use } from "react";
 import Link from "next/link";
@@ -132,6 +133,8 @@ interface OverviewContentProps {
    * from fundEquityPromise; passed down so live inserts for them are dropped too.
    */
   hiddenAccountIds?: string[];
+  /** Taipei midnight of today (server clock), for today's PnL. */
+  dayStartMs: number;
 }
 
 type FundSummary = { total: number; accountCount: number };
@@ -248,6 +251,7 @@ export function OverviewContent({
   fundEquityPromise,
   parentFills,
   hiddenAccountIds,
+  dayStartMs,
 }: OverviewContentProps) {
   const selectableIds = useMemo(
     () => [
@@ -503,6 +507,16 @@ export function OverviewContent({
           </div>
         )}
       </div>
+
+      {/* Today's PnL per running strategy */}
+      <DailyStrategyPnl
+        strategies={activeStrategies}
+        parents={parentStrategies}
+        equityData={equityData}
+        fundRows={fundRows}
+        share={share}
+        dayStartMs={dayStartMs}
+      />
 
       {/* Metrics Strip */}
       <Card className="overflow-hidden">
