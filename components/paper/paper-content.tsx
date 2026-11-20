@@ -302,8 +302,17 @@ export function PaperContent({
   const lineP = useMemo(() => resolve(rows, strategies, selP ?? defaultP), [rows, strategies, selP, defaultP]);
   const rowsP = useMemo(() => (mode === "pta" ? select(rows, lineP.sel, hideDup) : []), [mode, rows, lineP.sel, hideDup]);
 
-  const rowsA = useMemo(() => select(rows, lineA.sel, hideDup), [rows, lineA.sel, hideDup]);
-  const rowsB = useMemo(() => select(rows, lineB.sel, hideDup), [rows, lineB.sel, hideDup]);
+  const allA = useMemo(() => select(rows, lineA.sel, hideDup), [rows, lineA.sel, hideDup]);
+  const allB = useMemo(() => select(rows, lineB.sel, hideDup), [rows, lineB.sel, hideDup]);
+  // Compare starts both at the later of their first signals, so neither gets
+  // a head start; the earlier episodes are left out of every compare figure.
+  const compareStart = useMemo(() => {
+    if (mode !== "compare" || allA.length === 0 || allB.length === 0) return null;
+    const first = (rs: PaperRow[]) => Math.min(...rs.map((r) => r.t_sig));
+    return Math.max(first(allA), first(allB));
+  }, [mode, allA, allB]);
+  const rowsA = useMemo(() => (compareStart == null ? allA : allA.filter((r) => r.t_sig >= compareStart)), [allA, compareStart]);
+  const rowsB = useMemo(() => (compareStart == null ? allB : allB.filter((r) => r.t_sig >= compareStart)), [allB, compareStart]);
   const capitals = useMemo(() => strategyCapitals(rows), [rows]);
   const statsA = useMemo(() => computeStats(rowsA, accountCapital(rowsA, capitals)), [rowsA, capitals]);
   const statsB = useMemo(() => computeStats(rowsB, accountCapital(rowsB, capitals)), [rowsB, capitals]);
@@ -453,6 +462,11 @@ export function PaperContent({
       {mode === "compare" && (
         <Card>
           <CardContent className="overflow-x-auto p-3">
+            {compareStart != null && (
+              <p className="mb-2 font-sans text-xs text-muted-foreground">
+                Both from {fmt(compareStart)} {TZ_LABEL}, the later of A&apos;s and B&apos;s first signal; earlier episodes are left out.
+              </p>
+            )}
             <table className="w-full font-mono text-xs">
               <thead className="text-muted-foreground">
                 <tr className="border-b">
