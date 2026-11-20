@@ -59,6 +59,32 @@ function tone(value: number | null) {
 }
 
 /** Taipei minute via lib/time — a fixed zone, so the server render and the browser agree. */
+/**
+ * Transfers in the account curve, taken out: a step whose move is more than
+ * `pct` % of the equity before it is read as a deposit or withdrawal, and every
+ * later point is shifted by it, so the curve, change and drawdown show trading
+ * only. A threshold, not a transfer record — fund_account_equity has none — so
+ * the steps it took out are listed for the user to check.
+ */
+function removeTransfers(curve: { time: number; equity: number }[], pct: number) {
+  const transfers: { time: number; amount: number }[] = [];
+  if (curve.length < 2) return { curve, transfers };
+  let adj = 0;
+  const out = [curve[0]];
+  for (let i = 1; i < curve.length; i++) {
+    const step = curve[i].equity - curve[i - 1].equity;
+    const prev = curve[i - 1].equity;
+    if (prev > 0 && Math.abs(step) > (pct / 100) * prev) {
+      adj += step;
+      transfers.push({ time: curve[i].time, amount: step });
+    }
+    out.push({ ...curve[i], equity: curve[i].equity - adj });
+  }
+  return { curve: out, transfers };
+}
+
+const TRANSFER_PCTS = [5, 10, 15, 25] as const;
+
 function taipeiMinute(ms: number): string {
   return `${taipeiIso(ms).slice(0, 16).replace("T", " ")} ${TZ_LABEL}`;
 }
@@ -122,14 +148,21 @@ export function ParentAccountEquity({
     for (const row of latest.values()) max = Math.max(max, new Date(row.ts).getTime());
     return max;
   }, [latest]);
-  const curve = useMemo(
-    () => downsample(buildFundEquityCurve(rows, windowFrom).filter((p) => p.time <= windowTo)),
-    [rows, windowFrom, windowTo]
-  );
-  // Zoomed, the change runs to the selection's last point instead of now.
+  // Off by default: the real account, transfers included.
+  const [excludeTransfers, setExcludeTransfers] = useState(false);
+  const [transferPct, setTransferPct] = useState<number>(15);
+  const { curve, transfers } = useMemo(() => {
+    const full = buildFundEquityCurve(rows, windowFrom).filter((p) => p.time <= windowTo);
+    // Detected on the full-resolution curve, before downsampling hides steps.
+    const adjusted = excludeTransfers ? removeTransfers(full, transferPct) : { curve: full, transfers: [] };
+    return { curve: downsample(adjusted.curve), transfers: adjusted.transfers };
+  }, [rows, windowFrom, windowTo, excludeTransfers, transferPct]);
+  // Zoomed or without transfers, the change runs to the curve's last point
+  // instead of today's account equity.
   const { delta, deltaPct } = useMemo(
-    () => computeRangeDelta(curve, zoom && curve.length > 0 ? curve[curve.length - 1].equity : total),
-    [curve, total, zoom]
+    () =>
+      computeRangeDelta(curve, (zoom || excludeTransfers) && curve.length > 0 ? curve[curve.length - 1].equity : total),
+    [curve, total, zoom, excludeTransfers]
   );
   const drawdown = useMemo(() => maxDrawdown(curve), [curve]);
   // Volume in the range as a multiple of the account equity at the range start,
@@ -271,6 +304,43 @@ export function ParentAccountEquity({
             <Figure label="Last update" value={taipeiMinute(lastUpdateMs)} small />
           </div>
           <CardContent className="px-2 py-4 sm:px-6">
+            <div className="mb-2 flex flex-wrap items-center gap-1 px-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={excludeTransfers ? "default" : "outline"}
+                className="h-7 px-2 text-xs"
+                onClick={() => setExcludeTransfers((v) => !v)}
+              >
+                {excludeTransfers ? "Transfers excluded" : "Exclude transfers"}
+              </Button>
+              {excludeTransfers && (
+                <>
+                  <span className="ml-1 text-xs text-muted-foreground">step &gt;</span>
+                  {TRANSFER_PCTS.map((p) => (
+                    <Button
+                      key={p}
+                      type="button"
+                      size="sm"
+                      variant={transferPct === p ? "secondary" : "ghost"}
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setTransferPct(p)}
+                    >
+                      {p}%
+                    </Button>
+                  ))}
+                </>
+              )}
+            </div>
+            {excludeTransfers && (
+              <p className="mb-1 px-2 text-xs text-muted-foreground">
+                {transfers.length === 0
+                  ? `No step over ${transferPct}% of equity in this range.`
+                  : `Taken out as transfers (${transfers.length}): ${transfers
+                      .map((t) => `${money(t.amount, true)} at ${taipeiMinute(t.time).replace(` ${TZ_LABEL}`, "")}`)
+                      .join(", ")} ${TZ_LABEL}. Change, drawdown and the curve show trading only.`}
+              </p>
+            )}
             <p className="mb-1 px-2 text-xs text-muted-foreground">
               {zoom
                 ? `Zoomed: ${taipeiMinute(zoom[0]).replace(` ${TZ_LABEL}`, "")} – ${taipeiMinute(zoom[1])}. Drag again to zoom further; ↺ to reset.`
